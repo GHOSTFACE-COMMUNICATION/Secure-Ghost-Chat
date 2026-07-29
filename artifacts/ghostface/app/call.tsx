@@ -231,7 +231,9 @@ export default function CallScreen() {
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
           staysActiveInBackground: true,
-        }).catch(() => {});
+        }).catch((e) => {
+          console.warn("[Call] setAudioModeAsync failed — audio session may not be call-ready:", e);
+        });
       }
       const devices = Platform.OS === "web" ? navigator.mediaDevices : nativeMediaDevices;
       if (!devices) { setStatusNote("Microphone unavailable on this device"); return; }
@@ -244,16 +246,59 @@ export default function CallScreen() {
     }
   }, [isVideo]);
 
+  // Closes the peer connection, stops mic capture, clears the duration
+  // timer, and restores the non-call audio session. No mountedRef check and
+  // no state/navigation — this must also be safe to run from unmount
+  // cleanup, where setState would warn and there's no screen left to
+  // navigate away from. Idempotent: safe to call more than once (e.g. once
+  // from handleEndInternal, once again from the unmount cleanup below).
+  const teardownCallResources = useCallback(() => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (pcRef.current) { try { pcRef.current.close(); } catch { /* ignore close errors */ } pcRef.current = null; }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+      localStreamRef.current = null;
+    }
+    if (Platform.OS !== "web") {
+      Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch((e) => {
+        console.warn("[Call] Failed to restore audio session on teardown:", e);
+      });
+    }
+  }, []);
+
   const handleEndInternal = useCallback(() => {
     if (!mountedRef.current) return;
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (pcRef.current) { try { pcRef.current.close(); } catch { /* ignore close errors */ } pcRef.current = null; }
-    if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop()); localStreamRef.current = null; }
-    if (Platform.OS !== "web") {
-      Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
-    }
+    teardownCallResources();
     setCallState("ended");
     setTimeout(() => { if (mountedRef.current) router.back(); }, 1200);
+  }, [teardownCallResources]);
+
+  // ── Unmount: tear down a live call even when handleEnd never ran ─────────
+  // This screen can unmount without any explicit "end call" action — most
+  // notably, app/_layout.tsx locks (and swaps out the whole navigator) on
+  // any real AppState "background" transition, which unmounts this screen
+  // directly. Nothing else in this file closes the peer connection or stops
+  // mic capture in that path, so a backgrounded call would otherwise leave
+  // an orphaned RTCPeerConnection + live microphone stream running with no
+  // UI. mountedRef/handleEndInternal are unsuitable here: handleEndInternal
+  // no-ops once mountedRef.current is false, which may already be the case
+  // by the time this cleanup runs (another effect's cleanup owns flipping
+  // it) — so teardownCallResources is called directly instead.
+  //
+  // Only notifies the peer if the call had actually connected ("active") —
+  // best-effort: the signal goes out over the same WS that a lock-triggered
+  // unmount may be closing around the same time, so delivery isn't
+  // guaranteed, but sending it costs nothing (sendCallSignal no-ops if the
+  // socket isn't open). A call still ringing/negotiating when the screen
+  // unmounts intentionally does not send call-hangup here.
+  useEffect(() => {
+    return () => {
+      if (callStateRef.current === "active") {
+        sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
+      }
+      teardownCallResources();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Caller: send ring on mount ────────────────────────────────────────────
