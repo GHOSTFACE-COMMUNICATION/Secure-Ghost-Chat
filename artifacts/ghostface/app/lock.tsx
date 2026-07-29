@@ -578,23 +578,7 @@ export default function LockScreen() {
       fontSize: 11,
       letterSpacing: 4,
       marginTop: 6,
-      marginBottom: 18,
-    },
-    trialBadge: {
-      borderWidth: 1,
-      borderColor: "#ef4444",
-      backgroundColor: "rgba(239,68,68,0.10)",
-      borderRadius: 999,
-      paddingHorizontal: 18,
-      paddingVertical: 6,
       marginBottom: 28,
-    },
-    trialBadgeText: {
-      fontFamily: MONO,
-      color: "#ef4444",
-      fontSize: 11,
-      letterSpacing: 3,
-      fontWeight: "700" as const,
     },
     enterBtnWrap: {
       borderRadius: colors.radius,
@@ -884,10 +868,6 @@ export default function LockScreen() {
           <Text style={styles.identityReady}>
             {hasPin ? "IDENTITY KEY READY" : "NO PIN CONFIGURED"}
           </Text>
-
-          <View style={styles.trialBadge}>
-            <Text style={styles.trialBadgeText}>7-DAY FREE TRIAL</Text>
-          </View>
 
           <Pressable
             style={({ pressed }) => [styles.enterBtnWrap, pressed && { opacity: 0.85 }]}

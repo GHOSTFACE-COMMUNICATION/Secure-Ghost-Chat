@@ -141,6 +141,13 @@ export interface Message {
    * muted notice — never long-pressable, never editable, never re-sent.
    */
   system?: boolean;
+  /**
+   * emoji -> reactor aliases. Applying/removing a reaction never touches
+   * this message's `viewedAt`/`expiresAt` — a reaction on an unviewed
+   * disappearing message must not start its timer (see the reaction
+   * branches in the WS receive handlers and `sendReaction`).
+   */
+  reactions?: Record<string, string[]>;
 }
 
 export interface OutboxItem {
@@ -164,6 +171,13 @@ export interface OutboxItem {
    * immediately when the loop reaches this item."
    */
   nextAttemptAt?: number;
+  /**
+   * Present only for a queued reaction send — mutually exclusive with real
+   * message content (`text` is "" alongside this). Lets drainOutbox build a
+   * reaction envelope instead of a text envelope at actual send time, while
+   * reusing all the same backoff/retry/ordering machinery as text messages.
+   */
+  reaction?: { m: string; e: string; o: boolean };
 }
 
 // Legacy attachment envelope (v1) — carried no sender. Still parsed on receive
@@ -171,43 +185,70 @@ export interface OutboxItem {
 const ATTACHMENT_ENVELOPE_VERSION = 1;
 const ATTACHMENT_ENVELOPE_PREFIX = `{"_gfa":${ATTACHMENT_ENVELOPE_VERSION}`;
 
-// Sealed-sender envelope (v3). Every outgoing message is now wrapped in this
+// Sealed-sender envelope (v4). Every outgoing message is now wrapped in this
 // envelope BEFORE encryption so the sender's alias travels only inside the
 // ciphertext — never as a plaintext wire field or stored column. The receiver
 // recovers the sender after a successful decrypt (`f`). `t` is the text body,
 // `a` an optional attachment.
 //
-// v3 adds `x` — the disappearing-message TTL in ms, sender-authoritative.
+// v3 added `x` — the disappearing-message TTL in ms, sender-authoritative.
 // It's a DURATION, never an absolute timestamp: absolute timestamps would
 // leak/rely on clock-skew between the two devices. The receiver starts its
 // own local expiry countdown from `x` only once the message is actually
 // viewed (see `markMessagesViewed`); the sender starts its own copy's
 // countdown at send time.
 //
-// Hard version bump, no v2 compat shim: `unwrapPayload` gates on an exact
+// v4 adds:
+//   `i` — sender-generated stable message id, REQUIRED. Sender and receiver
+//   previously minted independent ids for the same logical message; the
+//   receiver now adopts `i` verbatim instead of minting its own, so both
+//   sides agree on one id (needed for reactions to target a message, and for
+//   read/delete state to mean the same thing on both devices).
+//
+//   `r` — a reaction: `{ m: target message id, e: emoji, o: true=add /
+//   false=remove }`. Explicit intent, not a toggle: the receiver SETS
+//   membership from `o` and must never flip/toggle on receipt, or a
+//   duplicate delivery (retry, outbox replay) would silently reverse the
+//   reaction. `t` is forced to "" whenever `r` is present, and a reaction
+//   envelope carries no `a`/`x` — it isn't rendered as a message at all (see
+//   the reaction branch in the WS receive handlers).
+//
+// Hard version bump, no v3 compat shim: `unwrapPayload` gates on an exact
 // `_gf === SEALED_ENVELOPE_VERSION` match (via the version-stamped prefix
-// below), so a v2-only build receiving a v3 envelope fails the prefix check
+// below), so a v3-only build receiving a v4 envelope fails the prefix check
 // and falls through to the plain-text branch rather than partially trusting
-// a v3 envelope it doesn't understand — it never silently drops just the
-// disappearing-timer semantics while rendering the rest normally.
-const SEALED_ENVELOPE_VERSION = 3;
+// a v4 envelope it doesn't understand — it never silently drops just the
+// id-agreement/reaction semantics while rendering the rest normally.
+const SEALED_ENVELOPE_VERSION = 4;
 const SEALED_ENVELOPE_PREFIX = `{"_gf":${SEALED_ENVELOPE_VERSION}`;
 
 interface SealedEnvelope {
   _gf: number;
   f: string;
+  /** Sender-generated stable message id. Meaningless/unused for a reaction envelope. */
+  i: string;
   t: string;
   a?: Attachment;
   /** Disappearing-message TTL in ms. Omitted entirely when no timer applies. */
   x?: number;
+  /** Reaction: target message id, emoji, and explicit add(true)/remove(false) intent. */
+  r?: { m: string; e: string; o: boolean };
 }
 
-function wrapPayload(from: string, text: string, attachment?: Attachment, ttlMs?: number): string {
+function wrapPayload(
+  from: string,
+  id: string,
+  text: string,
+  attachment?: Attachment,
+  ttlMs?: number,
+  reaction?: { m: string; e: string; o: boolean },
+): string {
   // image-ref carries a local-only `uri` for the sender's own preview that
   // must NOT be sent over the wire — strip it so the recipient only ever
-  // sees the blob reference + key.
+  // sees the blob reference + key. Not applicable to a reaction, which
+  // carries no attachment.
   let wireAttachment: Attachment | undefined;
-  if (attachment) {
+  if (!reaction && attachment) {
     if (attachment.kind === "image-ref") {
       const { kind, blobId, key, mimeType, width, height } = attachment;
       wireAttachment = { kind, blobId, key, mimeType, width, height };
@@ -215,9 +256,10 @@ function wrapPayload(from: string, text: string, attachment?: Attachment, ttlMs?
       wireAttachment = attachment;
     }
   }
-  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, t: text };
+  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, i: id, t: reaction ? "" : text };
   if (wireAttachment) env.a = wireAttachment;
-  if (ttlMs) env.x = ttlMs;
+  if (!reaction && ttlMs) env.x = ttlMs;
+  if (reaction) env.r = reaction;
   return JSON.stringify(env);
 }
 
@@ -290,27 +332,45 @@ function isValidAttachment(a: unknown): a is Attachment {
   return false;
 }
 
-function unwrapPayload(
-  plaintext: string,
-): { text: string; attachment?: Attachment; from?: string; ttlMs?: number } {
-  // v3 sealed-sender envelope — recovers the sender alias (`f`), body,
-  // optional attachment, and optional disappearing-message TTL (`x`). This
-  // is the only format emitted now.
+function unwrapPayload(plaintext: string): {
+  text: string;
+  attachment?: Attachment;
+  from?: string;
+  ttlMs?: number;
+  /** Sender-generated stable message id. Absent only for a non-v4/malformed
+   *  payload falling through to the plain-text branch — there's nothing to
+   *  recover an id from in that case. */
+  id?: string;
+  reaction?: { m: string; e: string; o: boolean };
+} {
+  // v4 sealed-sender envelope — recovers the sender alias (`f`), stable
+  // message id (`i`), body, optional attachment, optional disappearing TTL
+  // (`x`), and optional reaction (`r`). This is the only format emitted now.
   if (plaintext.startsWith(SEALED_ENVELOPE_PREFIX)) {
     try {
-      const parsed = JSON.parse(plaintext) as { _gf?: unknown; f?: unknown; t?: unknown; a?: unknown; x?: unknown };
+      const parsed = JSON.parse(plaintext) as {
+        _gf?: unknown; f?: unknown; i?: unknown; t?: unknown; a?: unknown; x?: unknown;
+        r?: { m?: unknown; e?: unknown; o?: unknown };
+      };
+      const reactionOk =
+        parsed.r === undefined ||
+        (typeof parsed.r.m === "string" && typeof parsed.r.e === "string" && typeof parsed.r.o === "boolean");
       if (
         parsed._gf === SEALED_ENVELOPE_VERSION &&
         typeof parsed.f === "string" &&
+        typeof parsed.i === "string" &&
         typeof parsed.t === "string" &&
         (parsed.a === undefined || isValidAttachment(parsed.a)) &&
-        (parsed.x === undefined || (typeof parsed.x === "number" && parsed.x > 0))
+        (parsed.x === undefined || (typeof parsed.x === "number" && parsed.x > 0)) &&
+        reactionOk
       ) {
         return {
           text: parsed.t,
           from: parsed.f,
+          id: parsed.i,
           ...(parsed.a !== undefined ? { attachment: parsed.a as Attachment } : {}),
           ...(parsed.x !== undefined ? { ttlMs: parsed.x as number } : {}),
+          ...(parsed.r !== undefined ? { reaction: parsed.r as { m: string; e: string; o: boolean } } : {}),
         };
       }
     } catch {
@@ -338,6 +398,30 @@ function unwrapPayload(
   return { text: plaintext };
 }
 
+/**
+ * Pure: set or clear `alias` in `reactions[emoji]`. Never a toggle — the
+ * caller decides add vs remove. On receive, `add` comes directly from the
+ * envelope's `o` (explicit intent); toggling here based on prior presence
+ * would let a duplicate/retried delivery silently reverse the reaction. The
+ * sender's UI computes `add` itself (by checking its own current state)
+ * before calling this for its local optimistic update.
+ */
+function applyReaction(
+  reactions: Record<string, string[]> | undefined,
+  emoji: string,
+  alias: string,
+  add: boolean,
+): Record<string, string[]> | undefined {
+  const current = reactions?.[emoji] ?? [];
+  const has = current.includes(alias);
+  if (add === has) return reactions;
+  const nextList = add ? [...current, alias] : current.filter((a) => a !== alias);
+  const next = { ...(reactions ?? {}) };
+  if (nextList.length === 0) delete next[emoji];
+  else next[emoji] = nextList;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 function previewForMessage(text: string, attachment?: Attachment): string {
   if (text && text.trim()) return text;
   if (!attachment) return text;
@@ -361,6 +445,13 @@ export interface Conversation {
    * effect on incoming messages, whose TTL comes from their own envelope.
    */
   disappearAfterSec?: number;
+  /**
+   * Local chat wallpaper choice, from CHAT_COLOR_PALETTE (lib/chatColors.ts).
+   * `undefined` renders as the app default. Purely device-local — never
+   * enters wrapPayload/unwrapPayload or any envelope; a Conversation object
+   * is never serialized onto the wire anywhere in this codebase.
+   */
+  bgColor?: string;
   safetyNumber?: string;
   drSession?: DRSession;
   pendingX3DHHeader?: string;
@@ -525,12 +616,14 @@ interface AppContextType extends AppState {
   connectVPN: (server: VPNServer) => void;
   disconnectVPN: () => void;
   sendMessage: (conversationId: string, text: string, attachment?: Attachment) => { queued: boolean };
+  sendReaction: (conversationId: string, targetMessageId: string, emoji: string) => void;
   retryMessage: (conversationId: string, messageId: string) => void;
   addConversation: (alias: string) => Promise<{ ok: boolean; error?: string }>;
   deleteMessage: (conversationId: string, messageId: string) => void;
   clearConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
   setDisappearTimer: (conversationId: string, seconds: number | undefined) => void;
+  setConversationBgColor: (conversationId: string, color: string | undefined) => void;
   markMessagesViewed: (conversationId: string, messageIds: string[]) => void;
   verifyConversation: (conversationId: string) => void;
   panicWipe: () => Promise<void>;
@@ -1876,6 +1969,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [persistConversations]);
 
+  const setConversationBgColor = useCallback((conversationId: string, color: string | undefined) => {
+    setState((prev) => {
+      const updated = prev.conversations.map((c) =>
+        c.id === conversationId ? { ...c, bgColor: color } : c
+      );
+      persistConversations(updated);
+      return { ...prev, conversations: updated };
+    });
+  }, [persistConversations]);
+
   /**
    * Stamp `viewedAt` (and derive `expiresAt = viewedAt + ttlMs`) on every
    * given message that has a TTL and hasn't been viewed yet — called when
@@ -2019,9 +2122,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       const outgoingTtlMs = conv.disappearAfterSec ? conv.disappearAfterSec * 1000 : undefined;
+      // Generated up front so the same id goes into both the wire envelope
+      // (below) and this device's own copy of the message — the receiver
+      // adopts this id verbatim rather than minting its own.
+      const newMsgId = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
       {
         const drSession = conv.drSession;
-        const wireText = wrapPayload(myAlias.toUpperCase(), text, attachment, outgoingTtlMs);
+        const wireText = wrapPayload(myAlias.toUpperCase(), newMsgId, text, attachment, outgoingTtlMs);
         try {
           const { state: newAlice, message: msg } = ratchetEncrypt(drSession.alice, wireText);
           updatedDRSession = { ...drSession, alice: newAlice, lastAliceHeader: msg.header };
@@ -2041,7 +2148,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const expiresAt = outgoingTtlMs ? Date.now() + outgoingTtlMs : undefined;
 
       const newMsg: Message = {
-        id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
+        id: newMsgId,
         text,
         fromMe: true,
         timestamp: Date.now(),
@@ -2198,6 +2305,90 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     },
     [persistConversations, persistOutbox]
   );
+
+  /**
+   * Send (or retract) a reaction on `targetMessageId`. Mirrors sendMessage's
+   * WS-down / LBW-or-no-token / ws-race branches so reactions get the same
+   * outbox + backoff + retry behavior as real messages, but simpler: there's
+   * no pending/failed UI for a reaction (best-effort, like Ghostpad's live
+   * text), and the sender applies its own local state immediately since it
+   * never receives its own reaction back over the wire.
+   */
+  const sendReaction = useCallback((conversationId: string, targetMessageId: string, emoji: string) => {
+    const conv = latestStateRef.current.conversations.find((c) => c.id === conversationId);
+    if (!conv) return;
+    const targetMsg = conv.messages.find((m) => m.id === targetMessageId);
+    if (!targetMsg) return;
+
+    const myAlias = (latestStateRef.current.alias ?? "GHOST_USER").toUpperCase();
+    const isRealContact = conv.isRealContact ?? false;
+    // The sender decides add vs remove by checking its OWN current state —
+    // this is the only "toggle" in the whole reaction flow. What actually
+    // transmits is the resulting explicit intent (`add`), never a toggle
+    // instruction, so a retried/duplicate delivery can't reverse it.
+    const add = !(targetMsg.reactions?.[emoji] ?? []).includes(myAlias);
+
+    setState((prev) => {
+      const updated = prev.conversations.map((c) => {
+        if (c.id !== conversationId) return c;
+        const messages = c.messages.map((m) =>
+          m.id === targetMessageId ? { ...m, reactions: applyReaction(m.reactions, emoji, myAlias, add) } : m
+        );
+        return { ...c, messages };
+      });
+      persistConversations(updated);
+      return { ...prev, conversations: updated };
+    });
+
+    if (!isRealContact || !conv.drSession) return; // mock/sketch contact — local-only, nothing to transmit
+
+    const reactionId = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+    const reactionPayload = { m: targetMessageId, e: emoji, o: add };
+
+    const queueReaction = () => {
+      const outboxItem: OutboxItem = {
+        id: reactionId,
+        conversationId,
+        text: "",
+        attempts: 0,
+        createdAt: Date.now(),
+        reaction: reactionPayload,
+      };
+      const nextOutbox = sortByCompose([...outboxRef.current, outboxItem]);
+      outboxRef.current = nextOutbox;
+      persistOutbox(nextOutbox);
+      scheduleOutboxDrain();
+    };
+
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1 || latestStateRef.current.lowBandwidthActive || !conv.recipientDeliveryId) {
+      queueReaction();
+      return;
+    }
+
+    try {
+      const wireText = wrapPayload(myAlias, reactionId, "", undefined, undefined, reactionPayload);
+      const { state: newAlice, message: msg } = ratchetEncrypt(conv.drSession.alice, wireText);
+      ws.send(JSON.stringify({
+        type: "msg",
+        to: conv.recipientDeliveryId,
+        payload: JSON.stringify(msg),
+        x3dhHeader: conv.pendingX3DHHeader,
+      }));
+      setState((prev) => {
+        const updated = prev.conversations.map((c) =>
+          c.id === conversationId && c.drSession
+            ? { ...c, drSession: { ...c.drSession, alice: newAlice }, pendingX3DHHeader: undefined }
+            : c
+        );
+        persistConversations(updated);
+        return { ...prev, conversations: updated };
+      });
+    } catch (e) {
+      console.error("[Reaction] Immediate send failed — queuing to outbox:", e);
+      queueReaction();
+    }
+  }, [persistConversations, persistOutbox, scheduleOutboxDrain]);
 
   const addConversation = useCallback(
     async (alias: string) => {
@@ -2739,7 +2930,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const aliceForEncrypt = aliceCursor.get(item.conversationId) ?? conv.drSession.alice;
           const myAlias = (latestStateRef.current.alias ?? "GHOST_USER").toUpperCase();
           const outgoingTtlMs = conv.disappearAfterSec ? conv.disappearAfterSec * 1000 : undefined;
-          const wireText = wrapPayload(myAlias, item.text, item.attachment, outgoingTtlMs);
+          const wireText = item.reaction
+            ? wrapPayload(myAlias, item.id, "", undefined, undefined, item.reaction)
+            : wrapPayload(myAlias, item.id, item.text, item.attachment, outgoingTtlMs);
           const { state: newAlice, message: aliceMsg } = ratchetEncrypt(aliceForEncrypt, wireText);
           // pendingX3DHHeader bootstraps the receiver's Bob session and is
           // only required on the very first ciphertext per conversation.
@@ -2770,11 +2963,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               if (c.id !== item.conversationId) return c;
               if (!c.drSession) return c;
               const updatedSession = { ...c.drSession, alice: newAlice, lastAliceHeader: aliceMsg.header };
-              const updatedMsgs = c.messages.map((m) =>
-                m.id === item.id
-                  ? { ...m, pending: false, encrypted: true, sealed: true, ciphertext: aliceMsg.ciphertext, fingerprint: `DR:${aliceMsg.ciphertext.slice(0, 8).toUpperCase()}`, ttlMs: outgoingTtlMs, expiresAt }
-                  : m
-              );
+              // A reaction's local optimistic apply already happened at
+              // sendReaction() call time — item.id here is the reaction's
+              // own throwaway id, not a pending Message id, so there's
+              // nothing to "finish" in the messages array. Only the DR
+              // session commit matters for a reaction drain.
+              const updatedMsgs = item.reaction
+                ? c.messages
+                : c.messages.map((m) =>
+                    m.id === item.id
+                      ? { ...m, pending: false, encrypted: true, sealed: true, ciphertext: aliceMsg.ciphertext, fingerprint: `DR:${aliceMsg.ciphertext.slice(0, 8).toUpperCase()}`, ttlMs: outgoingTtlMs, expiresAt }
+                      : m
+                  );
               return { ...c, messages: updatedMsgs, drSession: updatedSession, pendingX3DHHeader: undefined };
             });
             persistConversations(updated);
@@ -3029,9 +3229,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       const { state: newAlice, plaintext } = decrypted;
       const unwrapped = unwrapPayload(plaintext);
+      const updatedSession = { ...conv.drSession!, alice: newAlice };
+
+      // ── Reaction: toggled onto a target message, never rendered as its
+      // own Message. The ratchet advance still commits below regardless of
+      // whether the target exists — a successful decrypt always consumes
+      // ratchet state; dropping only means not touching the messages array.
+      if (unwrapped.reaction) {
+        const { m: targetId, e: emoji, o: add } = unwrapped.reaction;
+        setState((prev) => {
+          const updated = prev.conversations.map((c) => {
+            if (c.id !== conv.id) return c;
+            const targetExists = c.messages.some((m) => m.id === targetId);
+            const messages = targetExists
+              ? c.messages.map((m) =>
+                  m.id === targetId
+                    // Never touches viewedAt/expiresAt — reacting to an
+                    // unviewed disappearing message must not start its timer.
+                    ? { ...m, reactions: applyReaction(m.reactions, emoji, c.alias, add) }
+                    : m
+                )
+              : c.messages; // unknown/purged target — drop silently, no placeholder
+            return { ...c, messages, drSession: updatedSession };
+          });
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
+      // ── ID-collision guard: received ids are peer-controlled (sender-
+      // generated, v4). A collision with an existing message id — stale
+      // replay, retried outbox duplicate, or malicious — must never clobber
+      // it. Drop the incoming message entirely; the ratchet still commits,
+      // since decryption genuinely succeeded.
+      if (unwrapped.id && conv.messages.some((m) => m.id === unwrapped.id)) {
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === conv.id ? { ...c, drSession: updatedSession } : c
+          );
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
       const preview = previewForMessage(unwrapped.text, unwrapped.attachment);
       const newMsgObj: Message = {
-        id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
+        id: unwrapped.id ?? `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
         text: unwrapped.text,
         fromMe: false,
         timestamp: Date.now(),
@@ -3053,7 +3298,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 lastMessage: preview,
                 timestamp: Date.now(),
                 unread: c.unread + 1,
-                drSession: { ...c.drSession!, alice: newAlice },
+                drSession: updatedSession,
               }
             : c
         );
@@ -3164,8 +3409,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.warn("[DR] Glare with", senderAlias, "— sender wins; adopting rebuilt Bob session");
       }
 
-      const firstPreview = previewForMessage(unwrappedFirst.text, unwrappedFirst.attachment);
       const safetyNumber = generateSafetyNumber(latestStateRef.current.alias ?? "GHOST_USER", senderAlias);
+
+      // ── Reaction arriving via first-message bootstrap (session re-init,
+      // glare, or literally someone's first-ever contact). A reaction always
+      // needs an existing conversation with a prior message to attach to —
+      // if none exists here, there's nothing to react to and nothing worth
+      // creating a fresh session/conversation for. Drop entirely, "unknown/
+      // purged target: drop silently" extended to the conversation level.
+      if (unwrappedFirst.reaction) {
+        const existingConv = latestStateRef.current.conversations.find((c) => c.alias === senderAlias);
+        if (!existingConv) return;
+        const { m: targetId, e: emoji, o: add } = unwrappedFirst.reaction;
+        setState((prev) => {
+          const updated = prev.conversations.map((c) => {
+            if (c.id !== existingConv.id) return c;
+            const targetExists = c.messages.some((m) => m.id === targetId);
+            const messages = targetExists
+              ? c.messages.map((m) =>
+                  m.id === targetId
+                    // Never touches viewedAt/expiresAt.
+                    ? { ...m, reactions: applyReaction(m.reactions, emoji, senderAlias, add) }
+                    : m
+                )
+              : c.messages; // unknown/purged target — drop silently, no placeholder
+            return { ...c, messages, drSession: { ...bobSession, alice: newAlice }, safetyNumber };
+          });
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
+      const firstPreview = previewForMessage(unwrappedFirst.text, unwrappedFirst.attachment);
 
       const initMsg: Message = {
         id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
@@ -3175,22 +3451,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         encrypted: true,
         sealed: false,
       };
-      const firstMsg: Message = {
-        id: `${Date.now() + 1}${Math.random().toString(36).substr(2, 9)}`,
-        text: unwrappedFirst.text,
-        fromMe: false,
-        timestamp: Date.now(),
-        encrypted: true,
-        sealed: true,
-        fingerprint: `DR:${ratchetMsg.ciphertext.slice(0, 8).toUpperCase()}`,
-        ...(unwrappedFirst.attachment ? { attachment: unwrappedFirst.attachment } : {}),
-        // TTL from the envelope, not our own local conversation setting — no
-        // expiresAt until this message is actually viewed.
-        ...(unwrappedFirst.ttlMs ? { ttlMs: unwrappedFirst.ttlMs } : {}),
-      };
 
       setState((prev) => {
         const alreadyExists = prev.conversations.find((c) => c.alias === senderAlias);
+        const updatedSession = { ...bobSession, alice: newAlice };
+
+        // ID-collision guard: received ids are peer-controlled. A collision
+        // with an existing message id in this (re-initialized) conversation
+        // must never clobber it — commit the new session but drop the
+        // incoming message rather than overwrite.
+        if (alreadyExists && unwrappedFirst.id && alreadyExists.messages.some((m) => m.id === unwrappedFirst.id)) {
+          const updated = prev.conversations.map((c) =>
+            c.id === alreadyExists.id ? { ...c, drSession: updatedSession, safetyNumber } : c
+          );
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        }
+
+        const firstMsg: Message = {
+          id: unwrappedFirst.id ?? `${Date.now() + 1}${Math.random().toString(36).substr(2, 9)}`,
+          text: unwrappedFirst.text,
+          fromMe: false,
+          timestamp: Date.now(),
+          encrypted: true,
+          sealed: true,
+          fingerprint: `DR:${ratchetMsg.ciphertext.slice(0, 8).toUpperCase()}`,
+          ...(unwrappedFirst.attachment ? { attachment: unwrappedFirst.attachment } : {}),
+          // TTL from the envelope, not our own local conversation setting — no
+          // expiresAt until this message is actually viewed.
+          ...(unwrappedFirst.ttlMs ? { ttlMs: unwrappedFirst.ttlMs } : {}),
+        };
 
         if (alreadyExists) {
           // Sender re-initialized their session and we fell through from the
@@ -3201,7 +3491,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             c.id === alreadyExists.id
               ? {
                   ...c,
-                  drSession: { ...bobSession, alice: newAlice },
+                  drSession: updatedSession,
                   messages: [...c.messages, firstMsg],
                   lastMessage: firstPreview,
                   timestamp: Date.now(),
@@ -3223,7 +3513,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           unread: 1,
           safetyNumber,
           isRealContact: true,
-          drSession: { ...bobSession, alice: newAlice },
+          drSession: updatedSession,
           messages: [initMsg, firstMsg],
         };
         const updated = [newConv, ...prev.conversations];
@@ -3467,12 +3757,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         connectVPN,
         disconnectVPN,
         sendMessage,
+        sendReaction,
         retryMessage,
         addConversation,
         deleteMessage,
         clearConversation,
         deleteConversation,
         setDisappearTimer,
+        setConversationBgColor,
         markMessagesViewed,
         verifyConversation,
         sendCallSignal,

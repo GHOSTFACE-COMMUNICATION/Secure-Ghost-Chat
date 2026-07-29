@@ -28,6 +28,7 @@ import { StatusDot } from "@/components/StatusDot";
 import type { Attachment } from "@/context/AppContext";
 import { MAX_ATTACHMENT_B64_CHARS, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { CHAT_COLOR_PALETTE, getProfileColor } from "@/lib/chatColors";
 import { drKeyFingerprint } from "@/lib/doubleRatchet";
 import {
   base64ToBytes,
@@ -209,11 +210,13 @@ const DISAPPEAR_OPTIONS = [
   { label: "7d", value: 604800 },
 ];
 
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { conversations, sendMessage, retryMessage, deleteMessage, clearConversation, setDisappearTimer, markMessagesViewed, verifyConversation, deleteConversation, lowBandwidthActive, wsConnected } = useApp();
+  const { conversations, alias, sendMessage, sendReaction, retryMessage, deleteMessage, clearConversation, setDisappearTimer, setConversationBgColor, markMessagesViewed, verifyConversation, deleteConversation, lowBandwidthActive, wsConnected } = useApp();
   const [text, setText] = useState("");
   const [showInfo, setShowInfo] = useState(false);
   const [showDisappear, setShowDisappear] = useState(false);
@@ -608,35 +611,29 @@ export default function ChatScreen() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  const handleLongPress = (msgId: string, fromMe: boolean, plaintext: string) => {
+  // Long-press opens one overlay: the reaction emoji row on top, Copy/Delete
+  // below it — replaces the old bare Alert/prompt-based menu. Looks the
+  // target message up fresh by id at render time (below, near the FlatList)
+  // rather than snapshotting fromMe/text at press time.
+  const [actionSheetMsgId, setActionSheetMsgId] = useState<string | null>(null);
+
+  const handleLongPress = (msgId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setActionSheetMsgId(msgId);
+  };
+
+  const handleDeleteMessage = (msgId: string, fromMe: boolean) => {
     const deleteTitle = fromMe ? "DELETE MESSAGE" : "DELETE FOR ME";
     const deleteMsg = fromMe
       ? "Permanently delete this message?"
       : "Remove this message from your view?";
-
-    const copy = async () => {
-      await Clipboard.setStringAsync(plaintext);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    };
-
     if (Platform.OS !== "web") {
-      Alert.alert(
-        "MESSAGE",
-        fromMe ? "Copy text or permanently delete this message?" : "Copy text or remove this message from your view?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Copy", onPress: copy },
-          { text: "Delete", style: "destructive", onPress: () => deleteMessage(conv.id, msgId) },
-        ],
-        { cancelable: true }
-      );
-    } else {
-      const choice = window.prompt(`MESSAGE\nType "copy" to copy text, "delete" to ${fromMe ? "delete" : "remove"}:`, "copy");
-      if (choice === "copy") copy();
-      else if (choice === "delete") {
-        if (window.confirm(`${deleteTitle}\n${deleteMsg}`)) deleteMessage(conv.id, msgId);
-      }
+      Alert.alert(deleteTitle, deleteMsg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => deleteMessage(conv.id, msgId) },
+      ]);
+    } else if (window.confirm(`${deleteTitle}\n${deleteMsg}`)) {
+      deleteMessage(conv.id, msgId);
     }
   };
 
@@ -656,7 +653,7 @@ export default function ChatScreen() {
     ?? DISAPPEAR_OPTIONS[0];
 
   const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
+    container: { flex: 1, backgroundColor: conv.bgColor ?? colors.background },
     header: {
       flexDirection: "row",
       alignItems: "center",
@@ -668,6 +665,16 @@ export default function ChatScreen() {
       gap: 12,
     },
     headerInfo: { flex: 1 },
+    headerAvatar: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    headerAvatarTxt: { color: colors.foreground, fontSize: 11, fontWeight: "800", letterSpacing: 0.5 },
     headerAlias: { color: colors.foreground, fontSize: 14, fontWeight: "800", letterSpacing: 3 },
     headerSub: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
     headerSubText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
@@ -720,6 +727,23 @@ export default function ChatScreen() {
     msgText: { fontSize: 14, lineHeight: 20, letterSpacing: 0.3 },
     msgMeta: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
     msgTime: { fontSize: 9, letterSpacing: 0.5 },
+    reactionRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+    reactionChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      borderRadius: 12,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    reactionChipMine: {
+      borderColor: colors.primary,
+      backgroundColor: `${colors.primary}18`,
+    },
+    reactionChipTxt: { fontSize: 12, color: colors.foreground },
     fingerprint: { fontSize: 8, letterSpacing: 1, opacity: 0.5, fontFamily: "monospace" },
     expiryBadge: {
       fontSize: 8,
@@ -924,6 +948,24 @@ export default function ChatScreen() {
     },
     sheetTitle: { color: colors.foreground, fontSize: 13, fontWeight: "800", letterSpacing: 4 },
     sheetBody: { padding: 20, gap: 16 },
+    emojiRow: {
+      flexDirection: "row",
+      justifyContent: "space-around",
+      paddingHorizontal: 12,
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    emojiBtn: {
+      width: 44, height: 44, borderRadius: 22,
+      alignItems: "center", justifyContent: "center",
+    },
+    emojiBtnTxt: { fontSize: 26 },
+    actionRow: {
+      flexDirection: "row", alignItems: "center", gap: 10,
+      paddingVertical: 14,
+    },
+    actionRowTxt: { color: colors.foreground, fontSize: 13, fontWeight: "700", letterSpacing: 2 },
     safetyRow: {
       backgroundColor: colors.background,
       borderRadius: 12, borderWidth: 1, borderColor: colors.border,
@@ -948,6 +990,13 @@ export default function ChatScreen() {
       borderWidth: 1, borderColor: colors.border,
     },
     disappearOptTxt: { fontSize: 11, fontWeight: "800", letterSpacing: 2 },
+    bgSwatchRow: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
+    bgSwatch: {
+      width: 32, height: 32, borderRadius: 16,
+      borderWidth: 1, borderColor: colors.border,
+      alignItems: "center", justifyContent: "center",
+    },
+    bgSwatchActive: { borderWidth: 2, borderColor: colors.primary },
     clearBtn: {
       marginTop: 4,
       borderWidth: 1,
@@ -976,6 +1025,9 @@ export default function ChatScreen() {
         <Pressable style={{ padding: 4 }} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={22} color={colors.foreground} />
         </Pressable>
+        <View style={[styles.headerAvatar, { backgroundColor: getProfileColor(conv.alias) }]}>
+          <Text style={styles.headerAvatarTxt}>{conv.alias.slice(0, 2)}</Text>
+        </View>
         <View style={styles.headerInfo}>
           <Text style={styles.headerAlias}>{conv.alias}</Text>
           <View style={styles.headerSub}>
@@ -1105,7 +1157,7 @@ export default function ChatScreen() {
           ) : (
           <Pressable
             style={[styles.msgRow, item.fromMe ? { alignSelf: "flex-end" } : { alignSelf: "flex-start" }]}
-            onLongPress={() => handleLongPress(item.id, item.fromMe, item.text)}
+            onLongPress={() => handleLongPress(item.id)}
             delayLongPress={400}
           >
             <View style={[
@@ -1280,6 +1332,26 @@ export default function ChatScreen() {
                 <Text style={styles.expiryBadge}>⏱ {formatExpiry(item.expiresAt)}</Text>
               )}
             </View>
+            {item.reactions && Object.keys(item.reactions).length > 0 && (
+              <View style={[styles.reactionRow, item.fromMe ? { justifyContent: "flex-end" } : {}]}>
+                {Object.entries(item.reactions as Record<string, string[]>).map(([emoji, aliases]) => {
+                  const mine = !!alias && aliases.includes(alias.toUpperCase());
+                  return (
+                    <Pressable
+                      key={emoji}
+                      style={[styles.reactionChip, mine && styles.reactionChipMine]}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        sendReaction(conv.id, item.id, emoji);
+                      }}
+                      testID={`reaction-${emoji}-${item.id}`}
+                    >
+                      <Text style={styles.reactionChipTxt}>{emoji} {aliases.length}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
           </Pressable>
           )
         )}
@@ -1733,6 +1805,45 @@ export default function ChatScreen() {
                   <Text style={styles.infoLabel}>LIBRARY</Text>
                   <Text style={styles.infoValue}>@NOBLE/{conv.drSession ? "CURVES + HASHES" : "CIPHERS"}</Text>
                 </View>
+                {/* Chat wallpaper — local only, never leaves this device */}
+                <View style={{ marginTop: 4 }}>
+                  <Text style={[styles.safetyLabel, { marginBottom: 8 }]}>CHAT WALLPAPER</Text>
+                  <View style={styles.bgSwatchRow}>
+                    <Pressable
+                      style={[
+                        styles.bgSwatch,
+                        { backgroundColor: colors.background },
+                        !conv.bgColor && styles.bgSwatchActive,
+                      ]}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setConversationBgColor(conv.id, undefined);
+                      }}
+                      testID="bg-swatch-default"
+                    >
+                      {!conv.bgColor && <Ionicons name="checkmark" size={14} color={colors.foreground} />}
+                    </Pressable>
+                    {CHAT_COLOR_PALETTE.map((swatch) => (
+                      <Pressable
+                        key={swatch}
+                        style={[
+                          styles.bgSwatch,
+                          { backgroundColor: swatch },
+                          conv.bgColor === swatch && styles.bgSwatchActive,
+                        ]}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setConversationBgColor(conv.id, swatch);
+                        }}
+                        testID={`bg-swatch-${swatch}`}
+                      >
+                        {conv.bgColor === swatch && (
+                          <Ionicons name="checkmark" size={14} color={colors.foreground} />
+                        )}
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
                 {/* Verify / Unverify */}
                 <Pressable
                   style={({ pressed }) => [
@@ -1817,6 +1928,69 @@ export default function ChatScreen() {
                 </View>
               </View>
             </View>
+        </View>
+      </Modal>
+      {/* Message action sheet — long-press: reaction row above Copy/Delete */}
+      <Modal
+        visible={!!actionSheetMsgId}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionSheetMsgId(null)}
+      >
+        <View style={styles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setActionSheetMsgId(null)} />
+          {(() => {
+            const target = messages.find((m) => m.id === actionSheetMsgId);
+            if (!target) return null;
+            return (
+              <View style={styles.sheet}>
+                <View style={styles.handle} />
+                <View style={styles.emojiRow}>
+                  {REACTION_EMOJIS.map((emoji) => (
+                    <Pressable
+                      key={emoji}
+                      style={styles.emojiBtn}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        sendReaction(conv.id, target.id, emoji);
+                        setActionSheetMsgId(null);
+                      }}
+                      testID={`emoji-pick-${emoji}`}
+                    >
+                      <Text style={styles.emojiBtnTxt}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={styles.sheetBody}>
+                  <Pressable
+                    style={styles.actionRow}
+                    onPress={async () => {
+                      await Clipboard.setStringAsync(target.text);
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      setActionSheetMsgId(null);
+                    }}
+                  >
+                    <Ionicons name="copy-outline" size={16} color={colors.foreground} />
+                    <Text style={styles.actionRowTxt}>COPY</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.actionRow}
+                    onPress={() => {
+                      const msgId = target.id;
+                      const fromMe = target.fromMe;
+                      setActionSheetMsgId(null);
+                      handleDeleteMessage(msgId, fromMe);
+                    }}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={colors.destructive} />
+                    <Text style={[styles.actionRowTxt, { color: colors.destructive }]}>
+                      {target.fromMe ? "DELETE MESSAGE" : "DELETE FOR ME"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })()}
         </View>
       </Modal>
       {/* Queued message toast — shown briefly when a message is held for delivery */}
