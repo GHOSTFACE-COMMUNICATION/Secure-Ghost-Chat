@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -7,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -15,8 +17,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostpadSignal, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
-
-type Mode = "idle" | "creating" | "joining" | "paired";
 
 // How long after the last keystroke to relay the buffer to the partner —
 // keeps it feeling live without sending a WS frame per character.
@@ -40,25 +40,37 @@ export default function GhostpadScreen({
 }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { sendGhostpadSignal, registerGhostpadListener, wsConnected } = useApp();
+  const {
+    ghostpad,
+    sendGhostpadSignal,
+    registerGhostpadListener,
+    setGhostpadMode,
+    resetGhostpad,
+    wsConnected,
+  } = useApp();
+  const { mode, code } = ghostpad;
 
-  const [mode, setMode] = useState<Mode>("idle");
-  const [code, setCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
+  const [copied, setCopied] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSentRef = useRef("");
+
+  // Mirrors `mode` for the unmount cleanup below — that effect has an empty
+  // dep array (it must only run its cleanup on true unmount, not on every
+  // mode change), so it can't close over `mode` directly without going stale
+  // at the value `mode` held on first mount.
+  const modeRef = useRef(mode);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   useEffect(() => {
     registerGhostpadListener((signal: GhostpadSignal) => {
       switch (signal.type) {
-        case "ghostpad-created":
-          setCode(signal.code ?? null);
-          break;
         case "ghostpad-paired":
           setError("");
-          setMode("paired");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           break;
         case "ghostpad-text":
@@ -69,14 +81,11 @@ export default function GhostpadScreen({
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           break;
         case "ghostpad-ended":
-          setMode("idle");
-          setCode(null);
           setText("");
           setError("The other side left");
           break;
         case "ghostpad-error":
           setError(signal.text ?? "Something went wrong");
-          setMode("idle");
           break;
       }
     });
@@ -86,15 +95,25 @@ export default function GhostpadScreen({
   useEffect(() => {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
-      // Leaving the screen ends the session — nothing lingers server-side.
-      if (mode === "paired") sendGhostpadSignal({ type: "ghostpad-leave" });
+      // Leaving the screen ends an active pairing — nothing lingers
+      // server-side. This is unrelated to connectivity: the socket stays
+      // open (we're not locked), so tell the server explicitly and mirror
+      // it in our own state immediately, rather than waiting on a ws.onclose
+      // that isn't coming. A "creating" (unpaired, still-waiting) session is
+      // deliberately left alone here — that's the code the user may be
+      // mid-share on, and it's still valid server-side until it expires or
+      // the socket actually closes.
+      if (modeRef.current === "paired") {
+        sendGhostpadSignal({ type: "ghostpad-leave" });
+        resetGhostpad();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreate = () => {
     setError("");
-    setMode("creating");
+    setGhostpadMode("creating");
     sendGhostpadSignal({ type: "ghostpad-create" });
   };
 
@@ -121,10 +140,26 @@ export default function GhostpadScreen({
 
   const handleLeave = () => {
     sendGhostpadSignal({ type: "ghostpad-leave" });
-    setMode("idle");
-    setCode(null);
+    resetGhostpad();
     setText("");
     setJoinCode("");
+  };
+
+  const handleCopy = async () => {
+    if (!code) return;
+    await Clipboard.setStringAsync(code);
+    setCopied(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSend = async () => {
+    if (!code) return;
+    try {
+      await Share.share({ message: `Join my GHOSTPAD: ${code}` });
+    } catch {
+      // user cancelled or share sheet unavailable
+    }
   };
 
   const styles = StyleSheet.create({
@@ -213,6 +248,11 @@ export default function GhostpadScreen({
       letterSpacing: 1,
       textAlign: "center",
     },
+    shareRow: {
+      flexDirection: "row",
+      gap: 10,
+      width: "100%",
+    },
     pad: {
       flex: 1,
       color: colors.foreground,
@@ -279,7 +319,7 @@ export default function GhostpadScreen({
           </Pressable>
           <Pressable
             style={[styles.actionBtn, !wsConnected && { opacity: 0.4 }]}
-            onPress={() => setMode("joining")}
+            onPress={() => setGhostpadMode("joining")}
             disabled={!wsConnected}
           >
             <Text style={styles.actionBtnText}>JOIN PAD</Text>
@@ -293,6 +333,20 @@ export default function GhostpadScreen({
             <>
               <Text style={styles.emptySub}>SHARE THIS CODE</Text>
               <Text style={styles.codeDisplay}>{code}</Text>
+              <View style={styles.shareRow}>
+                <Pressable style={styles.footerBtn} onPress={handleCopy}>
+                  <Ionicons
+                    name={copied ? "checkmark" : "copy-outline"}
+                    size={14}
+                    color={copied ? colors.success : colors.mutedForeground}
+                  />
+                  <Text style={styles.footerBtnText}>{copied ? "COPIED" : "COPY"}</Text>
+                </Pressable>
+                <Pressable style={styles.footerBtn} onPress={handleSend}>
+                  <Ionicons name="share-outline" size={14} color={colors.mutedForeground} />
+                  <Text style={styles.footerBtnText}>SEND</Text>
+                </Pressable>
+              </View>
               <Text style={styles.emptySub}>Waiting for the other side to join…</Text>
               <ActivityIndicator color={colors.primary} />
             </>
@@ -325,7 +379,7 @@ export default function GhostpadScreen({
           >
             <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>CONNECT</Text>
           </Pressable>
-          <Pressable style={styles.actionBtn} onPress={() => setMode("idle")}>
+          <Pressable style={styles.actionBtn} onPress={() => setGhostpadMode("idle")}>
             <Text style={styles.actionBtnText}>CANCEL</Text>
           </Pressable>
         </View>

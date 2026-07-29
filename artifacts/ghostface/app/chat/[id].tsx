@@ -6,8 +6,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -213,7 +213,7 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { conversations, sendMessage, retryMessage, deleteMessage, clearConversation, setDisappearTimer, verifyConversation, deleteConversation, lowBandwidthActive, wsConnected } = useApp();
+  const { conversations, sendMessage, retryMessage, deleteMessage, clearConversation, setDisappearTimer, markMessagesViewed, verifyConversation, deleteConversation, lowBandwidthActive, wsConnected } = useApp();
   const [text, setText] = useState("");
   const [showInfo, setShowInfo] = useState(false);
   const [showDisappear, setShowDisappear] = useState(false);
@@ -251,12 +251,30 @@ export default function ChatScreen() {
 
   const conv = conversations.find((c) => c.id === id);
 
-  // Tick every second when a disappear timer is active — keeps countdown badges live
+  // Tick every second whenever a disappear timer could be live in this
+  // conversation — either our own outgoing default (disappearAfterSec) or
+  // any message carrying a receiver-side ttlMs (envelope-sourced, so it can
+  // be present even when we've never set a local disappear timer ourselves).
+  const hasTtlMessages = conv?.messages.some((m) => m.ttlMs) ?? false;
   useEffect(() => {
-    if (!conv?.disappearAfterSec) return;
+    if (!conv?.disappearAfterSec && !hasTtlMessages) return;
     const timer = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(timer);
-  }, [conv?.id, conv?.disappearAfterSec]);
+  }, [conv?.id, conv?.disappearAfterSec, hasTtlMessages]);
+
+  // Stamp viewedAt (and start the countdown) for every currently-visible
+  // message that has a TTL and hasn't been viewed yet. Fires on every focus
+  // — not just mount — so returning to an already-open conversation still
+  // catches messages that arrived (or were scrolled into view) since the
+  // last focus.
+  useFocusEffect(
+    useCallback(() => {
+      if (!conv) return;
+      const unviewed = conv.messages.filter((m) => m.ttlMs && !m.viewedAt).map((m) => m.id);
+      if (unviewed.length > 0) markMessagesViewed(conv.id, unviewed);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [conv?.id, conv?.messages]),
+  );
 
   if (!conv) {
     return (
@@ -1767,6 +1785,9 @@ export default function ChatScreen() {
               <View style={styles.sheetBody}>
                 <Text style={styles.safetyNote}>
                   Messages auto-delete after the set time. Screenshots are blocked on both sides.
+                </Text>
+                <Text style={[styles.safetyNote, { opacity: 0.6, marginTop: -4 }]}>
+                  This timer is enforced by the app on each device — it cannot be guaranteed against a modified client.
                 </Text>
                 <View style={styles.disappearOptions}>
                   {DISAPPEAR_OPTIONS.map((opt) => {

@@ -208,10 +208,15 @@ function RootNavigator() {
     const subscription = AppState.addEventListener(
       "change",
       (nextAppState: AppStateStatus) => {
+        // Lock on a real backgrounding only. `"inactive"` also fires for
+        // transient loss of focus that never actually leaves the app — the
+        // native share sheet, an image/file picker, a Face ID prompt, an
+        // incoming call banner — and treating those as background used to
+        // slam the whole navigator into <LockScreen/>, unmounting whatever
+        // screen was open and destroying its local state mid-interaction.
         const wasActive = appState.current === "active";
-        const isBackground =
-          nextAppState === "background" || nextAppState === "inactive";
-        if (wasActive && isBackground) {
+        const enteredBackground = nextAppState === "background";
+        if (wasActive && enteredBackground) {
           setLocked(true);
         }
         appState.current = nextAppState;

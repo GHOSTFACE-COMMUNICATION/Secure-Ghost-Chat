@@ -121,6 +121,16 @@ export interface Message {
   sealed: boolean;
   ciphertext?: string;
   fingerprint?: string;
+  /**
+   * Disappearing-message duration in ms, sender-authoritative — travels
+   * inside the encrypted envelope (`SealedEnvelope.x`). Present on both
+   * sender's and receiver's copies once a disappear timer applies. Absent
+   * `expiresAt` alongside a present `ttlMs` means "not yet viewed" on the
+   * receiver's side — the timer hasn't started.
+   */
+  ttlMs?: number;
+  /** Local receipt of the first view. Stamped once, on first render. */
+  viewedAt?: number;
   expiresAt?: number;
   pending?: boolean;
   failed?: boolean;
@@ -161,12 +171,26 @@ export interface OutboxItem {
 const ATTACHMENT_ENVELOPE_VERSION = 1;
 const ATTACHMENT_ENVELOPE_PREFIX = `{"_gfa":${ATTACHMENT_ENVELOPE_VERSION}`;
 
-// Sealed-sender envelope (v2). Every outgoing message is now wrapped in this
+// Sealed-sender envelope (v3). Every outgoing message is now wrapped in this
 // envelope BEFORE encryption so the sender's alias travels only inside the
 // ciphertext — never as a plaintext wire field or stored column. The receiver
 // recovers the sender after a successful decrypt (`f`). `t` is the text body,
 // `a` an optional attachment.
-const SEALED_ENVELOPE_VERSION = 2;
+//
+// v3 adds `x` — the disappearing-message TTL in ms, sender-authoritative.
+// It's a DURATION, never an absolute timestamp: absolute timestamps would
+// leak/rely on clock-skew between the two devices. The receiver starts its
+// own local expiry countdown from `x` only once the message is actually
+// viewed (see `markMessagesViewed`); the sender starts its own copy's
+// countdown at send time.
+//
+// Hard version bump, no v2 compat shim: `unwrapPayload` gates on an exact
+// `_gf === SEALED_ENVELOPE_VERSION` match (via the version-stamped prefix
+// below), so a v2-only build receiving a v3 envelope fails the prefix check
+// and falls through to the plain-text branch rather than partially trusting
+// a v3 envelope it doesn't understand — it never silently drops just the
+// disappearing-timer semantics while rendering the rest normally.
+const SEALED_ENVELOPE_VERSION = 3;
 const SEALED_ENVELOPE_PREFIX = `{"_gf":${SEALED_ENVELOPE_VERSION}`;
 
 interface SealedEnvelope {
@@ -174,9 +198,11 @@ interface SealedEnvelope {
   f: string;
   t: string;
   a?: Attachment;
+  /** Disappearing-message TTL in ms. Omitted entirely when no timer applies. */
+  x?: number;
 }
 
-function wrapPayload(from: string, text: string, attachment?: Attachment): string {
+function wrapPayload(from: string, text: string, attachment?: Attachment, ttlMs?: number): string {
   // image-ref carries a local-only `uri` for the sender's own preview that
   // must NOT be sent over the wire — strip it so the recipient only ever
   // sees the blob reference + key.
@@ -191,6 +217,7 @@ function wrapPayload(from: string, text: string, attachment?: Attachment): strin
   }
   const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, t: text };
   if (wireAttachment) env.a = wireAttachment;
+  if (ttlMs) env.x = ttlMs;
   return JSON.stringify(env);
 }
 
@@ -263,22 +290,27 @@ function isValidAttachment(a: unknown): a is Attachment {
   return false;
 }
 
-function unwrapPayload(plaintext: string): { text: string; attachment?: Attachment; from?: string } {
-  // v2 sealed-sender envelope — recovers the sender alias (`f`) plus body and
-  // optional attachment. This is the only format emitted now.
+function unwrapPayload(
+  plaintext: string,
+): { text: string; attachment?: Attachment; from?: string; ttlMs?: number } {
+  // v3 sealed-sender envelope — recovers the sender alias (`f`), body,
+  // optional attachment, and optional disappearing-message TTL (`x`). This
+  // is the only format emitted now.
   if (plaintext.startsWith(SEALED_ENVELOPE_PREFIX)) {
     try {
-      const parsed = JSON.parse(plaintext) as { _gf?: unknown; f?: unknown; t?: unknown; a?: unknown };
+      const parsed = JSON.parse(plaintext) as { _gf?: unknown; f?: unknown; t?: unknown; a?: unknown; x?: unknown };
       if (
         parsed._gf === SEALED_ENVELOPE_VERSION &&
         typeof parsed.f === "string" &&
         typeof parsed.t === "string" &&
-        (parsed.a === undefined || isValidAttachment(parsed.a))
+        (parsed.a === undefined || isValidAttachment(parsed.a)) &&
+        (parsed.x === undefined || (typeof parsed.x === "number" && parsed.x > 0))
       ) {
         return {
           text: parsed.t,
           from: parsed.f,
           ...(parsed.a !== undefined ? { attachment: parsed.a as Attachment } : {}),
+          ...(parsed.x !== undefined ? { ttlMs: parsed.x as number } : {}),
         };
       }
     } catch {
@@ -322,6 +354,12 @@ export interface Conversation {
   timestamp: number;
   unread: number;
   messages: Message[];
+  /**
+   * This device's own default disappear-timer for messages it SENDS in this
+   * conversation — travels to the peer inside each envelope as `ttlMs`, not
+   * as a standing setting. Purely local and one-directional: it has no
+   * effect on incoming messages, whose TTL comes from their own envelope.
+   */
   disappearAfterSec?: number;
   safetyNumber?: string;
   drSession?: DRSession;
@@ -395,6 +433,18 @@ export interface GhostpadSignal {
   text?: string;
 }
 
+/**
+ * Session identity only — code + pairing mode. Deliberately excludes the
+ * live pad text (that stays per-screen and ephemeral, matching the "nothing
+ * lingers" design). Lives in AppState rather than a screen-local useState so
+ * a lock/unmount (share sheet, navigation away and back) doesn't strand the
+ * user with a fresh idle screen after they've already shared the code.
+ */
+export interface GhostpadSession {
+  mode: "idle" | "creating" | "joining" | "paired";
+  code: string | null;
+}
+
 export interface IncomingCall {
   callId: string;
   from: string;
@@ -428,6 +478,7 @@ interface AppState {
   duressGracePeriod: number;
   language: string;
   incomingCall: IncomingCall | null;
+  ghostpad: GhostpadSession;
   // Satellite low-bandwidth mode (Task #111). `linkQuality` is the
   // heuristically classified link state, `lowBandwidthMode` is the user
   // override (auto/forceOn/forceOff), and `lowBandwidthActive` is the
@@ -480,6 +531,7 @@ interface AppContextType extends AppState {
   clearConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
   setDisappearTimer: (conversationId: string, seconds: number | undefined) => void;
+  markMessagesViewed: (conversationId: string, messageIds: string[]) => void;
   verifyConversation: (conversationId: string) => void;
   panicWipe: () => Promise<void>;
   connectWallet: (address: string) => Promise<{ error?: string }>;
@@ -497,6 +549,8 @@ interface AppContextType extends AppState {
   registerCallListener: (fn: ((s: CallSignal) => void) | null) => void;
   sendGhostpadSignal: (msg: object) => void;
   registerGhostpadListener: (fn: ((s: GhostpadSignal) => void) | null) => void;
+  setGhostpadMode: (mode: GhostpadSession["mode"]) => void;
+  resetGhostpad: () => void;
   dismissIncomingCall: () => void;
   wsConnected: boolean;
   loaded: boolean;
@@ -1046,6 +1100,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     appTokens: [],
     walletAddress: "GhFc3...x9mKr4",
     incomingCall: null,
+    ghostpad: { mode: "idle", code: null },
     transactions: DEFAULT_TRANSACTIONS,
     dataUsed: 2.4,
     dataLimit: 10,
@@ -1123,6 +1178,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         conversations = conversations.map((c) =>
           isValidDRSession(c.drSession) ? c : { ...c, drSession: undefined }
         );
+
+        // Purge disappearing messages that expired while the app was closed,
+        // BEFORE `loaded` ever flips true (app/_layout.tsx gates all
+        // rendering on it) — an expired message must never flash on screen
+        // even for a frame on cold start. Only messages that already carry
+        // an `expiresAt` are touched: an unviewed receiver message has
+        // `ttlMs` but no `expiresAt` yet, so its timer hasn't started and
+        // it's correctly left alone here.
+        {
+          const now = Date.now();
+          let purged = false;
+          conversations = conversations.map((c) => {
+            const filtered = c.messages.filter((m) => !m.expiresAt || m.expiresAt > now);
+            if (filtered.length !== c.messages.length) {
+              purged = true;
+              return { ...c, messages: filtered };
+            }
+            return c;
+          });
+          if (purged) {
+            writeEncryptedString(CONVERSATIONS_KEY, JSON.stringify(conversations)).catch(
+              (e) => console.warn("[AppContext] Failed to persist hydrate-time expiry purge:", e)
+            );
+          }
+        }
 
         let autoLockTimeout: number | null = 5 * 60 * 1000;
         if (autoLockRaw === "null") {
@@ -1796,6 +1876,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [persistConversations]);
 
+  /**
+   * Stamp `viewedAt` (and derive `expiresAt = viewedAt + ttlMs`) on every
+   * given message that has a TTL and hasn't been viewed yet — called when
+   * the chat screen brings them on screen. Persists the write immediately,
+   * in the same tick as the state update, so a force-quit right after
+   * viewing can't reset the timer: there is no separate debounced-save path
+   * here to race against, same as every other conversation mutation in this
+   * file.
+   */
+  const markMessagesViewed = useCallback((conversationId: string, messageIds: string[]) => {
+    if (messageIds.length === 0) return;
+    const idSet = new Set(messageIds);
+    setState((prev) => {
+      let changed = false;
+      const updated = prev.conversations.map((c) => {
+        if (c.id !== conversationId) return c;
+        const messages = c.messages.map((m) => {
+          if (!idSet.has(m.id) || !m.ttlMs || m.viewedAt) return m;
+          changed = true;
+          const viewedAt = Date.now();
+          return { ...m, viewedAt, expiresAt: viewedAt + m.ttlMs };
+        });
+        return changed ? { ...c, messages } : c;
+      });
+      if (!changed) return prev;
+      persistConversations(updated);
+      return { ...prev, conversations: updated };
+    });
+  }, [persistConversations]);
+
   const verifyConversation = useCallback((conversationId: string) => {
     setState((prev) => {
       const updated = prev.conversations.map((c) =>
@@ -1908,9 +2018,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      const outgoingTtlMs = conv.disappearAfterSec ? conv.disappearAfterSec * 1000 : undefined;
       {
         const drSession = conv.drSession;
-        const wireText = wrapPayload(myAlias.toUpperCase(), text, attachment);
+        const wireText = wrapPayload(myAlias.toUpperCase(), text, attachment, outgoingTtlMs);
         try {
           const { state: newAlice, message: msg } = ratchetEncrypt(drSession.alice, wireText);
           updatedDRSession = { ...drSession, alice: newAlice, lastAliceHeader: msg.header };
@@ -1925,9 +2036,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return recordSendFailure("Message could not be encrypted. Please try again.");
       }
 
-      const expiresAt = conv.disappearAfterSec
-        ? Date.now() + conv.disappearAfterSec * 1000
-        : undefined;
+      // Sender's own copy starts its timer at send time, same as before —
+      // only the receiver's copy waits for a view event (see markMessagesViewed).
+      const expiresAt = outgoingTtlMs ? Date.now() + outgoingTtlMs : undefined;
 
       const newMsg: Message = {
         id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
@@ -1938,6 +2049,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sealed: true,
         ciphertext: aliceMsg.ciphertext,
         fingerprint: `DR:${aliceMsg.ciphertext.slice(0, 8).toUpperCase()}`,
+        ttlMs: outgoingTtlMs,
         expiresAt,
         attachment,
       };
@@ -2436,6 +2548,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       duressGracePeriod: 3,
       language: "en",
       incomingCall: null,
+      ghostpad: { mode: "idle", code: null },
       linkQuality: "unknown",
       lowBandwidthMode: "auto",
       // Same derivation as createInitialState — AUTO+UNKNOWN must start
@@ -2467,6 +2580,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const registerGhostpadListener = useCallback((fn: ((s: GhostpadSignal) => void) | null) => {
     ghostpadListenerRef.current = fn;
+  }, []);
+
+  const setGhostpadMode = useCallback((mode: GhostpadSession["mode"]) => {
+    setState((prev) => ({ ...prev, ghostpad: { ...prev.ghostpad, mode } }));
+  }, []);
+
+  const resetGhostpad = useCallback(() => {
+    setState((prev) => ({ ...prev, ghostpad: { mode: "idle", code: null } }));
   }, []);
 
   const dismissIncomingCall = useCallback(() => {
@@ -2617,7 +2738,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // back to the committed session.
           const aliceForEncrypt = aliceCursor.get(item.conversationId) ?? conv.drSession.alice;
           const myAlias = (latestStateRef.current.alias ?? "GHOST_USER").toUpperCase();
-          const wireText = wrapPayload(myAlias, item.text, item.attachment);
+          const outgoingTtlMs = conv.disappearAfterSec ? conv.disappearAfterSec * 1000 : undefined;
+          const wireText = wrapPayload(myAlias, item.text, item.attachment, outgoingTtlMs);
           const { state: newAlice, message: aliceMsg } = ratchetEncrypt(aliceForEncrypt, wireText);
           // pendingX3DHHeader bootstraps the receiver's Bob session and is
           // only required on the very first ciphertext per conversation.
@@ -2642,7 +2764,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           aliceCursor.set(item.conversationId, newAlice);
           headerSent.add(item.conversationId);
-          const expiresAt = conv.disappearAfterSec ? Date.now() + conv.disappearAfterSec * 1000 : undefined;
+          const expiresAt = outgoingTtlMs ? Date.now() + outgoingTtlMs : undefined;
           setState((prev) => {
             const updated = prev.conversations.map((c) => {
               if (c.id !== item.conversationId) return c;
@@ -2650,7 +2772,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               const updatedSession = { ...c.drSession, alice: newAlice, lastAliceHeader: aliceMsg.header };
               const updatedMsgs = c.messages.map((m) =>
                 m.id === item.id
-                  ? { ...m, pending: false, encrypted: true, sealed: true, ciphertext: aliceMsg.ciphertext, fingerprint: `DR:${aliceMsg.ciphertext.slice(0, 8).toUpperCase()}`, expiresAt }
+                  ? { ...m, pending: false, encrypted: true, sealed: true, ciphertext: aliceMsg.ciphertext, fingerprint: `DR:${aliceMsg.ciphertext.slice(0, 8).toUpperCase()}`, ttlMs: outgoingTtlMs, expiresAt }
                   : m
               );
               return { ...c, messages: updatedMsgs, drSession: updatedSession, pendingX3DHHeader: undefined };
@@ -2836,12 +2958,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     // ── Ghostpad signals — relayed, never persisted client-side either ───────
+    // Session identity (mode + code) is committed straight into AppState
+    // here, independent of whether a GhostpadScreen is currently mounted to
+    // receive it — a lock/unmount mid-session must not strand the user on a
+    // blank idle screen once they're back. The live pad text stays screen-
+    // local and ephemeral via ghostpadListenerRef, matching the "nothing
+    // lingers" design for actual pad content.
     if (wsMsg.type && GHOSTPAD_SIGNAL_TYPES.has(wsMsg.type)) {
-      ghostpadListenerRef.current?.({
+      const signal: GhostpadSignal = {
         type: wsMsg.type as GhostpadSignal["type"],
         code: wsMsg.code,
         text: wsMsg.text,
-      });
+      };
+      switch (signal.type) {
+        case "ghostpad-created":
+          setState((prev) => ({ ...prev, ghostpad: { mode: "creating", code: signal.code ?? null } }));
+          break;
+        case "ghostpad-paired":
+          setState((prev) => ({ ...prev, ghostpad: { ...prev.ghostpad, mode: "paired" } }));
+          break;
+        case "ghostpad-ended":
+        case "ghostpad-error":
+          setState((prev) => ({ ...prev, ghostpad: { mode: "idle", code: null } }));
+          break;
+      }
+      ghostpadListenerRef.current?.(signal);
       return;
     }
 
@@ -2898,9 +3039,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sealed: true,
         fingerprint: `DR:${ratchetMsg.ciphertext.slice(0, 8).toUpperCase()}`,
         ...(unwrapped.attachment ? { attachment: unwrapped.attachment } : {}),
-        ...(conv.disappearAfterSec
-          ? { expiresAt: Date.now() + conv.disappearAfterSec * 1000 }
-          : {}),
+        // TTL comes from the sender via the envelope, never from our own
+        // local conversation setting. No expiresAt yet — the countdown only
+        // starts once this message is actually viewed (markMessagesViewed).
+        ...(unwrapped.ttlMs ? { ttlMs: unwrapped.ttlMs } : {}),
       };
       setState((prev) => {
         const updated = prev.conversations.map((c) =>
@@ -3042,6 +3184,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sealed: true,
         fingerprint: `DR:${ratchetMsg.ciphertext.slice(0, 8).toUpperCase()}`,
         ...(unwrappedFirst.attachment ? { attachment: unwrappedFirst.attachment } : {}),
+        // TTL from the envelope, not our own local conversation setting — no
+        // expiresAt until this message is actually viewed.
+        ...(unwrappedFirst.ttlMs ? { ttlMs: unwrappedFirst.ttlMs } : {}),
       };
 
       setState((prev) => {
@@ -3052,15 +3197,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // decrypt-fail path. Replace the stale DR session and append the
           // decrypted message to the existing conversation rather than creating
           // a duplicate.
-          const firstMsgWithExpiry: Message = alreadyExists.disappearAfterSec
-            ? { ...firstMsg, expiresAt: Date.now() + alreadyExists.disappearAfterSec * 1000 }
-            : firstMsg;
           const updated = prev.conversations.map((c) =>
             c.id === alreadyExists.id
               ? {
                   ...c,
                   drSession: { ...bobSession, alice: newAlice },
-                  messages: [...c.messages, firstMsgWithExpiry],
+                  messages: [...c.messages, firstMsg],
                   lastMessage: firstPreview,
                   timestamp: Date.now(),
                   unread: c.unread + 1,
@@ -3204,6 +3346,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         ws.onclose = (event) => {
           setWsConnected(false);
+          // The server unconditionally revokes any pending Ghostpad code and
+          // ends any active pairing the instant its socket for this alias
+          // closes (see api-server's wss.on("close") handler) — regardless
+          // of why the socket closed (lock, network drop, backgrounding).
+          // Mirror that here so we never show a code/session client-side
+          // that the server has already discarded.
+          setState((prev) =>
+            prev.ghostpad.mode === "idle" ? prev : { ...prev, ghostpad: { mode: "idle", code: null } }
+          );
           if (pingTimer) { clearTimeout(pingTimer); pingTimer = null; }
           // Feed the LBW classifier: count this disconnect, and start the
           // "stuck reconnecting" stopwatch if it isn't already running.
@@ -3322,11 +3473,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         clearConversation,
         deleteConversation,
         setDisappearTimer,
+        markMessagesViewed,
         verifyConversation,
         sendCallSignal,
         registerCallListener,
         sendGhostpadSignal,
         registerGhostpadListener,
+        setGhostpadMode,
+        resetGhostpad,
         dismissIncomingCall,
         panicWipe,
         connectWallet,

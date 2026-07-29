@@ -2,6 +2,7 @@
    module (react-native-webrtc) and the browser RTC globals are loaded dynamically
    and are not statically typed uniformly across web/native platforms. */
 import { Ionicons } from "@expo/vector-icons";
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -218,6 +219,20 @@ export default function CallScreen() {
   const getMedia = useCallback(async (pc: any) => {
     if (!pc) return;
     try {
+      // expo-av and react-native-webrtc share the same native iOS audio
+      // session. If a voice message was ever recorded in this app session,
+      // AppContext's chat screen leaves that session in `allowsRecordingIOS:
+      // false` mode (lib/chat's stop-recording cleanup) — WebRTC still
+      // negotiates and connects fine either way (ICE/DTLS/SRTP don't touch
+      // this), but actual audio capture/playback silently does nothing.
+      // Force a call-appropriate session before requesting the mic.
+      if (Platform.OS !== "web") {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+        }).catch(() => {});
+      }
       const devices = Platform.OS === "web" ? navigator.mediaDevices : nativeMediaDevices;
       if (!devices) { setStatusNote("Microphone unavailable on this device"); return; }
       const stream = await devices.getUserMedia({ audio: true, video: isVideo });
@@ -234,6 +249,9 @@ export default function CallScreen() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (pcRef.current) { try { pcRef.current.close(); } catch { /* ignore close errors */ } pcRef.current = null; }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop()); localStreamRef.current = null; }
+    if (Platform.OS !== "web") {
+      Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
+    }
     setCallState("ended");
     setTimeout(() => { if (mountedRef.current) router.back(); }, 1200);
   }, []);
@@ -346,6 +364,18 @@ export default function CallScreen() {
     setShowVoiceChanger((v) => !v);
     Animated.spring(voiceSlideAnim, { toValue: showVoiceChanger ? 0 : 1, useNativeDriver: true, tension: 80, friction: 12 }).start();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const toggleMute = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setMuted((m) => {
+      const next = !m;
+      // `enabled = false` silences the track at the source without tearing
+      // down or renegotiating the peer connection — the remote side keeps
+      // receiving silence rather than the connection hiccuping.
+      localStreamRef.current?.getAudioTracks().forEach((t: MediaStreamTrack) => { t.enabled = !next; });
+      return next;
+    });
   };
 
   const formatDuration = (secs: number) => {
@@ -529,7 +559,7 @@ export default function CallScreen() {
         {/* Call controls */}
         <View style={styles.controls}>
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMuted((m) => !m); }}>
+            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]} onPress={toggleMute}>
               <Ionicons name={muted ? "mic-off" : "mic"} size={22} color={muted ? colors.primaryForeground : colors.foreground} />
             </Pressable>
             <Text style={styles.modeLabel}>{muted ? "UNMUTE" : "MUTE"}</Text>
