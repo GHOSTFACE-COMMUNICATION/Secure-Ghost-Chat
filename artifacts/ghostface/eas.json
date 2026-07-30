@@ -36,7 +36,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "secure-ghost-chat.onrender.com"
+        "EXPO_PUBLIC_DOMAIN": "api-server-production-b252.up.railway.app"
       }
     },
     "production": {
@@ -51,7 +51,7 @@
         "distribution": "store"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "secure-ghost-chat.onrender.com"
+        "EXPO_PUBLIC_DOMAIN": "api-server-production-b252.up.railway.app"
       }
     }
   },

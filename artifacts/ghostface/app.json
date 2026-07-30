@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GHOSTFACE",
-    "slug": "ghostface",
+    "slug": "mayybachh",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -105,9 +105,9 @@
       "marketingUrl": "https://ghostface.app",
       "router": {},
       "eas": {
-        "projectId": "0b6b78a6-7c24-4128-b51c-70dbaaf4b58e"
+        "projectId": "00848c98-2704-4201-b2ba-81956ef7aae2"
       }
     },
-    "owner": "ghost_face"
+    "owner": "ghostface-limited"
   }
 }
