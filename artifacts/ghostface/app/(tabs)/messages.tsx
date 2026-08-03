@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -77,6 +77,21 @@ export default function MessagesScreen() {
   }, [wsConnected, hadConnection]);
 
   const [pageTab, setPageTab] = useState<PageTab>("messages");
+
+  // "New Code" quick action from the invite-expired alert (task #145): a
+  // regenInvite timestamp param routes here — switch to the Invite tab and
+  // forward the signal so GhostInvite auto-generates a fresh code.
+  const { regenInvite } = useLocalSearchParams<{ regenInvite?: string }>();
+  const [regenSignal, setRegenSignal] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof regenInvite === "string" && regenInvite) {
+      setPageTab("invite");
+      setRegenSignal(regenInvite);
+      // Clear the param immediately so stale route state can never replay
+      // the signal on later navigations.
+      router.setParams({ regenInvite: undefined });
+    }
+  }, [regenInvite]);
   const [showNew, setShowNew] = useState(false);
   const [newAlias, setNewAlias] = useState("");
 
@@ -472,7 +487,10 @@ export default function MessagesScreen() {
       {pageTab === "tools" ? (
         <EncryptionTools />
       ) : pageTab === "invite" ? (
-        <GhostInvite />
+        <GhostInvite
+          regenerateSignal={regenSignal}
+          onRegenerateConsumed={() => setRegenSignal(null)}
+        />
       ) : (
         <FlatList
           ref={listRef}

@@ -26,6 +26,7 @@ import {
 } from "@/lib/smsFallback";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
+import { router } from "expo-router";
 import { Alert, AppState as RNAppState, Platform } from "react-native";
 import React, {
   createContext,
@@ -2619,7 +2620,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       Alert.alert(
         "Invite Expired",
         `Your invite ${expiredCode} expired without being redeemed.`,
-        [{ text: "OK" }],
+        [
+          { text: "OK", style: "cancel" },
+          {
+            text: "New Code",
+            onPress: () => {
+              // Jump to the Invite tab and trigger an auto-regenerate. The
+              // timestamp param makes each tap a fresh signal so repeated
+              // expiries each regenerate exactly once.
+              router.push({
+                pathname: "/(tabs)/messages",
+                params: { regenInvite: String(Date.now()) },
+              });
+            },
+          },
+        ],
       );
       return;
     }

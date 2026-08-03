@@ -104,7 +104,22 @@ async function lookupInviteCode(code: string): Promise<RedeemResult> {
 
 type RedeemState = "idle" | "success" | RedeemFailReason;
 
-export default function GhostInvite() {
+interface GhostInviteProps {
+  /**
+   * One-shot auto-regenerate signal (task #145). When this changes to a new
+   * non-null value (a timestamp string from the invite-expired alert's
+   * "New Code" action), a fresh invite code is generated exactly once.
+   */
+  regenerateSignal?: string | null;
+  /**
+   * Called after the signal has been consumed so the parent can clear it —
+   * without this, remounting the (conditionally rendered) component with a
+   * stale signal would regenerate again.
+   */
+  onRegenerateConsumed?: () => void;
+}
+
+export default function GhostInvite({ regenerateSignal, onRegenerateConsumed }: GhostInviteProps) {
   const colors = useColors();
   const { addConversation, alias: myAlias } = useApp();
   const [showScanner, setShowScanner] = useState(false);
@@ -193,6 +208,19 @@ export default function GhostInvite() {
     },
     [timerIdx, myAlias],
   );
+
+  // Auto-regenerate when the invite-expired alert's "New Code" action routes
+  // here. The ref guards against double-firing within this mount; the
+  // onRegenerateConsumed callback tells the parent to clear the signal so it
+  // can never replay across remounts of this (conditionally rendered) view.
+  const lastRegenSignalRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (regenerateSignal && lastRegenSignalRef.current !== regenerateSignal) {
+      lastRegenSignalRef.current = regenerateSignal;
+      reset();
+      onRegenerateConsumed?.();
+    }
+  }, [regenerateSignal, reset, onRegenerateConsumed]);
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
