@@ -509,3 +509,8 @@ export function broadcastToAlias(alias: string, message: Omit<WireMessage, "toke
 }
 
 export { connectedClients };
+
+// Exposed for tests only (e.g. verifying restart-survival of invite-expiry
+// notices). Do not call from production code paths — the WS auth flow is
+// the sole runtime caller.
+export const __testing = { deliverPendingInviteExpiries };
