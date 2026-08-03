@@ -139,8 +139,8 @@ export function Periscope() {
         </div>
       </div>
 
-      {/* Main instrument — centred, takes all flex space */}
-      <div className="flex-1 relative flex items-center justify-center z-10 w-full px-4 -mt-6">
+      {/* Main instrument — biased upward so the dial centre sits above mid-screen */}
+      <div className="flex-1 relative flex items-center justify-center z-10 w-full px-4" style={{ paddingBottom: '28%' }}>
         <div className="relative w-full max-w-[340px] aspect-square flex items-center justify-center">
 
           {/* Outer tick ring */}
@@ -185,22 +185,33 @@ export function Periscope() {
             <div ref={glowRef} className="w-[160px] h-[160px] rounded-full absolute"
               style={{ background: 'radial-gradient(circle, rgba(191,155,48,0.22) 0%, transparent 70%)', transition: 'none' }} />
 
-            {/* The coin image */}
-            <img
+            {/* Coin — metallic rim wrapping the image */}
+            <div
               ref={coinRef}
-              src="/__mockup/images/ghostface-logo.jpeg"
-              alt="GHOSTFACE"
               style={{
-                width: 148, height: 148,
+                width: 156, height: 156,
                 borderRadius: '50%',
-                objectFit: 'cover',
-                objectPosition: 'center 15%',
-                border: '1.5px solid rgba(191,155,48,0.4)',
-                background: '#020202',
+                padding: 4,
+                background: 'conic-gradient(from 30deg, #5a3e08, #c9971c, #f0d060, #c9971c, #7a5210, #c9971c, #f0d060, #c9971c, #5a3e08)',
+                boxShadow: '0 0 32px rgba(191,155,48,0.5), inset 0 1px 4px rgba(255,235,120,0.5)',
+                flexShrink: 0,
                 willChange: 'transform, filter',
                 transformOrigin: 'center center',
               }}
-            />
+            >
+              <img
+                src="/__mockup/images/ghostface-logo.jpeg"
+                alt="GHOSTFACE"
+                style={{
+                  width: '100%', height: '100%',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  objectPosition: 'center 15%',
+                  background: '#020202',
+                  display: 'block',
+                }}
+              />
+            </div>
 
             {/* Scrolling hex */}
             <div className="mt-5 text-[8px] tracking-widest opacity-25 font-mono">{hex}</div>

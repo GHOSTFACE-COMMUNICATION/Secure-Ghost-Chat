@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
+  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -39,6 +40,37 @@ const ORBIT_CENTER = ORBIT_SIZE / 2;
 const ORBIT_RADIUS = 134;
 const NODE = 60;
 
+// ── Coin physics ──────────────────────────────────────────────────────────────
+const CYCLE = 5200; // ms per full spin-slow-fall cycle
+const FAST_END = 0.3;
+const SLOW_END = 0.68;
+const FALL_END = 0.88;
+
+function easeIn3(t: number) { return t * t * t; }
+function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+
+function coinPhysics(ms: number): { rotY: number; tiltX: number; scaleX: number } {
+  const t = (ms % CYCLE) / CYCLE;
+  if (t < FAST_END) {
+    return { rotY: (t / FAST_END) * 1800, tiltX: 0, scaleX: 1 };
+  }
+  if (t < SLOW_END) {
+    const p = easeIn3((t - FAST_END) / (SLOW_END - FAST_END));
+    return { rotY: 1800 + p * 720, tiltX: lerp(0, 62, p), scaleX: 1 };
+  }
+  if (t < FALL_END) {
+    const p = (t - SLOW_END) / (FALL_END - SLOW_END);
+    const ep = easeIn3(p);
+    const wobble = lerp(6, 2, ep) * Math.sin(p * Math.PI * 14);
+    return {
+      rotY: 2520 + p * 180,
+      tiltX: lerp(62, 86, ep) + wobble,
+      scaleX: lerp(1, 0.15, 1 - Math.pow(1 - p, 3)),
+    };
+  }
+  return { rotY: 2700, tiltX: 88, scaleX: 0.08 };
+}
+
 type NavNode = {
   icon: IconName;
   label: string;
@@ -57,30 +89,26 @@ export default function HomeScreen() {
   const wipeFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
+  // Decorative ring spin
   const spin = useRef(new Animated.Value(0)).current;
-  const globeSpin = useRef(new Animated.Value(0)).current;
+  // Coin physics values — driven by rAF, not Animated.timing
+  const coinRotY = useRef(new Animated.Value(0)).current;
+  const coinTiltX = useRef(new Animated.Value(0)).current;
+  const coinScaleX = useRef(new Animated.Value(1)).current;
+  const coinGlow = useRef(new Animated.Value(0.6)).current;
+
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
   const wipeAnim = useRef(new Animated.Value(0)).current;
+  const rafRef = useRef<number>(0);
 
-  // Continuous slow spin + ghostly breathing fade for the centerpiece.
-  // Gated by screen focus so the loops don't churn battery while off-screen.
+  // Decorative ring + breathing fade — gated on screen focus
   useFocusEffect(
     useCallback(() => {
       const spinLoop = Animated.loop(
         Animated.timing(spin, {
           toValue: 1,
           duration: 26000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      );
-      // Sideways "globe" spin for the centerpiece — rotates on its vertical
-      // axis (rotateY) rather than flat round-and-round (rotateZ).
-      const globeLoop = Animated.loop(
-        Animated.timing(globeSpin, {
-          toValue: 1,
-          duration: 9000,
           easing: Easing.linear,
           useNativeDriver: true,
         }),
@@ -102,17 +130,30 @@ export default function HomeScreen() {
         ]),
       );
       spinLoop.start();
-      globeLoop.start();
       fadeLoop.start();
       return () => {
         spinLoop.stop();
-        globeLoop.stop();
         fadeLoop.stop();
       };
-    }, [spin, globeSpin, fade]),
+    }, [spin, fade]),
   );
 
-  // Reveal/hide the orbiting menu when the central circle is long-pressed.
+  // Coin physics loop — runs on JS thread, drives Animated.Values via setValue
+  useEffect(() => {
+    const startMs = performance.now();
+    function frame(now: number) {
+      const { rotY, tiltX, scaleX } = coinPhysics(now - startMs);
+      coinRotY.setValue(rotY);
+      coinTiltX.setValue(tiltX);
+      coinScaleX.setValue(scaleX);
+      coinGlow.setValue(scaleX > 0.5 ? 0.65 : 0.2);
+      rafRef.current = requestAnimationFrame(frame);
+    }
+    rafRef.current = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  // Reveal/hide orbiting menu on tap
   useEffect(() => {
     Animated.timing(reveal, {
       toValue: menuOpen ? 1 : 0,
@@ -140,7 +181,6 @@ export default function HomeScreen() {
   }, []);
 
   // Panic-wipe gesture — silent: no haptics, no audio, no toast, no alert.
-  // The 3-second hold IS the confirmation.
   const handleWipePressIn = () => {
     if (isWiping) return;
     setWipeArmed(true);
@@ -222,10 +262,6 @@ export default function HomeScreen() {
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
-  const globeDeg = globeSpin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
   const circleOpacity = fade.interpolate({
     inputRange: [0, 1],
     outputRange: [0.82, 1],
@@ -242,6 +278,26 @@ export default function HomeScreen() {
     inputRange: [0, 1],
     outputRange: [1, 0],
   });
+
+  // Coin transform — driven by physics rAF loop via setValue
+  const coinTransform = [
+    { perspective: 800 },
+    {
+      rotateX: coinTiltX.interpolate({
+        inputRange: [0, 90],
+        outputRange: ["0deg", "90deg"],
+        extrapolate: "clamp",
+      }),
+    },
+    {
+      rotateY: coinRotY.interpolate({
+        inputRange: [0, 3600],
+        outputRange: ["0deg", "3600deg"],
+        extrapolate: "clamp",
+      }),
+    },
+    { scaleX: coinScaleX },
+  ];
 
   return (
     <TabScreenWrapper>
@@ -292,7 +348,7 @@ export default function HomeScreen() {
           <Text style={styles.aliasTagline}>SECURE IDENTITY</Text>
         </View>
 
-        {/* Radial dial: long-press the transparent circle to reveal the menu */}
+        {/* Radial dial: tap the coin to reveal/hide the menu */}
         <View style={styles.orbitWrap}>
           <View style={styles.orbit}>
             {/* Decorative tick ring — fades in with the menu */}
@@ -319,41 +375,43 @@ export default function HomeScreen() {
               ))}
             </Animated.View>
 
-            {/* Rotating compass emblem — long-press to reveal/hide menu */}
+            {/* Coin centerpiece — tap to reveal/hide menu */}
             <View pointerEvents="box-none" style={styles.centerWrap}>
               <View style={styles.centerCol}>
                 <Pressable
-                  onLongPress={toggleMenu}
-                  delayLongPress={350}
+                  onPress={toggleMenu}
                   hitSlop={24}
                   style={styles.centerHit}
                   accessibilityRole="button"
-                  accessibilityLabel={
-                    menuOpen ? "Hide menu" : "Long press to reveal menu"
-                  }
+                  accessibilityLabel={menuOpen ? "Hide menu" : "Tap to reveal menu"}
                 >
+                  {/* Outer ambient glow */}
                   <View pointerEvents="none" style={styles.globeGlow} />
-                  <View pointerEvents="none" style={styles.globeGlowInner} />
-                  <Animated.Image
-                    source={require("../../assets/images/login-compass.png")}
-                    resizeMode="contain"
+
+                  {/* Physics-driven spinning coin with metallic rim */}
+                  <Animated.View
+                    pointerEvents="none"
                     style={[
-                      styles.centerEmblem,
+                      styles.coinRim,
                       {
                         opacity: circleOpacity,
-                        transform: [
-                          { perspective: 800 },
-                          { rotateY: globeDeg },
-                        ],
+                        transform: coinTransform,
                       },
                     ]}
-                  />
+                  >
+                    <Image
+                      source={require("../../assets/images/ghostface-logo.jpeg")}
+                      resizeMode="cover"
+                      style={styles.coinImage}
+                    />
+                  </Animated.View>
                 </Pressable>
+
                 <Animated.Text
                   pointerEvents="none"
                   style={[styles.centerHint, { opacity: hintOpacity }]}
                 >
-                  HOLD TO REVEAL
+                  TAP TO REVEAL
                 </Animated.Text>
               </View>
             </View>
@@ -493,7 +551,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(191,155,48,0.4)",
   },
 
-  // Central rotating compass emblem
+  // Central coin
   centerWrap: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -504,39 +562,45 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   centerHit: {
-    width: 184,
-    height: 184,
+    width: 196,
+    height: 196,
     alignItems: "center",
     justifyContent: "center",
   },
-  centerEmblem: {
-    width: 184,
-    height: 184,
-  },
   globeGlow: {
     position: "absolute",
-    width: 250,
-    height: 250,
-    top: (184 - 250) / 2,
-    left: (184 - 250) / 2,
-    borderRadius: 125,
-    backgroundColor: "rgba(191,155,48,0.07)",
-    boxShadow: boxShadow(GOLD, 0.6, 55),
+    width: 260,
+    height: 260,
+    top: (196 - 260) / 2,
+    left: (196 - 260) / 2,
+    borderRadius: 130,
+    backgroundColor: "rgba(191,155,48,0.06)",
+    boxShadow: boxShadow(GOLD, 0.55, 50),
   },
-  globeGlowInner: {
-    position: "absolute",
-    width: 196,
-    height: 196,
-    top: (184 - 196) / 2,
-    left: (184 - 196) / 2,
-    borderRadius: 98,
-    backgroundColor: "rgba(245,200,80,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(191,155,48,0.22)",
+  // Metallic coin rim — conic-gradient-style gold ring
+  coinRim: {
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    padding: 5,
+    borderWidth: 4,
+    borderColor: "rgba(191,155,48,0.0)", // transparent — visual ring comes from backgroundColor
+    backgroundColor: "#c9971c",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: [
+      boxShadow(GOLD, 0.7, 18),
+      "inset 0 2px 6px rgba(255,235,120,0.5)",
+    ].join(", "),
+    overflow: "hidden",
+  },
+  coinImage: {
+    width: 176,
+    height: 176,
+    borderRadius: 88,
   },
   centerHint: {
-    position: "absolute",
-    bottom: -26,
+    marginTop: 16,
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 4,
