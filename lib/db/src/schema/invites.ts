@@ -12,12 +12,18 @@ import { pgTable, serial, text, timestamp, boolean } from "drizzle-orm/pg-core";
  * Expired or redeemed codes return 404/410.
  */
 export const invitesTable = pgTable("invites", {
-  id:         serial("id").primaryKey(),
-  code:       text("code").notNull().unique(),
-  ownerAlias: text("owner_alias").notNull(),
-  expiresAt:  timestamp("expires_at").notNull(),
-  redeemed:   boolean("redeemed").notNull().default(false),
-  createdAt:  timestamp("created_at").defaultNow().notNull(),
+  id:               serial("id").primaryKey(),
+  code:             text("code").notNull().unique(),
+  ownerAlias:       text("owner_alias").notNull(),
+  expiresAt:        timestamp("expires_at").notNull(),
+  redeemed:         boolean("redeemed").notNull().default(false),
+  createdAt:        timestamp("created_at").defaultNow().notNull(),
+  /**
+   * Set once the owner has been notified of this code expiring unredeemed.
+   * NULL = notification still pending (user was offline when it expired).
+   * Non-null = notification delivered; never re-send.
+   */
+  ownerNotifiedAt:  timestamp("owner_notified_at"),
 });
 
 export type Invite = typeof invitesTable.$inferSelect;

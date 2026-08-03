@@ -6,8 +6,9 @@ import {
   identityKeysTable,
   deviceTokensTable,
   departuresTable,
+  invitesTable,
 } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull, lte } from "drizzle-orm";
 import { createHash } from "crypto";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
@@ -40,7 +41,8 @@ export interface WireMessage {
     | "call-answer"
     | "call-ice"
     | "sms_inbound"
-    | "departed";
+    | "departed"
+    | "invite-expired";
   token?: string;
   alias?: string;
   to?: string;
@@ -55,6 +57,8 @@ export interface WireMessage {
   // Task #113: client-generated id echoed back as `departed_ack.requestId`
   // so the panic-wipe flow can race the ack against a timeout.
   requestId?: string;
+  /** Invite code carried by `invite-expired` events. */
+  code?: string;
 }
 
 // Extend WebSocket with an aliveness flag used by the protocol-level heartbeat.
@@ -175,6 +179,46 @@ async function deliverPendingDepartures(alias: string, ws: WebSocket): Promise<v
   }
 }
 
+/**
+ * Push any expired-but-unredeemed invite notices addressed to this alias.
+ * Each matching row is sent as `{ type:"invite-expired", code }`, then
+ * ownerNotifiedAt is stamped so the notice is never replayed.
+ * Called on every successful WS auth, mirroring deliverPendingDepartures.
+ */
+async function deliverPendingInviteExpiries(alias: string, ws: WebSocket): Promise<void> {
+  try {
+    const pending = await db
+      .select()
+      .from(invitesTable)
+      .where(
+        and(
+          eq(invitesTable.ownerAlias, normalizeAlias(alias)),
+          eq(invitesTable.redeemed, false),
+          lte(invitesTable.expiresAt, new Date()),
+          isNull(invitesTable.ownerNotifiedAt),
+        ),
+      );
+
+    for (const row of pending) {
+      ws.send(JSON.stringify({ type: "invite-expired", code: row.code }));
+    }
+
+    if (pending.length > 0) {
+      await Promise.all(
+        pending.map((row) =>
+          db
+            .update(invitesTable)
+            .set({ ownerNotifiedAt: new Date() })
+            .where(eq(invitesTable.id, row.id)),
+        ),
+      );
+      logger.info({ alias, count: pending.length }, "Delivered pending invite-expiry notices");
+    }
+  } catch (err) {
+    logger.error({ err, alias }, "Failed to deliver pending invite-expiry notices");
+  }
+}
+
 export function createWsServer(wss: WebSocketServer): void {
   // ── Protocol-level heartbeat ─────────────────────────────────────────────
   // Every 30 s the server sends a native WebSocket ping frame to every client.
@@ -254,6 +298,7 @@ export function createWsServer(wss: WebSocketServer): void {
 
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
+        await deliverPendingInviteExpiries(authedAlias, ws);
         return;
       }
 

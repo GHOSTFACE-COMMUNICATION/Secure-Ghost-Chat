@@ -2610,6 +2610,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // ── Invite expired without being redeemed ─────────────────────────────────
+    // Server delivers this once, after the TTL elapses on an unredeemed code.
+    // Show a one-shot alert; the server's ownerNotifiedAt stamp ensures it is
+    // never replayed — no extra client-side deduplication is needed.
+    if (wsMsg.type === "invite-expired" && typeof (wsMsg as { code?: unknown }).code === "string") {
+      const expiredCode = (wsMsg as { code: string }).code;
+      Alert.alert(
+        "Invite Expired",
+        `Your invite ${expiredCode} expired without being redeemed.`,
+        [{ text: "OK" }],
+      );
+      return;
+    }
+
     // ── Call signals ─────────────────────────────────────────────────────────
     if (wsMsg.type && CALL_SIGNAL_TYPES.has(wsMsg.type) && wsMsg.from) {
       if (wsMsg.type === "call-ring") {
