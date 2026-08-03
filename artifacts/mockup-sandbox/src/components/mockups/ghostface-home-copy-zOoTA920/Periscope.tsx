@@ -166,13 +166,6 @@ export function Periscope() {
                   }}
                 />
 
-                <div className="text-center mt-4 z-20">
-                    <div className="text-[9px] tracking-[0.4em] opacity-60 mb-1 text-[#bf9b30]">PROTECTION</div>
-                    <div className="font-['Playfair_Display'] italic text-[24px] leading-none pulse-glow tracking-widest text-[#bf9b30]">
-                        ACTIVE
-                    </div>
-                </div>
-
                 <div className="absolute bottom-[26%] text-[8px] tracking-widest opacity-30 font-mono">
                   {hex}
                 </div>
