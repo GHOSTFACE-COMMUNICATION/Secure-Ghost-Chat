@@ -48,6 +48,23 @@ export function Periscope() {
           0%, 100% { text-shadow: 0 0 20px rgba(191,155,48,0.7); opacity: 1; }
           50% { text-shadow: 0 0 5px rgba(191,155,48,0.2); opacity: 0.7; }
         }
+        .coin-spin {
+          animation: coin-flip 3.6s ease-in-out infinite;
+          transform-style: preserve-3d;
+        }
+        @keyframes coin-flip {
+          0%   { transform: rotateY(0deg)    scale(1);    filter: drop-shadow(0 0 12px rgba(191,155,48,0.6)); }
+          20%  { transform: rotateY(90deg)   scale(0.82); filter: drop-shadow(0 0 4px  rgba(191,155,48,0.2)); }
+          40%  { transform: rotateY(180deg)  scale(1);    filter: drop-shadow(0 0 18px rgba(191,155,48,0.8)); }
+          60%  { transform: rotateY(270deg)  scale(0.82); filter: drop-shadow(0 0 4px  rgba(191,155,48,0.2)); }
+          80%  { transform: rotateY(360deg)  scale(1);    filter: drop-shadow(0 0 12px rgba(191,155,48,0.6)); }
+          100% { transform: rotateY(360deg)  scale(1);    filter: drop-shadow(0 0 12px rgba(191,155,48,0.6)); }
+        }
+        .coin-glow { animation: coin-glow 3.6s ease-in-out infinite; }
+        @keyframes coin-glow {
+          0%, 80%, 100% { opacity: 0.25; transform: scale(1); }
+          40% { opacity: 0.55; transform: scale(1.15); }
+        }
       `}} />
 
       {/* Noise Texture */}
@@ -128,23 +145,35 @@ export function Periscope() {
                 </text>
             </svg>
 
-            {/* Center Lock & Status */}
+            {/* Center — spinning coin logo */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-30">
-                {/* Physical-looking inner bezel */}
-                <div className="w-[150px] h-[150px] rounded-full border border-[#bf9b30]/20 absolute flex items-center justify-center bg-[#020202] shadow-[inset_0_4px_20px_rgba(0,0,0,0.8),0_0_15px_rgba(191,155,48,0.05)]">
-                  <div className="w-[134px] h-[134px] rounded-full border border-[#bf9b30]/10" />
-                </div>
-                
-                <Lock size={22} strokeWidth={1.5} className="mb-4 text-[#bf9b30] opacity-90" />
-                
-                <div className="text-center z-20">
-                    <div className="text-[9px] tracking-[0.4em] opacity-60 mb-2 text-[#bf9b30]">PROTECTION</div>
-                    <div className="font-['Playfair_Display'] italic text-[28px] leading-none pulse-glow tracking-widest text-[#bf9b30]">
+                {/* Ambient glow pulse behind coin */}
+                <div className="w-[148px] h-[148px] rounded-full absolute coin-glow"
+                  style={{ background: 'radial-gradient(circle, rgba(191,155,48,0.18) 0%, transparent 70%)' }} />
+
+                {/* Coin */}
+                <img
+                  src="/__mockup/images/ghostface-logo.jpeg"
+                  alt="GHOSTFACE"
+                  className="coin-spin"
+                  style={{
+                    width: 140, height: 140,
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    objectPosition: 'center 15%',
+                    border: '1.5px solid rgba(191,155,48,0.35)',
+                    background: '#020202',
+                  }}
+                />
+
+                <div className="text-center mt-4 z-20">
+                    <div className="text-[9px] tracking-[0.4em] opacity-60 mb-1 text-[#bf9b30]">PROTECTION</div>
+                    <div className="font-['Playfair_Display'] italic text-[24px] leading-none pulse-glow tracking-widest text-[#bf9b30]">
                         ACTIVE
                     </div>
                 </div>
 
-                <div className="absolute bottom-[28%] text-[8px] tracking-widest opacity-30 font-mono">
+                <div className="absolute bottom-[26%] text-[8px] tracking-widest opacity-30 font-mono">
                   {hex}
                 </div>
             </div>
