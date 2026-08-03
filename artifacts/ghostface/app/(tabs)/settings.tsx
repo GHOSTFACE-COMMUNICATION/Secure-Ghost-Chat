@@ -931,7 +931,7 @@ export default function SettingsScreen() {
 
         <View style={styles.versionSection}>
           <GhostLogo size={50} color={colors.border} />
-          <Text style={styles.versionText}>GHOSTFACE v1.0.0</Text>
+          <Text style={styles.versionText}>GHOSTFACE v1.0.0 (4)</Text>
           <Text style={styles.versionText}>NO FACE. NO TRACE.</Text>
         </View>
 

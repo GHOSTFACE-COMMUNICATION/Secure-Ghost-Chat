@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ghostface.app",
-      "buildNumber": "1",
+      "buildNumber": "4",
       "minimumOsVersion": "16.0",
       "infoPlist": {
         "NSFaceIDUsageDescription": "GHOSTFACE uses Face ID to protect your private messages and identity with biometric authentication.",
@@ -37,7 +37,7 @@
     },
     "android": {
       "package": "com.ghostface.app",
-      "versionCode": 1,
+      "versionCode": 4,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "minSdkVersion": 26,

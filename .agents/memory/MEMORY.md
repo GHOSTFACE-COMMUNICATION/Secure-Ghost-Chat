@@ -2,4 +2,5 @@
 - [GHOSTFACE payments](ghostface-payments.md) — crypto-only (USDC on Solana); Stripe was fully removed. Do not reintroduce a card/fiat path.
 - [GHOSTFACE real E2E encryption](ghostface-encryption.md) — real X3DH+Double Ratchet only, no sim/demo key path; public-only bundles, send hard-fails when not a real session; no JS test runner (use scripts/check-*.mjs).
 - [Sealed-sender binding](sealed-sender-binding.md) — when the sender alias rides inside the encrypted payload, the X3DH bootstrap path must bind it to the alias's registered identity key (ikA) or any peer can impersonate any alias.
+- [Stale db declarations](db-declarations-stale.md) — if api-server typecheck says a schema column doesn't exist but it's in lib/db/src, rebuild with `tsc -b lib/db --force`.
 - Shadows: use `boxShadow()` from `@/lib/shadow` (folds color+opacity→rgba, blur=old shadowRadius). Do NOT reintroduce deprecated RN `shadow*` props — they log warnings.

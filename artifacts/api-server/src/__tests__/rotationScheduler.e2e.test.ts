@@ -4,9 +4,13 @@
  * Connects to the real Postgres database (DATABASE_URL) and exercises the
  * full rotation path:
  *   1. Insert a ghost_numbers row with nextRotationAt in the past.
- *   2. Call tick() via __testing.
+ *   2. Call rotateOne() via __testing on the specific test row.
  *   3. Assert the row's msisdn changed while its id stayed the same and the
  *      old msisdn was appended to archived_msisdns.
+ *
+ * NOTE: We intentionally call rotateOne() on the single test row rather than
+ * tick(), which would process every due row in the shared database and could
+ * silently corrupt other users' ghost numbers when run against a dev DB.
  *
  * Skipped automatically when DATABASE_URL is absent.
  */
@@ -84,9 +88,14 @@ describe.skipIf(SKIP)("rotationScheduler — E2E (real DB)", () => {
 
   it("rotates the number: same id, new msisdn, old msisdn archived", async () => {
     // Import after env is confirmed present so pool connects correctly.
-    const { __testing } = await import("../lib/rotationScheduler.js");
+    // Use performRotation directly on the known test row — avoids tick(), which
+    // would scan and mutate every due row in the shared DB (a foot-gun on dev).
+    const { performRotation } = await import("../lib/rotationScheduler.js");
 
-    await __testing.tick();
+    await performRotation(
+      { id: rowId, country: "NZ", msisdn: OLD_MSISDN, rotateEveryDays: 7 },
+      { resetCountdown: true },
+    );
 
     const res = await client.query<{
       id: number;
