@@ -30,5 +30,10 @@ GHOSTFACE uses HYBRID PQ: ML-KEM-768 mixed with X25519 in BOTH the X3DH handshak
 
 **Why:** hybrid was added so a future quantum adversary can't break sessions, without ever weakening the classical guarantee. The subtle failure mode is silent de-sync from asymmetric KEM folding or a half-provisioned PQ key.
 
+# Ratchet hardening invariants (Aug 2026 audit)
+- AEAD associated data uses a CANONICAL fixed-field-order header serializer (`headerAd`), not `JSON.stringify(header)` — keep both encrypt/decrypt on it; the field order (dh,n,pn,pqPub,pqCt) is wire-compatible and must not change.
+- Skipped-key cache: delete only AFTER successful decrypt (else one tampered packet destroys the key), and total map is capped (oldest-evicted) beyond the per-chain MAX_SKIP.
+- A bundle with exactly ONE of spkSignature/ikSignPublicKey is rejected as a downgrade attempt; both-absent still warns (legacy). Full audit: `artifacts/ghostface/docs/ENCRYPTION_AUDIT.md`.
+
 # Test infra note (no JS test runner)
 The repo has NO vitest/jest/tsx/esbuild, and `artifacts/ghostface/tsconfig.json` EXCLUDES `**/*.test.ts` (so a `.test.ts` is neither typechecked nor run). The convention for runnable checks is `scripts/check-*.{js,mjs}` exposed as a `check:*` package script. The two-party handshake test lives at `artifacts/ghostface/scripts/check-x3dh-handshake.mjs` (`pnpm --filter @workspace/ghostface run check:handshake`); it transpiles `lib/doubleRatchet.ts` at runtime via the `typescript` API and asserts no private-key sharing.
