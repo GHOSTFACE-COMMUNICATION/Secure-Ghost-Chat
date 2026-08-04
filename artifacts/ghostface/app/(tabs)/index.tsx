@@ -47,6 +47,11 @@ const CYCLE = 5200; // ms per full spin-slow-fall cycle
 // ~2 s (half-life ≈ 0.4 s).
 const TAP_KICK_DEG_S = 900; // deg/s added per tap
 const MAX_BOOST_DEG_S = 4000; // cap on stacked boost velocity
+// Motion blur ramps in between these boost velocities (deg/s). Below the
+// start the face stays crisp; at the end the pre-blurred face fully covers
+// the crisp one so top-speed spins read as a whirl, not a strobing logo.
+const BLUR_START_DEG_S = 1400;
+const BLUR_FULL_DEG_S = 3200;
 const FAST_END = 0.3;
 const SLOW_END = 0.68;
 const FALL_END = 0.88;
@@ -103,6 +108,8 @@ export default function HomeScreen() {
   const coinGlow = useRef(new Animated.Value(0.6)).current;
   // 0..1 — how edge-on the coin is; drives the fake "thickness" rim band
   const coinEdge = useRef(new Animated.Value(0)).current;
+  // 0..1 — motion-blur mix; crossfades a pre-blurred face over the crisp one
+  const coinBlur = useRef(new Animated.Value(0)).current;
   // Tap-to-spin impulse (deg/s), decays exponentially each frame
   const boostVel = useRef(0);
   const boostDeg = useRef(0);
@@ -180,6 +187,17 @@ export default function HomeScreen() {
       const edgeOn = Math.pow(Math.abs(Math.sin((totalRotY * Math.PI) / 180)), 3);
       const flatFade = Math.max(0, Math.min(1, (scaleX - 0.3) / 0.7));
       coinEdge.setValue(edgeOn * flatFade);
+      // Motion blur: ramp with boost velocity, smoothstep-shaped so it eases
+      // in near top speed and fades out smoothly as the boost decays.
+      const blurT = Math.max(
+        0,
+        Math.min(
+          1,
+          (boostVel.current - BLUR_START_DEG_S) /
+            (BLUR_FULL_DEG_S - BLUR_START_DEG_S),
+        ),
+      );
+      coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
       rafRef.current = requestAnimationFrame(frame);
     }
     rafRef.current = requestAnimationFrame(frame);
@@ -463,6 +481,26 @@ export default function HomeScreen() {
                       resizeMode="cover"
                       style={styles.coinImage}
                     />
+                    {/* Motion blur: pre-blurred face crossfades in with boost
+                        velocity so top-speed spins read as a whirl */}
+                    <Animated.Image
+                      source={require("../../assets/images/ghostface-logo.jpeg")}
+                      resizeMode="cover"
+                      blurRadius={18}
+                      style={[styles.coinBlurImage, { opacity: coinBlur }]}
+                    />
+                    {/* Faint horizontal streaks sell the spin direction */}
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.coinBlurStreaks,
+                        { opacity: Animated.multiply(coinBlur, 0.55) },
+                      ]}
+                    >
+                      <View style={[styles.coinStreak, { top: "28%" }]} />
+                      <View style={[styles.coinStreak, { top: "50%" }]} />
+                      <View style={[styles.coinStreak, { top: "72%" }]} />
+                    </Animated.View>
                   </Animated.View>
                 </Pressable>
 
@@ -680,6 +718,27 @@ const styles = StyleSheet.create({
     width: 176,
     height: 176,
     borderRadius: 88,
+  },
+  coinBlurImage: {
+    position: "absolute",
+    width: 176,
+    height: 176,
+    borderRadius: 88,
+  },
+  coinBlurStreaks: {
+    position: "absolute",
+    width: 176,
+    height: 176,
+    borderRadius: 88,
+    overflow: "hidden",
+  },
+  coinStreak: {
+    position: "absolute",
+    left: "6%",
+    right: "6%",
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "rgba(255,230,150,0.35)",
   },
   centerHint: {
     marginTop: 16,
