@@ -44,6 +44,11 @@ const ACTION_TTL_MS = 60_000;
 let mod: CallKitModule | null = null;
 let initialized = false;
 let pendingAction: NativeCallAction | null = null;
+// Task #160: handler invoked when the user ends an *active* (post-answer)
+// call from the native CallKit / Core-Telecom UI, keyed to a serverCallId.
+// The in-app call screen registers it so a system-UI hangup also notifies
+// the remote peer over WS and tears down WebRTC.
+let activeCallEndedHandler: { serverCallId: string; onEnded: () => void } | null = null;
 // OS session id by serverCallId, so the app can clear the native call UI
 // when the in-app call ends.
 const sessionIdsByServerCallId = new Map<string, string>();
@@ -123,12 +128,27 @@ export function initNativeCallUi(
       if (!serverCallId) return;
       sessionIdsByServerCallId.delete(serverCallId);
       // Only a ring-stage end is a decline; an end after "connected" is the
-      // in-app call tearing down (already handled by app/call.tsx).
+      // user hanging up an active call from the system UI (task #160) — or
+      // the in-app call tearing down (endNativeCall removes the session id
+      // first, so that case never reaches this listener with a mapping).
       if (session.status === "ringing" || session.status === "connecting") {
         if (pendingAction?.serverCallId === serverCallId && pendingAction.action === "answered") {
           return; // answered then immediately connected+ended bookkeeping — keep the answer
         }
         pendingAction = { serverCallId, action: "declined", at: Date.now() };
+        return;
+      }
+      // Post-answer end from the CallKit / Core-Telecom UI: notify the
+      // in-app call screen so it sends call-hangup to the peer and tears
+      // down WebRTC instead of leaving the remote side orphaned.
+      if (activeCallEndedHandler?.serverCallId === serverCallId) {
+        const handler = activeCallEndedHandler.onEnded;
+        activeCallEndedHandler = null;
+        try {
+          handler();
+        } catch (e) {
+          console.warn("[NativeCallUi] active-call ended handler failed:", e);
+        }
       }
     });
 
@@ -163,11 +183,34 @@ export function takeNativeCallAction(serverCallId: string): "answered" | "declin
 }
 
 /**
+ * Registers the handler invoked when the user ends the *active* call for
+ * `serverCallId` from the native system UI (task #160). Returns an
+ * unsubscribe function. Only one handler is kept — the in-app call screen
+ * owns at most one call at a time.
+ */
+export function setActiveCallEndedHandler(
+  serverCallId: string,
+  onEnded: () => void,
+): () => void {
+  activeCallEndedHandler = { serverCallId, onEnded };
+  return () => {
+    if (activeCallEndedHandler?.serverCallId === serverCallId) {
+      activeCallEndedHandler = null;
+    }
+  };
+}
+
+/**
  * Clears the native call UI for `serverCallId` when the in-app call ends
  * (hangup, remote end, no-answer). Best-effort; no-op when there is no
  * matching native session.
  */
 export function endNativeCall(serverCallId: string): void {
+  // The app is ending the call itself — drop the system-UI hangup handler so
+  // the native "ended" event this triggers doesn't send a duplicate hangup.
+  if (activeCallEndedHandler?.serverCallId === serverCallId) {
+    activeCallEndedHandler = null;
+  }
   const m = loadModule();
   if (!m) return;
   const sessionId = sessionIdsByServerCallId.get(serverCallId);

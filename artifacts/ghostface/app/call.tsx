@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { endNativeCall } from "@/lib/nativeCallUi";
+import { endNativeCall, setActiveCallEndedHandler } from "@/lib/nativeCallUi";
 
 // ── Native WebRTC (@livekit/react-native-webrtc) — native platforms only ────
 // On web we use the browser's built-in WebRTC APIs instead. The @livekit fork
@@ -341,6 +341,20 @@ export default function CallScreen() {
 
     return () => registerCallListener(null);
   }, [alias, effectiveCallId, isCaller, makePC, getMedia, sendCallSignal, handleEndInternal, registerCallListener]);
+
+  // ── Native system-UI hangup (task #160) ──────────────────────────────────
+  // When the user ends an *active* call from the CallKit / Core-Telecom call
+  // screen (lock screen included), send call-hangup to the peer and tear down
+  // WebRTC — otherwise the remote side keeps an orphaned call open until its
+  // timeout. No-op on web / Expo Go (handler is simply never invoked).
+  useEffect(() => {
+    const unsubscribe = setActiveCallEndedHandler(effectiveCallId, () => {
+      if (!mountedRef.current) return;
+      sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
+      handleEndInternal();
+    });
+    return unsubscribe;
+  }, [alias, effectiveCallId, sendCallSignal, handleEndInternal]);
 
   // ── UI handlers ───────────────────────────────────────────────────────────
   const handleEnd = () => {
