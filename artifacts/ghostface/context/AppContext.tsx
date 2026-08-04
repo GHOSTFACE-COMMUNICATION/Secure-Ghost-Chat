@@ -1,6 +1,5 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
-import { registerForCallPush, registerVoipToken, unregisterCallPush } from "@/lib/callPush";
-import { initNativeCallUi, takeNativeCallAction } from "@/lib/nativeCallUi";
+import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import {
   classifyLinkQuality,
   isLowBandwidthActive,
@@ -27,9 +26,7 @@ import {
   sanitizeFallbackMessage,
 } from "@/lib/smsFallback";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import * as SecureStore from "expo-secure-store";
-import { router } from "expo-router";
 import { Alert, AppState as RNAppState, Platform } from "react-native";
 import React, {
   createContext,
@@ -39,7 +36,7 @@ import React, {
   useState,
 } from "react";
 import {
-  generateSafetyNumberFromKeys,
+  generateSafetyNumber,
 } from "@/lib/crypto";
 import {
   initSessionAliceWithHeader,
@@ -57,6 +54,7 @@ import {
 } from "@/lib/doubleRatchet";
 import { x25519, ed25519 } from "@noble/curves/ed25519.js";
 import { randomBytes } from "@noble/hashes/utils.js";
+import Purchases, { LOG_LEVEL } from "react-native-purchases";
 
 const toHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join("");
 
@@ -440,6 +438,12 @@ export interface Conversation {
   timestamp: number;
   unread: number;
   messages: Message[];
+  /**
+   * This device's own default disappear-timer for messages it SENDS in this
+   * conversation — travels to the peer inside each envelope as `ttlMs`, not
+   * as a standing setting. Purely local and one-directional: it has no
+   * effect on incoming messages, whose TTL comes from their own envelope.
+   */
   disappearAfterSec?: number;
   /**
    * Local chat wallpaper choice, from CHAT_COLOR_PALETTE (lib/chatColors.ts).
@@ -483,13 +487,26 @@ export interface Transaction {
   timestamp: number;
 }
 
+// Mirrors the shape of GET /api/tokens on the api-server — the mint address
+// and network are only present once a token has actually been deployed
+// on-chain (see routes/tokens.ts). Fetched live rather than hardcoded so
+// the wallet screen tracks whatever's actually deployed without a client
+// release every time a mint address changes.
+export interface AppToken {
+  id: number;
+  name: string;
+  symbol: string;
+  decimals: number;
+  mintAddress: string | null;
+  network: string | null;
+}
+
 export interface VPNServer {
   id: string;
   name: string;
   country: string;
   region: string;
   shortRegion: string;
-  latency: number;
   flag: string;
 }
 
@@ -505,6 +522,18 @@ export interface GhostpadSignal {
   type: "ghostpad-created" | "ghostpad-paired" | "ghostpad-text" | "ghostpad-wipe" | "ghostpad-ended" | "ghostpad-error";
   code?: string;
   text?: string;
+}
+
+/**
+ * Session identity only — code + pairing mode. Deliberately excludes the
+ * live pad text (that stays per-screen and ephemeral, matching the "nothing
+ * lingers" design). Lives in AppState rather than a screen-local useState so
+ * a lock/unmount (share sheet, navigation away and back) doesn't strand the
+ * user with a fresh idle screen after they've already shared the code.
+ */
+export interface GhostpadSession {
+  mode: "idle" | "creating" | "joining" | "paired";
+  code: string | null;
 }
 
 export interface IncomingCall {
@@ -529,6 +558,7 @@ interface AppState {
   conversations: Conversation[];
   fdBalance: number;
   casperBalance: number;
+  appTokens: AppToken[];
   walletAddress: string;
   transactions: Transaction[];
   dataUsed: number;
@@ -539,6 +569,7 @@ interface AppState {
   duressGracePeriod: number;
   language: string;
   incomingCall: IncomingCall | null;
+  ghostpad: GhostpadSession;
   // Satellite low-bandwidth mode (Task #111). `linkQuality` is the
   // heuristically classified link state, `lowBandwidthMode` is the user
   // override (auto/forceOn/forceOff), and `lowBandwidthActive` is the
@@ -546,12 +577,6 @@ interface AppState {
   linkQuality: LinkQuality;
   lowBandwidthMode: LowBandwidthMode;
   lowBandwidthActive: boolean;
-  /**
-   * Whether the home-screen coin's tap-spin haptic tick loop is enabled
-   * (Task #192). Defaults to true; when false the coin rAF loop skips the
-   * haptic block entirely. Other haptics are unaffected.
-   */
-  spinHapticsEnabled: boolean;
   /**
    * Trusted E.164 phone numbers that receive a one-line distress SMS when
    * panicWipe/duress fires AND the WS broadcast can't be confirmed (Task
@@ -604,11 +629,11 @@ interface AppContextType extends AppState {
   panicWipe: () => Promise<void>;
   connectWallet: (address: string) => Promise<{ error?: string }>;
   disconnectWallet: () => Promise<void>;
+  refreshAppTokenBalances: () => Promise<void>;
   setAutoLockTimeout: (ms: number | null) => Promise<void>;
   setDuressGracePeriod: (seconds: number) => Promise<void>;
   setLanguage: (code: string) => Promise<void>;
   setLowBandwidthMode: (mode: LowBandwidthMode) => Promise<void>;
-  setSpinHapticsEnabled: (enabled: boolean) => Promise<void>;
   setSmsFallbackNumbers: (numbers: string[]) => Promise<void>;
   setSmsFallbackMessage: (message: string) => Promise<void>;
   /** Re-fetch the on-chain-verified plan entitlement from the server. */
@@ -617,6 +642,8 @@ interface AppContextType extends AppState {
   registerCallListener: (fn: ((s: CallSignal) => void) | null) => void;
   sendGhostpadSignal: (msg: object) => void;
   registerGhostpadListener: (fn: ((s: GhostpadSignal) => void) | null) => void;
+  setGhostpadMode: (mode: GhostpadSession["mode"]) => void;
+  resetGhostpad: () => void;
   dismissIncomingCall: () => void;
   wsConnected: boolean;
   loaded: boolean;
@@ -668,12 +695,12 @@ const GHOSTPAD_SIGNAL_TYPES = new Set([
 const DEFAULT_TRANSACTIONS: Transaction[] = [];
 
 const VPN_SERVERS: VPNServer[] = [
-  { id: "1", name: "US East", country: "United States", region: "New York", shortRegion: "NYC", latency: 12, flag: "🇺🇸" },
-  { id: "2", name: "EU West", country: "Germany", region: "Frankfurt", shortRegion: "FRA", latency: 24, flag: "🇩🇪" },
-  { id: "3", name: "Asia Pacific", country: "Japan", region: "Tokyo", shortRegion: "TYO", latency: 68, flag: "🇯🇵" },
-  { id: "4", name: "Nordic", country: "Sweden", region: "Stockholm", shortRegion: "ARN", latency: 31, flag: "🇸🇪" },
-  { id: "5", name: "Offshore", country: "Iceland", region: "Reykjavik", shortRegion: "KEF", latency: 45, flag: "🇮🇸" },
-  { id: "6", name: "SE Asia", country: "Singapore", region: "Singapore", shortRegion: "SIN", latency: 92, flag: "🇸🇬" },
+  { id: "1", name: "US East", country: "United States", region: "New York", shortRegion: "NYC", flag: "🇺🇸" },
+  { id: "2", name: "EU West", country: "Germany", region: "Frankfurt", shortRegion: "FRA", flag: "🇩🇪" },
+  { id: "3", name: "Asia Pacific", country: "Japan", region: "Tokyo", shortRegion: "TYO", flag: "🇯🇵" },
+  { id: "4", name: "Nordic", country: "Sweden", region: "Stockholm", shortRegion: "ARN", flag: "🇸🇪" },
+  { id: "5", name: "Offshore", country: "Iceland", region: "Reykjavik", shortRegion: "KEF", flag: "🇮🇸" },
+  { id: "6", name: "SE Asia", country: "Singapore", region: "Singapore", shortRegion: "SIN", flag: "🇸🇬" },
 ];
 
 export { VPN_SERVERS };
@@ -692,9 +719,6 @@ const DURESS_GRACE_KEY = "ghostface_duress_grace_period";
 const LANGUAGE_KEY = "ghostface_language";
 const LAST_VPN_SERVER_KEY = "ghostface_last_vpn_server_id";
 const LOW_BW_MODE_KEY = "ghostface_low_bandwidth_mode";
-// Home-screen coin tap-spin haptic ticks (Task #192). "false" disables the
-// spin buzz loop; all other haptics (menu tap, nav) are unaffected.
-const SPIN_HAPTICS_KEY = "ghostface_spin_haptics_enabled";
 const SMS_FALLBACK_NUMBERS_KEY = "ghostface_sms_fallback_numbers";
 const SMS_FALLBACK_MESSAGE_KEY = "ghostface_sms_fallback_message";
 const MY_IK_PRIV_KEY = "ghostface_my_ik_priv";
@@ -719,7 +743,6 @@ const APP_STORAGE_KEYS = [
   LANGUAGE_KEY,
   LAST_VPN_SERVER_KEY,
   LOW_BW_MODE_KEY,
-  SPIN_HAPTICS_KEY,
 ] as const;
 
 export function getApiBase(): string {
@@ -1042,6 +1065,86 @@ async function fetchSolBalance(address: string): Promise<number> {
   }
 }
 
+function clusterRpcUrl(network: string | null): string {
+  return network === "devnet"
+    ? "https://api.devnet.solana.com"
+    : "https://api.mainnet-beta.solana.com";
+}
+
+/** Real on-chain SPL token balance for a given owner + mint, via raw
+ * JSON-RPC (no @solana/web3.js dependency needed client-side, matching
+ * fetchSolBalance's pattern). Returns 0 if the owner has no token account
+ * for this mint yet — that's a legitimate "never held any" state, not
+ * an error. */
+async function fetchSplTokenBalance(
+  ownerAddress: string,
+  mintAddress: string,
+  network: string | null,
+): Promise<number> {
+  try {
+    const resp = await fetch(clusterRpcUrl(network), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getTokenAccountsByOwner",
+        params: [ownerAddress, { mint: mintAddress }, { encoding: "jsonParsed" }],
+      }),
+    });
+    const json = await resp.json();
+    const accounts = json?.result?.value ?? [];
+    if (accounts.length === 0) return 0;
+    const amount =
+      accounts[0]?.account?.data?.parsed?.info?.tokenAmount?.uiAmount;
+    return typeof amount === "number" ? amount : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Fetches the live token list (name/symbol/mint) from the api-server, and
+ * — if a wallet is connected — the real balance of each deployed token for
+ * that wallet. Deliberately tolerant of a missing apiBase or a token with
+ * no mintAddress yet (still "pending"): those just show as 0 rather than
+ * failing the whole screen. */
+async function fetchAppTokensAndBalances(
+  ownerAddress: string | null,
+): Promise<{ tokens: AppToken[]; balances: number[] }> {
+  const apiBase = getApiBase();
+  if (!apiBase) return { tokens: [], balances: [] };
+  try {
+    const resp = await fetch(`${apiBase}/tokens`);
+    if (!resp.ok) return { tokens: [], balances: [] };
+    const json = await resp.json();
+    const raw = (json?.data ?? []) as Array<{
+      id: number;
+      name: string;
+      symbol: string;
+      decimals: number;
+      mintAddress: string | null;
+      network: string | null;
+    }>;
+    const tokens: AppToken[] = raw.map((t) => ({
+      id: t.id,
+      name: t.name,
+      symbol: t.symbol,
+      decimals: t.decimals,
+      mintAddress: t.mintAddress,
+      network: t.network,
+    }));
+    if (!ownerAddress) return { tokens, balances: tokens.map(() => 0) };
+    const balances = await Promise.all(
+      tokens.map((t) =>
+        t.mintAddress ? fetchSplTokenBalance(ownerAddress, t.mintAddress, t.network) : Promise.resolve(0),
+      ),
+    );
+    return { tokens, balances };
+  } catch {
+    return { tokens: [], balances: [] };
+  }
+}
+
 async function secureGet(key: string): Promise<string | null> {
   if (Platform.OS === "web") return AsyncStorage.getItem(key);
   return SecureStore.getItemAsync(key);
@@ -1060,7 +1163,11 @@ async function secureDelete(key: string): Promise<void> {
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false);// Safety net: never let the splash hang forever, even if init stalls.
+  useEffect(() => {
+    const t = setTimeout(() => setLoaded(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasPin, setHasPin] = useState(false);
   const [hasDuressPin, setHasDuressPin] = useState(false);
@@ -1083,8 +1190,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     conversations: createDefaultConversations(),
     fdBalance: 0,
     casperBalance: 0,
+    appTokens: [],
     walletAddress: "GhFc3...x9mKr4",
     incomingCall: null,
+    ghostpad: { mode: "idle", code: null },
     transactions: DEFAULT_TRANSACTIONS,
     dataUsed: 2.4,
     dataLimit: 10,
@@ -1100,7 +1209,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // automatically"). Hardcoding `false` here would mean cold start and
     // panic-wipe reset both show INACTIVE until the classifier fires.
     lowBandwidthActive: isLowBandwidthActive("unknown", "auto"),
-    spinHapticsEnabled: true,
     smsFallbackNumbers: [],
     smsFallbackMessage: DEFAULT_SMS_FALLBACK_MESSAGE,
   });
@@ -1108,7 +1216,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, biometric, onboarded, convData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, spinHapticsRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, biometric, onboarded, convData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
@@ -1124,7 +1232,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.getItem(LANGUAGE_KEY),
           AsyncStorage.getItem(OUTBOX_KEY),
           AsyncStorage.getItem(LOW_BW_MODE_KEY),
-          AsyncStorage.getItem(SPIN_HAPTICS_KEY),
           secureGet(SMS_FALLBACK_NUMBERS_KEY),
           secureGet(SMS_FALLBACK_MESSAGE_KEY),
         ]);
@@ -1164,6 +1271,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         conversations = conversations.map((c) =>
           isValidDRSession(c.drSession) ? c : { ...c, drSession: undefined }
         );
+
+        // Purge disappearing messages that expired while the app was closed,
+        // BEFORE `loaded` ever flips true (app/_layout.tsx gates all
+        // rendering on it) — an expired message must never flash on screen
+        // even for a frame on cold start. Only messages that already carry
+        // an `expiresAt` are touched: an unviewed receiver message has
+        // `ttlMs` but no `expiresAt` yet, so its timer hasn't started and
+        // it's correctly left alone here.
+        {
+          const now = Date.now();
+          let purged = false;
+          conversations = conversations.map((c) => {
+            const filtered = c.messages.filter((m) => !m.expiresAt || m.expiresAt > now);
+            if (filtered.length !== c.messages.length) {
+              purged = true;
+              return { ...c, messages: filtered };
+            }
+            return c;
+          });
+          if (purged) {
+            writeEncryptedString(CONVERSATIONS_KEY, JSON.stringify(conversations)).catch(
+              (e) => console.warn("[AppContext] Failed to persist hydrate-time expiry purge:", e)
+            );
+          }
+        }
 
         let autoLockTimeout: number | null = 5 * 60 * 1000;
         if (autoLockRaw === "null") {
@@ -1239,7 +1371,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           vpnConnected: false,
           lowBandwidthMode,
           lowBandwidthActive,
-          spinHapticsEnabled: spinHapticsRaw !== "false",
           smsFallbackNumbers,
           smsFallbackMessage,
         }));
@@ -1260,6 +1391,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setState((prev) => ({ ...prev, solBalance: bal }))
           );
         }
+
+        // Populate app token metadata (name/symbol/mint) regardless of
+        // whether a wallet is connected, so the wallet screen's tabs show
+        // real symbols instead of placeholders; balances only resolve if a
+        // wallet is connected (fetchAppTokensAndBalances handles both).
+        fetchAppTokensAndBalances(connectedWallet ?? null).then(({ tokens, balances }) => {
+          if (tokens.length === 0) return;
+          setState((prev) => ({
+            ...prev,
+            appTokens: tokens,
+            casperBalance: balances[0] ?? prev.casperBalance,
+            fdBalance: balances[1] ?? prev.fdBalance,
+          }));
+        });
 
         // Self-heal crypto state for returning users.
         // Three cases:
@@ -1579,16 +1724,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const setSpinHapticsEnabled = useCallback(async (enabled: boolean) => {
-    try {
-      await AsyncStorage.setItem(SPIN_HAPTICS_KEY, String(enabled));
-      setState((prev) => ({ ...prev, spinHapticsEnabled: enabled }));
-    } catch (err) {
-      console.error("[AppContext] Failed to save spin haptics setting:", err);
-      throw err;
-    }
-  }, []);
-
   const setBiometricEnabled = useCallback(async (enabled: boolean) => {
     try {
       await AsyncStorage.setItem("biometricEnabled", String(enabled));
@@ -1768,34 +1903,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void refreshEntitlement();
     }
   }, [state.alias, state.deviceToken, refreshEntitlement]);
-
-  // Task #150/#152: register this device for call wake-ups. In dev/production
-  // builds the native module (expo-callkit-telecom) provides the true
-  // full-screen ring — PushKit VoIP + CallKit on iOS, Core-Telecom on
-  // Android — and registers its transport token instead. Elsewhere (web,
-  // Expo Go, module-less builds) we fall back to the Expo alert push.
-  // Best-effort; no-ops when notification permission is denied.
-  useEffect(() => {
-    if (state.alias && state.deviceToken) {
-      const apiBase = getApiBase();
-      if (!apiBase) return;
-      const alias = state.alias;
-      const deviceToken = state.deviceToken;
-      const nativeActive = initNativeCallUi((token, type) => {
-        void registerVoipToken(
-          apiBase,
-          token,
-          Platform.OS === "ios" ? "ios" : "android",
-          alias,
-          deviceToken,
-          type === "APNS_VOIP" ? "apns-voip" : "fcm",
-        );
-      });
-      // Only register the alert-push fallback when the native ring isn't
-      // available — a device holding both would ring twice per call.
-      if (!nativeActive) void registerForCallPush(apiBase, alias, deviceToken);
-    }
-  }, [state.alias, state.deviceToken]);
 
   const setDuressGracePeriod = useCallback(async (seconds: number) => {
     const VALID_GRACE = [1, 2, 3, 5];
@@ -2036,9 +2143,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return recordSendFailure("Message could not be encrypted. Please try again.");
       }
 
-      const expiresAt = conv.disappearAfterSec
-        ? Date.now() + conv.disappearAfterSec * 1000
-        : undefined;
+      // Sender's own copy starts its timer at send time, same as before —
+      // only the receiver's copy waits for a view event (see markMessagesViewed).
+      const expiresAt = outgoingTtlMs ? Date.now() + outgoingTtlMs : undefined;
 
       const newMsg: Message = {
         id: newMsgId,
@@ -2049,6 +2156,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sealed: true,
         ciphertext: aliceMsg.ciphertext,
         fingerprint: `DR:${aliceMsg.ciphertext.slice(0, 8).toUpperCase()}`,
+        ttlMs: outgoingTtlMs,
         expiresAt,
         attachment,
       };
@@ -2316,7 +2424,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       let drSession: DRSession;
       let usedOPK = false;
       let pendingX3DHHeader: string;
-      let myIkPubForSafety: string; // hoisted out of the try for the safety number below
 
       try {
         const [myIKPriv, myIKPub, mySpkPriv, mySpkPub] = await Promise.all([
@@ -2366,7 +2473,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return { ok: false, error: "no_own_keys" };
         }
 
-        myIkPubForSafety = ikPubFinal;
         const { session, x3dhHeader } = initSessionAliceWithHeader(bundle, ikPrivFinal, ikPubFinal);
         drSession = session;
         usedOPK = !!bundle.opkPublicKey;
@@ -2378,9 +2484,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setState((prev) => {
         const id = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
-        // Key-derived (Signal-style): bound to both parties' actual identity
-        // keys, so a MITM swapping keys produces a visibly different number.
-        const safetyNumber = generateSafetyNumberFromKeys(myIkPubForSafety, bundle.ikPublicKey);
+        const safetyNumber = generateSafetyNumber(prev.alias ?? "GHOST_USER", aliasUpper);
         const newConv: Conversation = {
           id,
           alias: aliasUpper,
@@ -2423,6 +2527,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [persistConversations]
   );
 
+  const refreshAppTokenBalances = useCallback(async () => {
+    const owner = latestStateRef.current.connectedWalletAddress;
+    const { tokens, balances } = await fetchAppTokensAndBalances(owner);
+    if (tokens.length === 0) return;
+    setState((prev) => ({
+      ...prev,
+      appTokens: tokens,
+      // Ordered by id ascending server-side (routes/tokens.ts) — id 1 is
+      // CASPER, id 2 is the second app token (Fantasma). Falls back to the
+      // previous value rather than 0 if the list ever comes back shorter.
+      casperBalance: balances[0] ?? prev.casperBalance,
+      fdBalance: balances[1] ?? prev.fdBalance,
+    }));
+  }, []);
+
   const connectWallet = useCallback(async (address: string): Promise<{ error?: string }> => {
     const trimmed = address.trim();
     if (!isValidSolanaAddress(trimmed)) {
@@ -2430,10 +2549,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       await AsyncStorage.setItem(CONNECTED_WALLET_KEY, trimmed);
-      setState((prev) => ({ ...prev, connectedWalletAddress: trimmed, solBalance: 0 }));
+      setState((prev) => ({ ...prev, connectedWalletAddress: trimmed, solBalance: 0, fdBalance: 0, casperBalance: 0 }));
       fetchSolBalance(trimmed).then((bal) =>
         setState((prev) => ({ ...prev, solBalance: bal }))
       );
+      fetchAppTokensAndBalances(trimmed).then(({ tokens, balances }) => {
+        if (tokens.length === 0) return;
+        setState((prev) => ({
+          ...prev,
+          appTokens: tokens,
+          casperBalance: balances[0] ?? 0,
+          fdBalance: balances[1] ?? 0,
+        }));
+      });
       return {};
     } catch (err) {
       console.error("[AppContext] Failed to save connected wallet:", err);
@@ -2443,7 +2571,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const disconnectWallet = useCallback(async () => {
     await AsyncStorage.removeItem(CONNECTED_WALLET_KEY);
-    setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0 }));
+    // Token balances belonged to the wallet that just disconnected — zero
+    // them out too, but keep appTokens (name/symbol/mint) so the tabs don't
+    // flash back to placeholder labels.
+    setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0, fdBalance: 0, casperBalance: 0 }));
   }, []);
 
   const setLanguage = useCallback(async (code: string) => {
@@ -2465,21 +2596,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // SMS handoff would always run against an empty list (Task #113).
     const snapshotNumbers = latestStateRef.current.smsFallbackNumbers;
     const snapshotMessage = latestStateRef.current.smsFallbackMessage;
-
-    // Task #153: best-effort unregister of this device's call push tokens
-    // BEFORE the wipe clears the device token — a wiped phone must not keep
-    // buzzing with "Incoming call" wake pushes. Fire-and-forget: never
-    // delays the wipe, and the server also purges tokens on the departed
-    // broadcast. SILENCE CONTRACT: pure network call, failures swallowed.
-    try {
-      const { alias: wipeAlias, deviceToken: wipeDeviceToken } = latestStateRef.current;
-      const apiBase = getApiBase();
-      if (apiBase && wipeAlias && wipeDeviceToken) {
-        void unregisterCallPush(apiBase, wipeAlias, wipeDeviceToken);
-      }
-    } catch {
-      // Best-effort — see above.
-    }
 
     // Best-effort: notify known real contacts that we are gone, so their
     // app can flag this conversation as self-destructed. Must happen BEFORE
@@ -2612,6 +2728,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       conversations: [],
       fdBalance: 0,
       casperBalance: 0,
+      appTokens: [],
       walletAddress: "GhFc3...x9mKr4",
       transactions: DEFAULT_TRANSACTIONS,
       dataUsed: 2.4,
@@ -2622,13 +2739,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       duressGracePeriod: 3,
       language: "en",
       incomingCall: null,
+      ghostpad: { mode: "idle", code: null },
       linkQuality: "unknown",
       lowBandwidthMode: "auto",
       // Same derivation as createInitialState — AUTO+UNKNOWN must start
       // active per task spec so the user doesn't briefly burn satellite
       // bytes between panicWipe reset and the first classifier tick.
       lowBandwidthActive: isLowBandwidthActive("unknown", "auto"),
-      spinHapticsEnabled: true,
       smsFallbackNumbers: [],
       smsFallbackMessage: DEFAULT_SMS_FALLBACK_MESSAGE,
     });
@@ -2654,6 +2771,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const registerGhostpadListener = useCallback((fn: ((s: GhostpadSignal) => void) | null) => {
     ghostpadListenerRef.current = fn;
+  }, []);
+
+  const setGhostpadMode = useCallback((mode: GhostpadSession["mode"]) => {
+    setState((prev) => ({ ...prev, ghostpad: { ...prev.ghostpad, mode } }));
+  }, []);
+
+  const resetGhostpad = useCallback(() => {
+    setState((prev) => ({ ...prev, ghostpad: { mode: "idle", code: null } }));
   }, []);
 
   const dismissIncomingCall = useCallback(() => {
@@ -2832,7 +2957,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
           aliceCursor.set(item.conversationId, newAlice);
           headerSent.add(item.conversationId);
-          const expiresAt = conv.disappearAfterSec ? Date.now() + conv.disappearAfterSec * 1000 : undefined;
+          const expiresAt = outgoingTtlMs ? Date.now() + outgoingTtlMs : undefined;
           setState((prev) => {
             const updated = prev.conversations.map((c) => {
               if (c.id !== item.conversationId) return c;
@@ -3032,71 +3157,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // ── Invite expired without being redeemed ─────────────────────────────────
-    // Server delivers this once, after the TTL elapses on an unredeemed code.
-    // Show a one-shot alert; the server's ownerNotifiedAt stamp ensures it is
-    // never replayed — no extra client-side deduplication is needed.
-    if (wsMsg.type === "invite-expired" && typeof (wsMsg as { code?: unknown }).code === "string") {
-      const expiredCode = (wsMsg as { code: string }).code;
-      Alert.alert(
-        "Invite Expired",
-        `Your invite ${expiredCode} expired without being redeemed.`,
-        [
-          { text: "OK", style: "cancel" },
-          {
-            text: "New Code",
-            onPress: () => {
-              // Jump to the Invite tab and trigger an auto-regenerate. The
-              // timestamp param makes each tap a fresh signal so repeated
-              // expiries each regenerate exactly once.
-              router.push({
-                pathname: "/(tabs)/messages",
-                params: { regenInvite: String(Date.now()) },
-              });
-            },
-          },
-        ],
-      );
-      return;
-    }
-
     // ── Ghostpad signals — relayed, never persisted client-side either ───────
+    // Session identity (mode + code) is committed straight into AppState
+    // here, independent of whether a GhostpadScreen is currently mounted to
+    // receive it — a lock/unmount mid-session must not strand the user on a
+    // blank idle screen once they're back. The live pad text stays screen-
+    // local and ephemeral via ghostpadListenerRef, matching the "nothing
+    // lingers" design for actual pad content.
     if (wsMsg.type && GHOSTPAD_SIGNAL_TYPES.has(wsMsg.type)) {
-      ghostpadListenerRef.current?.({
+      const signal: GhostpadSignal = {
         type: wsMsg.type as GhostpadSignal["type"],
         code: wsMsg.code,
         text: wsMsg.text,
-      });
+      };
+      switch (signal.type) {
+        case "ghostpad-created":
+          setState((prev) => ({ ...prev, ghostpad: { mode: "creating", code: signal.code ?? null } }));
+          break;
+        case "ghostpad-paired":
+          setState((prev) => ({ ...prev, ghostpad: { ...prev.ghostpad, mode: "paired" } }));
+          break;
+        case "ghostpad-ended":
+        case "ghostpad-error":
+          setState((prev) => ({ ...prev, ghostpad: { mode: "idle", code: null } }));
+          break;
+      }
+      ghostpadListenerRef.current?.(signal);
       return;
     }
 
     // ── Call signals ─────────────────────────────────────────────────────────
     if (wsMsg.type && CALL_SIGNAL_TYPES.has(wsMsg.type) && wsMsg.from) {
       if (wsMsg.type === "call-ring") {
-        const ringCallId = wsMsg.callId ?? "unknown";
-        const ringFrom = wsMsg.from!.toUpperCase();
-        const ringMode = (wsMsg.callMode as "voice" | "video") ?? "voice";
-        // Task #152: if the user already answered/declined this call from the
-        // native CallKit / Core-Telecom UI (lock screen, closed app), honor
-        // that instead of showing the in-app ring banner again.
-        const nativeAction = takeNativeCallAction(ringCallId);
-        if (nativeAction === "answered") {
-          router.push({
-            pathname: "/call",
-            params: { alias: ringFrom, mode: ringMode, role: "callee", callId: ringCallId },
-          });
-          return;
-        }
-        if (nativeAction === "declined") {
-          const ws = wsRef.current;
-          if (ws && ws.readyState === 1) {
-            ws.send(JSON.stringify({ type: "call-hangup", to: ringFrom, callId: ringCallId }));
-          }
-          return;
-        }
         setState((prev) => ({
           ...prev,
-          incomingCall: { callId: ringCallId, from: ringFrom, mode: ringMode },
+          incomingCall: { callId: wsMsg.callId ?? "unknown", from: wsMsg.from!.toUpperCase(), mode: (wsMsg.callMode as "voice" | "video") ?? "voice" },
         }));
       } else {
         callSignalListenerRef.current?.({ type: wsMsg.type, from: wsMsg.from.toUpperCase(), payload: wsMsg.payload, callId: wsMsg.callId, callMode: wsMsg.callMode });
@@ -3189,9 +3284,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sealed: true,
         fingerprint: `DR:${ratchetMsg.ciphertext.slice(0, 8).toUpperCase()}`,
         ...(unwrapped.attachment ? { attachment: unwrapped.attachment } : {}),
-        // TTL from the envelope (sender-authoritative), not our own local
-        // conversation setting — no expiresAt until this message is actually
-        // viewed (see markMessagesViewed), matching the bootstrap path.
+        // TTL comes from the sender via the envelope, never from our own
+        // local conversation setting. No expiresAt yet — the countdown only
+        // starts once this message is actually viewed (markMessagesViewed).
         ...(unwrapped.ttlMs ? { ttlMs: unwrapped.ttlMs } : {}),
       };
       setState((prev) => {
@@ -3314,9 +3409,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.warn("[DR] Glare with", senderAlias, "— sender wins; adopting rebuilt Bob session");
       }
 
-      // Key-derived from our IK and the sender's registry-verified ikA —
-      // matches what the initiator computed from our bundle.
-      const safetyNumber = generateSafetyNumberFromKeys(myIKPub, x3dhHeader.ikA);
+      const safetyNumber = generateSafetyNumber(latestStateRef.current.alias ?? "GHOST_USER", senderAlias);
 
       // ── Reaction arriving via first-message bootstrap (session re-init,
       // glare, or literally someone's first-ever contact). A reaction always
@@ -3543,6 +3636,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         ws.onclose = (event) => {
           setWsConnected(false);
+          // The server unconditionally revokes any pending Ghostpad code and
+          // ends any active pairing the instant its socket for this alias
+          // closes (see api-server's wss.on("close") handler) — regardless
+          // of why the socket closed (lock, network drop, backgrounding).
+          // Mirror that here so we never show a code/session client-side
+          // that the server has already discarded.
+          setState((prev) =>
+            prev.ghostpad.mode === "idle" ? prev : { ...prev, ghostpad: { mode: "idle", code: null } }
+          );
           if (pingTimer) { clearTimeout(pingTimer); pingTimer = null; }
           // Feed the LBW classifier: count this disconnect, and start the
           // "stuck reconnecting" stopwatch if it isn't already running.
@@ -3669,15 +3771,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         registerCallListener,
         sendGhostpadSignal,
         registerGhostpadListener,
+        setGhostpadMode,
+        resetGhostpad,
         dismissIncomingCall,
         panicWipe,
         connectWallet,
         disconnectWallet,
+        refreshAppTokenBalances,
         setAutoLockTimeout,
         setDuressGracePeriod,
         setLanguage,
         setLowBandwidthMode,
-        setSpinHapticsEnabled,
         setSmsFallbackNumbers,
         setSmsFallbackMessage,
         refreshEntitlement,

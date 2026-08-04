@@ -18,11 +18,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GoldGradient } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { SecureBadge } from "@/components/SecureBadge";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
@@ -102,8 +102,6 @@ export default function SettingsScreen() {
     lowBandwidthActive,
     linkQuality,
     setLowBandwidthMode,
-    spinHapticsEnabled,
-    setSpinHapticsEnabled,
     smsFallbackNumbers,
     smsFallbackMessage,
     setSmsFallbackNumbers,
@@ -763,25 +761,6 @@ export default function SettingsScreen() {
             />
           </View>
           <View style={styles.settingDivider} />
-          {/* ── Spin haptics (Task #192) ─────────────────────────────── */}
-          <View style={styles.settingRow}>
-            <View style={styles.settingIcon}>
-              <Ionicons name="radio-outline" size={18} color={colors.primary} />
-            </View>
-            <Text style={styles.settingLabel}>SPIN HAPTICS</Text>
-            <Switch
-              value={spinHapticsEnabled}
-              onValueChange={(val) => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setSpinHapticsEnabled(val).catch(() => {});
-              }}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.foreground}
-              ios_backgroundColor={colors.border}
-              testID="spin-haptics-switch"
-            />
-          </View>
-          <View style={styles.settingDivider} />
           {/* ── Low-bandwidth mode (Task #111) ────────────────────────── */}
           <View style={[styles.settingRow, { flexDirection: "column", alignItems: "stretch", gap: 10, paddingVertical: 14 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -1075,7 +1054,7 @@ export default function SettingsScreen() {
 
         <View style={styles.versionSection}>
           <GhostLogo size={50} color={colors.border} />
-          <Text style={styles.versionText}>GHOSTFACE v1.0.0 (4)</Text>
+          <Text style={styles.versionText}>GHOSTFACE v1.0.0</Text>
           <Text style={styles.versionText}>NO FACE. NO TRACE.</Text>
         </View>
 
@@ -1166,7 +1145,7 @@ export default function SettingsScreen() {
           setPinSimilar(false);
         }}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => {
             setShowPinChange(false);
             setNewPin("");
@@ -1246,7 +1225,7 @@ export default function SettingsScreen() {
                 </>
               )}
             </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Duress PIN modal */}
@@ -1256,7 +1235,7 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setShowDuressPin(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDuressPin(false)} />
             <View style={styles.modalContent}>
               {duressPinSaved ? (
@@ -1330,7 +1309,7 @@ export default function SettingsScreen() {
                 </>
               )}
             </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Decoy PIN modal */}
@@ -1459,7 +1438,7 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setShowSmsFallback(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowSmsFallback(false)} />
           <View style={styles.modalContent}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
@@ -1579,7 +1558,7 @@ export default function SettingsScreen() {
               <Text style={styles.cancelText}>CLOSE</Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
     </View>

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, invitesTable, identityKeysTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
@@ -77,9 +77,8 @@ router.post("/invites", async (req: Request, res: Response) => {
 
 /**
  * GET /invites/:code
- * Looks up an invite code. Returns the owner's alias so the redeemer
- * can establish an E2EE session with the real person.
- * Marks the code as redeemed (single-use).
+ * Non-destructive lookup — returns ownerAlias if the code is valid and unredeemed.
+ * Does NOT consume the code. Consume requires a separate POST /invites/:code/consume.
  */
 router.get("/invites/:code", async (req: Request, res: Response) => {
   if (!redeemLimiter.check(getIpKey(req))) {
@@ -106,13 +105,57 @@ router.get("/invites/:code", async (req: Request, res: Response) => {
       return res.status(410).json({ error: "Code expired" });
     }
 
-    // Mark redeemed
-    await db.update(invitesTable).set({ redeemed: true }).where(eq(invitesTable.code, raw));
-
-    logger.info({ code: raw, ownerAlias: invite.ownerAlias }, "Invite redeemed");
+    logger.info({ code: raw, ownerAlias: invite.ownerAlias }, "Invite lookup");
     return res.json({ ownerAlias: invite.ownerAlias });
   } catch (err) {
     logger.error({ err }, "Failed to redeem invite");
+    return res.status(500).json({ error: toErrorMessage(err) });
+  }
+});
+
+
+/**
+ * POST /invites/:code/consume
+ * Atomically marks an invite code as redeemed. Call ONLY after the E2EE handshake
+ * (addConversation) has already succeeded on the client.
+ *
+ * Single conditional UPDATE — one concurrent winner, zero rows = already used/expired.
+ */
+router.post("/invites/:code/consume", async (req: Request, res: Response) => {
+  if (!redeemLimiter.check(getIpKey(req))) {
+    return res.status(429).json({ error: "Too many requests" });
+  }
+
+  const raw = (req.params.code as string).toUpperCase();
+  if (!CODE_REGEX.test(raw)) {
+    return res.status(400).json({ error: "Invalid code format" });
+  }
+
+  try {
+    const consumed = await db
+      .update(invitesTable)
+      .set({ redeemed: true })
+      .where(
+        and(
+          eq(invitesTable.code, raw),
+          eq(invitesTable.redeemed, false),
+          gt(invitesTable.expiresAt, new Date()),
+        ),
+      )
+      .returning({ code: invitesTable.code });
+
+    if (consumed.length > 0) {
+      logger.info({ code: raw }, "Invite consumed");
+      return res.json({ ok: true });
+    }
+
+    // Zero rows — distinguish already-used from expired for the client
+    const [invite] = await db.select().from(invitesTable).where(eq(invitesTable.code, raw));
+    if (!invite)         return res.status(404).json({ error: "Code not found" });
+    if (invite.redeemed) return res.status(410).json({ error: "Code already used" });
+    return res.status(410).json({ error: "Code expired" });
+  } catch (err) {
+    logger.error({ err }, "Failed to consume invite");
     return res.status(500).json({ error: toErrorMessage(err) });
   }
 });

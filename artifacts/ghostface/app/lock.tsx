@@ -8,7 +8,6 @@ import {
   Animated,
   AppState,
   Easing,
-  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostLogo } from "@/components/GhostLogo";
+import { GhostRevealMark } from "@/components/GhostRevealMark";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
@@ -30,15 +30,12 @@ const WARN_FROM = 7;
 const FAIL_KEY = "ghostface_pin_fail_count";
 
 // ── Tap-to-enter reveal ───────────────────────────────────────────────────────
-// The lock screen opens on an idle "IDENTITY KEY READY" gate built around a
-// coin-spinning compass emblem. Tapping ENTER reveals the secure scrambled
-// keypad. This is a purely visual gate — all PIN / duress / wipe / biometric
-// logic below is untouched and only becomes reachable once the keypad is shown.
+// The lock screen opens on an idle "IDENTITY KEY READY" gate built around the
+// ghost-reveal mark (GhostRevealMark). Tapping ENTER reveals the secure
+// scrambled keypad. This is a purely visual gate — all PIN / duress / wipe /
+// biometric logic below is untouched and only becomes reachable once the
+// keypad is shown.
 const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
-
-// Coin-spin centerpiece — the brand compass/globe emblem. It rotates on its
-// vertical axis like a coin spinning on a table, not a flat round-and-round spin.
-const LOGIN_COMPASS = require("@/assets/images/login-compass.png");
 
 // ── Secure storage helpers (web-safe) ─────────────────────────────────────────
 
@@ -116,8 +113,6 @@ export default function LockScreen() {
   // Tap-to-enter reveal state. The keypad stays hidden behind the idle
   // "identity key ready" gate until the user taps ENTER.
   const [decryptRevealed, setDecryptRevealed] = useState(false);
-  // Coin-spin animation for the compass emblem (vertical-axis rotation).
-  const coinSpin = useRef(new Animated.Value(0)).current;
 
   // Duress grace-period state
   const [duressCountdown, setDuressCountdown] = useState<number | null>(null);
@@ -134,20 +129,6 @@ export default function LockScreen() {
       }
     };
   }, []);
-
-  // Coin-spin loop — the compass rotates continuously on its vertical axis.
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(coinSpin, {
-        toValue: 1,
-        duration: 3200,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [coinSpin]);
 
   // Scrambled digit layout — randomised on every mount and app-foreground event
   const [digits, setDigits] = useState<string[]>(() => shuffleDigits());
@@ -461,8 +442,13 @@ export default function LockScreen() {
       backgroundColor: colors.background,
       alignItems: "center",
       justifyContent: "center",
-      paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0),
-      paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 0),
+      // Symmetric top/bottom padding keeps the centered content visually
+      // centered regardless of how lopsided a device's safe-area insets are
+      // (e.g. iPhone 16's Dynamic Island top inset vs. its home-indicator
+      // bottom inset) — asymmetric insets here would skew justifyContent:
+      // "center" downward by half the top/bottom delta.
+      paddingTop: Math.max(insets.top, insets.bottom) + (Platform.OS === "web" ? 67 : 0),
+      paddingBottom: Math.max(insets.top, insets.bottom) + (Platform.OS === "web" ? 34 : 0),
     },
     logo: { marginBottom: 12 },
     appName: {
@@ -570,7 +556,7 @@ export default function LockScreen() {
       textAlign: "center",
     },
 
-    // ── Coin-spin entry gate ────────────────────────────────────────────────
+    // ── Ghost-reveal entry gate ────────────────────────────────────────────
     compassWrap: {
       position: "absolute",
       top: 8,
@@ -585,10 +571,6 @@ export default function LockScreen() {
       alignItems: "center",
       justifyContent: "flex-end",
       paddingBottom: 130,
-    },
-    compassImg: {
-      width: 300,
-      height: 300,
     },
     identityReady: {
       fontFamily: MONO,
@@ -877,26 +859,10 @@ export default function LockScreen() {
           {biometricError ? <Text style={styles.errorText}>{biometricError}</Text> : null}
         </>
       ) : (
-        <View style={styles.gate} testID="decrypt-seal">
-          <Animated.View
-            style={[
-              styles.compassWrap,
-              {
-                transform: [
-                  { perspective: 900 },
-                  { rotateX: "14deg" },
-                  {
-                    rotateY: coinSpin.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ["0deg", "360deg"],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
-            <Image source={LOGIN_COMPASS} style={styles.compassImg} resizeMode="contain" />
-          </Animated.View>
+        <View style={styles.gate}>
+          <View style={styles.compassWrap}>
+            <GhostRevealMark size={600} />
+          </View>
 
           <Text style={styles.appName}>GHOSTFACE</Text>
           <Text style={styles.identityReady}>

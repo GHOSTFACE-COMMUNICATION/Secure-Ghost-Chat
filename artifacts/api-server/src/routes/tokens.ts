@@ -10,15 +10,25 @@ import {
 } from "@solana/spl-token";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
-import {
-  isAdminAuthorized,
-  isValidAdminSecret,
-  setAdminSessionCookie,
-} from "../middlewares/adminAuth";
 
 const router: IRouter = Router();
 
-const SOLANA_RPC = process.env.SOLANA_RPC_URL ?? clusterApiUrl("mainnet-beta");
+// Deliberately independent of SOLANA_RPC_URL — that env var is the live
+// mainnet connection solanaPayments.ts uses to verify real USDC subscription
+// payments. Reusing it here would mean pointing token-deploy testing at
+// devnet could silently break real payment verification, or vice versa.
+type SolanaNetwork = "devnet" | "mainnet-beta";
+
+function isSolanaNetwork(v: unknown): v is SolanaNetwork {
+  return v === "devnet" || v === "mainnet-beta";
+}
+
+function getRpcUrl(network: SolanaNetwork): string {
+  if (network === "devnet") {
+    return process.env.SOLANA_DEVNET_RPC_URL?.trim() || clusterApiUrl("devnet");
+  }
+  return process.env.SOLANA_RPC_URL?.trim() || clusterApiUrl("mainnet-beta");
+}
 
 function getDeployerKeypair(): Keypair | null {
   const raw = process.env.SOLANA_DEPLOYER_KEY;
@@ -141,7 +151,12 @@ router.delete("/tokens/:id", async (req: Request, res: Response) => {
   }
 });
 
-// ── POST /api/tokens/:id/deploy — Deploy to Solana mainnet ───────────────────
+// ── POST /api/tokens/:id/deploy — Deploy to Solana (devnet by default) ───────
+//
+// Body: { network?: "devnet" | "mainnet-beta", mintAuthority?: string }
+// network defaults to "devnet" — deploying a real, irreversible mainnet
+// token requires explicitly passing { network: "mainnet-beta" }. This was
+// previously hardcoded to mainnet-beta with no way to test safely first.
 router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
   try {
     const [token] = await db
@@ -154,11 +169,17 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
         .status(400)
         .json({ error: "Token is already deployed", mintAddress: token.mintAddress });
 
+    const requestedNetwork = req.body.network;
+    if (requestedNetwork !== undefined && !isSolanaNetwork(requestedNetwork)) {
+      return res.status(400).json({ error: 'network must be "devnet" or "mainnet-beta"' });
+    }
+    const network: SolanaNetwork = requestedNetwork ?? "devnet";
+
     const payer = getDeployerKeypair();
     if (!payer) {
       return res.status(503).json({
         error:
-          "Deployer not configured. Set SOLANA_DEPLOYER_KEY (JSON array of 64 bytes) and fund it with SOL.",
+          "Deployer not configured. Set SOLANA_DEPLOYER_KEY (JSON array of 64 bytes).",
         setup: true,
       });
     }
@@ -173,12 +194,24 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
       }
     }
 
-    const connection = new Connection(SOLANA_RPC, "confirmed");
-    const balance = await connection.getBalance(payer.publicKey);
+    const connection = new Connection(getRpcUrl(network), "confirmed");
+    let balance = await connection.getBalance(payer.publicKey);
+    if (balance < 0.01 * LAMPORTS_PER_SOL && network === "devnet") {
+      // Devnet SOL is free and only usable for testing — airdrop rather
+      // than asking for manual funding.
+      try {
+        const sig = await connection.requestAirdrop(payer.publicKey, LAMPORTS_PER_SOL);
+        await connection.confirmTransaction(sig, "confirmed");
+        balance = await connection.getBalance(payer.publicKey);
+      } catch (err) {
+        logger.warn({ err: toErrorMessage(err) }, "[tokens/deploy] devnet airdrop failed");
+      }
+    }
     if (balance < 0.01 * LAMPORTS_PER_SOL) {
       return res.status(402).json({
-        error: `Deployer needs ≥ 0.01 SOL. Current: ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL`,
+        error: `Deployer needs ≥ 0.01 SOL on ${network}. Current: ${(balance / LAMPORTS_PER_SOL).toFixed(4)} SOL`,
         deployerAddress: payer.publicKey.toBase58(),
+        network,
         setup: true,
       });
     }
@@ -206,7 +239,10 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
     }
 
     const mintAddress = mint.toBase58();
-    const explorerUrl = `https://solscan.io/token/${mintAddress}`;
+    const explorerUrl =
+      network === "devnet"
+        ? `https://solscan.io/token/${mintAddress}?cluster=devnet`
+        : `https://solscan.io/token/${mintAddress}`;
 
     await db
       .update(tokensTable)
@@ -215,7 +251,7 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
         mintAddress,
         deploySignature: mintSignature,
         explorerUrl,
-        network: "mainnet-beta",
+        network,
         deployedAt: new Date(),
       })
       .where(eq(tokensTable.id, token.id));
@@ -237,92 +273,11 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
   }
 });
 
-// ── Admin login (task #182) ───────────────────────────────────────────────────
-// Browser access no longer uses ?key=<secret> in the URL (it leaks into browser
-// history / access logs / referrers). Instead the dashboard shows a login form
-// that POSTs the secret and sets an HttpOnly signed session cookie. A legacy
-// ?key= visit is still accepted but is immediately redirected with the key
-// stripped from the URL (handled in requireAdminSecret).
-
-function renderLoginPage(res: Response, error?: string) {
-  res.status(error ? 401 : 200);
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>GHOSTFACE · ADMIN LOGIN</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;700;900&display=swap" rel="stylesheet">
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{background:#000;color:#f0f0f0;font-family:'Geist Mono',monospace;min-height:100vh}
-  body{display:flex;align-items:center;justify-content:center;padding:24px}
-  .card{background:#0a0a0a;border:1px solid #222;border-radius:10px;padding:32px;width:100%;max-width:380px}
-  h1{font-size:13px;font-weight:900;letter-spacing:4px;margin-bottom:6px}
-  .sub{font-size:10px;letter-spacing:2px;color:#555;margin-bottom:24px}
-  label{display:block;font-size:9px;letter-spacing:2px;color:#555;margin-bottom:8px}
-  input{width:100%;background:#000;border:1px solid #222;border-radius:6px;color:#f0f0f0;
-    font-family:inherit;font-size:13px;letter-spacing:1px;padding:12px;margin-bottom:16px;outline:none}
-  input:focus{border-color:#555}
-  button{width:100%;background:#f0f0f0;color:#000;border:none;border-radius:6px;
-    font-family:inherit;font-size:11px;font-weight:900;letter-spacing:3px;padding:12px;cursor:pointer}
-  button:hover{opacity:.9}
-  .err{font-size:10px;letter-spacing:1px;color:#FF3B30;margin-bottom:16px}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>TOKEN ADMIN</h1>
-  <div class="sub">AUTHENTICATION REQUIRED</div>
-  ${error ? `<div class="err">${error}</div>` : ""}
-  <form method="POST" action="/api/admin/login" autocomplete="off">
-    <label for="key">ADMIN SECRET</label>
-    <input id="key" name="key" type="password" autofocus autocomplete="off"/>
-    <button type="submit">UNLOCK</button>
-  </form>
-</div>
-</body>
-</html>`);
-}
-
-router.post("/admin/login", (req: Request, res: Response) => {
-  if (!process.env.ADMIN_SECRET) {
-    return res.status(503).json({ error: "admin endpoints disabled (ADMIN_SECRET not set)" });
-  }
-  const key = typeof req.body?.key === "string" ? req.body.key : "";
-  if (!isValidAdminSecret(key)) {
-    return renderLoginPage(res, "INVALID SECRET");
-  }
-  setAdminSessionCookie(req, res);
-  return res.redirect(303, "/api/admin");
-});
-
 // ── GET /admin — Token management admin dashboard ─────────────────────────────
-// Task #168: gated behind ADMIN_SECRET. Task #182: browser auth via login form
-// + HttpOnly session cookie; legacy ?key= is redirected with the key stripped.
-router.get(
-  "/admin",
-  (req: Request, res: Response, next) => {
-    if (!process.env.ADMIN_SECRET) {
-      return res.status(503).json({ error: "admin endpoints disabled (ADMIN_SECRET not set)" });
-    }
-    if (isAdminAuthorized(req)) return next();
-    const queryKey = typeof req.query["key"] === "string" ? req.query["key"] : "";
-    if (queryKey && isValidAdminSecret(queryKey)) {
-      // Valid legacy ?key= — set the session cookie and strip the secret from
-      // the URL so it never lands in browser history.
-      setAdminSessionCookie(req, res);
-      return res.redirect(302, "/api/admin");
-    }
-    return renderLoginPage(res, queryKey ? "INVALID SECRET" : undefined);
-  },
-  (_req: Request, res: Response) => {
-    const API = `/api`;
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`<!DOCTYPE html>
+router.get("/admin", (_req: Request, res: Response) => {
+  const API = `/api`;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -831,7 +786,6 @@ document.getElementById('fColor').addEventListener('input', function() {
 </script>
 </body>
 </html>`);
-  },
-);
+});
 
 export default router;

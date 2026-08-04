@@ -32,16 +32,7 @@ import { randomBytes } from "@noble/hashes/utils.js";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 
 const MAX_SKIP = 1000;
-
-/**
- * Hard cap on the TOTAL number of cached skipped-message keys across all
- * chains. MAX_SKIP bounds a single chain, but nothing previously bounded the
- * map across many chains — undelivered messages could accumulate message keys
- * indefinitely, weakening forward secrecy (old message keys retained at rest)
- * and growing storage without bound. Oldest entries are evicted first
- * (Map preserves insertion order).
- */
-const MAX_SKIPPED_KEYS_TOTAL = 2000;
+const PQ_CT_RESEND_WINDOW = 4;
 
 // ── Byte helpers ──────────────────────────────────────────────────────────────
 
@@ -277,23 +268,6 @@ export interface RatchetHeader {
    */
   pqPub?: string;
   pqCt?:  string;
-}
-
-/**
- * Canonical associated-data serialisation of a ratchet header.
- * JSON.stringify on a parsed object preserves *wire* key order, so a transport
- * or proxy that re-encodes the JSON (re-ordering keys) would silently break
- * AEAD verification even though nothing was tampered with. Serialising with an
- * explicit, fixed field order on BOTH the encrypt and decrypt side removes the
- * dependency on key ordering. The order below matches the historical sender
- * insertion order (dh, n, pn, pqPub, pqCt), so output is byte-identical for
- * all previously produced messages.
- */
-function headerAd(h: RatchetHeader): Uint8Array {
-  const parts = [`"dh":${JSON.stringify(h.dh)}`, `"n":${h.n}`, `"pn":${h.pn}`];
-  if (h.pqPub !== undefined) parts.push(`"pqPub":${JSON.stringify(h.pqPub)}`);
-  if (h.pqCt !== undefined) parts.push(`"pqCt":${JSON.stringify(h.pqCt)}`);
-  return strToBytes(`{${parts.join(",")}}`);
 }
 
 export interface RatchetMessage {
@@ -581,9 +555,9 @@ export function ratchetEncrypt(
   // attach the ciphertext for the peer (set when this sending chain began with a
   // DH ratchet). Both ride inside the AEAD associated data via the serialised header.
   if (s.pq && s.PQs) header.pqPub = s.PQs.pub;
-  if (s.pq && s.pendingPqCt) header.pqCt = s.pendingPqCt;
+  if (s.pq && s.pendingPqCt && s.Ns < PQ_CT_RESEND_WINDOW) header.pqCt = s.pendingPqCt;
 
-  const ad         = headerAd(header);
+  const ad         = strToBytes(JSON.stringify(header));
   const ciphertext = aeadEncrypt(mk, padPlaintext(plaintext), ad);
 
   s.CKs = newCKs;
@@ -606,13 +580,8 @@ function trySkippedKey(
   const k  = `${header.dh}:${header.n}`;
   const mk = s.MKSKIPPED.get(k);
   if (!mk) return null;
-  // Decrypt FIRST, delete only on success. Deleting before decrypting meant a
-  // corrupted/tampered copy of a message permanently destroyed the cached key,
-  // making the legitimate copy undecryptable (message-loss DoS with a single
-  // malformed packet).
-  const pt = aeadDecrypt(mk, ct, ad);
   s.MKSKIPPED.delete(k);
-  return pt;
+  return aeadDecrypt(mk, ct, ad);
 }
 
 function skipChainKeys(s: RatchetState, until: number): void {
@@ -623,12 +592,6 @@ function skipChainKeys(s: RatchetState, until: number): void {
     s.CKr = ck;
     s.MKSKIPPED.set(`${toHex(s.DHr)}:${s.Nr}`, mk);
     s.Nr  += 1;
-  }
-  // Enforce the global cap — evict oldest cached keys beyond the limit.
-  while (s.MKSKIPPED.size > MAX_SKIPPED_KEYS_TOTAL) {
-    const oldest = s.MKSKIPPED.keys().next().value;
-    if (oldest === undefined) break;
-    s.MKSKIPPED.delete(oldest);
   }
 }
 
@@ -687,7 +650,7 @@ export function ratchetDecrypt(
   const s  = deserializeState(serialized);
   const { header, ciphertext: ctHex } = message;
   const ct = fromHex(ctHex);
-  const ad = headerAd(header);
+  const ad = strToBytes(JSON.stringify(header));
 
   // 1. Try a cached skipped-message key
   const fromSkip = trySkippedKey(s, header, ct, ad);
@@ -834,13 +797,6 @@ export function initSessionAliceWithHeader(
     if (!valid) {
       throw new Error("[X3DH] SPK signature verification FAILED — bundle rejected (possible MITM)");
     }
-  } else if (bundle.spkSignature || bundle.ikSignPublicKey) {
-    // Exactly ONE of the two signature fields present — no legitimate
-    // registration produces this. It indicates a tampered/stripped bundle
-    // (signature-downgrade attempt). Fail closed.
-    throw new Error(
-      "[X3DH] Bundle carries partial signature material (one of spkSignature/ikSignPublicKey missing) — bundle rejected",
-    );
   } else {
     console.warn("[X3DH] Bundle has no SPK signature — proceeding without MITM protection (legacy registration)");
   }

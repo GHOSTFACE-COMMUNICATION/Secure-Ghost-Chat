@@ -1,4 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { managedNonce } from "@noble/ciphers/utils.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { blake2b } from "@noble/hashes/blake2.js";
+import { md5 } from "@noble/hashes/legacy.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
@@ -13,75 +19,81 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { GoldGradient } from "@/components/GoldGradient";
+import { deriveKeyFromPin, generateSalt } from "@/lib/crypto";
 
 type EncToolTab = "cipher" | "hash" | "keygen" | "stealth";
 
-function b64Encode(str: string): string {
-  if (Platform.OS === "web") {
-    try { return btoa(unescape(encodeURIComponent(str))); } catch { return btoa(str); }
-  }
-  const C = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const bytes = Array.from(str).map((c) => c.charCodeAt(0));
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function bytesToBase64(bytes: Uint8Array): string {
   let out = "";
   for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i] ?? 0, b1 = bytes[i + 1] ?? 0, b2 = bytes[i + 2] ?? 0;
-    out += C[b0 >> 2] + C[((b0 & 3) << 4) | (b1 >> 4)];
-    out += i + 1 < bytes.length ? C[((b1 & 15) << 2) | (b2 >> 6)] : "=";
-    out += i + 2 < bytes.length ? C[b2 & 63] : "=";
+    const b0 = bytes[i], b1 = bytes[i + 1] ?? 0, b2 = bytes[i + 2] ?? 0;
+    out += B64[b0 >> 2] + B64[((b0 & 3) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? B64[((b1 & 15) << 2) | (b2 >> 6)] : "=";
+    out += i + 2 < bytes.length ? B64[b2 & 63] : "=";
   }
   return out;
 }
 
-function b64Decode(str: string): string {
+function base64ToBytes(str: string): Uint8Array {
+  const s = str.replace(/=+$/, "");
+  const out: number[] = [];
+  for (let i = 0; i < s.length; i += 4) {
+    const a = B64.indexOf(s[i] ?? ""), b = B64.indexOf(s[i + 1] ?? "");
+    const c = s[i + 2] ? B64.indexOf(s[i + 2]) : -1;
+    const d = s[i + 3] ? B64.indexOf(s[i + 3]) : -1;
+    out.push((a << 2) | (b >> 4));
+    if (c >= 0) out.push(((b & 15) << 4) | (c >> 2));
+    if (d >= 0) out.push(((c & 3) << 6) | d);
+  }
+  return new Uint8Array(out);
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function concatBytes(...arrs: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
+  let offset = 0;
+  for (const a of arrs) { out.set(a, offset); offset += a.length; }
+  return out;
+}
+
+/** ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations) — same KDF the app uses for PIN-derived keys. */
+function ghostEncrypt(plaintext: string, passphrase: string): string {
+  const salt = generateSalt();
+  const key = deriveKeyFromPin(passphrase || "GHOSTFACE", salt);
+  const chacha = managedNonce(chacha20poly1305);
+  const ciphertext = chacha(key).encrypt(new TextEncoder().encode(plaintext));
+  return "GHX2::" + bytesToBase64(concatBytes(salt, ciphertext));
+}
+
+function ghostDecrypt(payload: string, passphrase: string): string {
+  if (!payload.startsWith("GHX2::")) return "INVALID FORMAT — NOT GHOSTFACE ENCRYPTED";
   try {
-    if (Platform.OS === "web") return decodeURIComponent(escape(atob(str)));
-    const C = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    const s = str.replace(/=/g, "");
-    let out = "";
-    for (let i = 0; i < s.length; i += 4) {
-      const a = C.indexOf(s[i] ?? ""), b = C.indexOf(s[i + 1] ?? "");
-      const c = s[i + 2] ? C.indexOf(s[i + 2]) : 0;
-      const d = s[i + 3] ? C.indexOf(s[i + 3]) : 0;
-      out += String.fromCharCode((a << 2) | (b >> 4));
-      if (s[i + 2]) out += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-      if (s[i + 3]) out += String.fromCharCode(((c & 3) << 6) | d);
-    }
-    return out;
-  } catch { return "DECODE ERROR"; }
-}
-
-function xor(text: string, key: string): string {
-  const k = key || "GHOSTFACE";
-  return Array.from(text).map((c, i) =>
-    String.fromCharCode(c.charCodeAt(0) ^ k.charCodeAt(i % k.length))
-  ).join("");
-}
-
-function ghostEncrypt(p: string, k: string) { return "GHX1::" + b64Encode(xor(p, k)); }
-function ghostDecrypt(c: string, k: string) {
-  if (!c.startsWith("GHX1::")) return "INVALID FORMAT — NOT GHOSTFACE ENCRYPTED";
-  return xor(b64Decode(c.slice(6)), k);
+    const combined = base64ToBytes(payload.slice(6));
+    const salt = combined.slice(0, 32);
+    const ciphertext = combined.slice(32);
+    const key = deriveKeyFromPin(passphrase || "GHOSTFACE", salt);
+    const chacha = managedNonce(chacha20poly1305);
+    return new TextDecoder().decode(chacha(key).decrypt(ciphertext));
+  } catch {
+    return "DECRYPTION FAILED — wrong key or corrupted data";
+  }
 }
 
 function simHash(input: string, algo: "SHA-256" | "MD5" | "BLAKE2"): string {
-  const seed = algo === "SHA-256" ? 0x6a09e667 : algo === "MD5" ? 0x67452301 : 0x6b08c647;
-  let h = 0;
-  for (let i = 0; i < input.length; i++) h = ((h << 5) - h + input.charCodeAt(i) + seed) | 0;
-  const raw = Math.abs(h).toString(16).padStart(8, "0");
-  return Array.from({ length: 8 }, (_, i) =>
-    parseInt(raw, 16).toString(16).padStart(8, "0").split("").map((c, j) =>
-      ((parseInt(c, 16) + i * 3 + j * 7) % 16).toString(16)
-    ).join("")
-  ).join("").slice(0, algo === "MD5" ? 32 : 64);
+  const bytes = new TextEncoder().encode(input);
+  const digest = algo === "SHA-256" ? sha256(bytes) : algo === "MD5" ? md5(bytes) : blake2b(bytes);
+  return bytesToHex(digest);
 }
 
 function genKeyPair() {
-  const h = "0123456789abcdef";
-  const r = (n: number) => Array.from({ length: n }, () => h[Math.floor(Math.random() * 16)]).join("");
-  return {
-    pub: `04:${r(8)}:${r(8)}:${r(8)}:${r(8)}:${r(8)}:${r(8)}:${r(8)}`,
-    priv: `GF:${r(12)}:${r(12)}:${r(12)}:${r(12)}`,
-  };
+  const priv = secp256k1.utils.randomSecretKey();
+  const pub = secp256k1.getPublicKey(priv, false);
+  return { pub: bytesToHex(pub), priv: bytesToHex(priv) };
 }
 
 function stealthEncode(msg: string): string {
@@ -225,7 +237,7 @@ export default function EncryptionTools() {
           <>
             <View style={s.info}>
               <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
-              <Text style={s.infoTxt}>XOR + Base64 on-device encryption. Output is prefixed GHX1::.</Text>
+              <Text style={s.infoTxt}>ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations). Output is prefixed GHX2::.</Text>
             </View>
 
             <Text style={s.lbl}>MODE</Text>
@@ -247,7 +259,7 @@ export default function EncryptionTools() {
             <TextInput
               style={[s.input, { minHeight: 72, textAlignVertical: "top" }]}
               value={encInput} onChangeText={setEncInput}
-              placeholder={encMode === "encrypt" ? "Enter message..." : "Paste GHX1:: ciphertext..."}
+              placeholder={encMode === "encrypt" ? "Enter message..." : "Paste GHX2:: ciphertext..."}
               placeholderTextColor={colors.mutedForeground}
               multiline autoCorrect={false}
             />
@@ -328,7 +340,7 @@ export default function EncryptionTools() {
           <>
             <View style={s.info}>
               <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
-              <Text style={s.infoTxt}>Simulated EC key pair (secp256k1). Share public key freely — NEVER share the private key.</Text>
+              <Text style={s.infoTxt}>Real secp256k1 EC key pair, generated on-device with a CSPRNG. Share public key freely — NEVER share the private key.</Text>
             </View>
 
             <Pressable

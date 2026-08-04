@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GHOSTFACE",
-    "slug": "ghostface",
+    "slug": "mayybachh",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -16,8 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ghostface.app",
-      "buildNumber": "4",
-      "minimumOsVersion": "16.0",
+      "buildNumber": "1",
       "infoPlist": {
         "NSFaceIDUsageDescription": "GHOSTFACE uses Face ID to protect your private messages and identity with biometric authentication.",
         "NSCameraUsageDescription": "GHOSTFACE uses the camera for QR code scanning and secure video calls.",
@@ -37,10 +36,7 @@
     },
     "android": {
       "package": "com.ghostface.app",
-      "versionCode": 4,
-      "compileSdkVersion": 35,
-      "targetSdkVersion": 35,
-      "minSdkVersion": 26,
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
@@ -62,13 +58,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
-      "expo-callkit-telecom",
-      [
-        "expo-router",
-        {
-          "origin": "https://replit.com/"
-        }
-      ],
+      "expo-router",
       [
         "expo-font",
         {
@@ -91,6 +81,19 @@
           "faceIDPermission": "GHOSTFACE uses Face ID to protect your private messages and identity with biometric authentication."
         }
       ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0"
+          },
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 26
+          }
+        }
+      ],
       "./plugins/withAdiRegistration"
     ],
     "experiments": {
@@ -100,10 +103,11 @@
     "extra": {
       "privacyPolicyUrl": "https://ghostface.app/privacy",
       "marketingUrl": "https://ghostface.app",
+      "router": {},
       "eas": {
-        "projectId": "5384dffd-78ad-41a3-bff3-4ed0a894c22c"
+        "projectId": "1955ab0c-ad35-40bd-9428-543e6dd8d293"
       }
     },
-    "owner": "ghostfacecomms"
+    "owner": "ghost_face"
   }
 }

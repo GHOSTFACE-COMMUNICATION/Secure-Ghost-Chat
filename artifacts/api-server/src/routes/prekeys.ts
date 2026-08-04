@@ -167,37 +167,24 @@ router.post("/prekeys/register", async (req: Request, res: Response) => {
       .from(deviceTokensTable)
       .where(eq(deviceTokensTable.userId, normalizedUserId));
 
-    const token = randomBytes(32).toString("hex");
-    const tokenHash = hashToken(token);
-
+    // First-writer-wins: an existing registration for this alias is refused
+    // outright, with no reissue path. The previous "demo recovery" upsert
+    // here let ANY caller reissue keys for ANY already-registered alias with
+    // zero proof of prior ownership — i.e. anyone could silently hijack an
+    // existing identity by re-POSTing its alias. registerWithServer() on the
+    // client already treats a non-2xx response as "registration didn't
+    // happen" and gives up quietly (see AppContext.tsx), so a device that
+    // truly lost its SecureStore (token + private keys) has no way to prove
+    // it was the prior owner and correctly cannot reclaim the alias — that's
+    // the same TOFU tradeoff Signal makes, not a regression. Recovery in
+    // that case means picking a new alias; existing peers see it as a
+    // safety-number change, not a silent takeover.
     if (existing) {
-      // Demo recovery: device lost its SecureStore (token + private keys).
-      // Re-issue a fresh device token and replace identity keys so the
-      // device can resume real X3DH sessions. This is intentional for the
-      // demo and removes the prior "first-writer wins" guarantee.
-      await db.transaction(async (tx) => {
-        await tx
-          .update(deviceTokensTable)
-          .set({ tokenHash })
-          .where(eq(deviceTokensTable.userId, normalizedUserId));
-        await tx
-          .update(identityKeysTable)
-          .set({
-            ikPublicKey,
-            spkPublicKey,
-            ikSignPublicKey: ikSignPublicKey ?? null,
-            spkSignature: spkSignature ?? null,
-            pqkemPublicKey: pqkemPublicKey ?? null,
-            pqkemSignature: pqkemSignature ?? null,
-          })
-          .where(eq(identityKeysTable.userId, normalizedUserId));
-      });
-      // Preserve the existing delivery id across a re-issue (it's a stable
-      // routing handle); only mint one if the row predates task #128.
-      const deliveryId = await ensureDeliveryId(normalizedUserId);
-      return res.status(200).json({ token, userId: normalizedUserId, deliveryId, reissued: true });
+      return res.status(409).json({ error: "Alias already registered" });
     }
 
+    const token = randomBytes(32).toString("hex");
+    const tokenHash = hashToken(token);
     const deliveryId = generateDeliveryId();
     await db.transaction(async (tx) => {
       await tx.insert(deviceTokensTable).values({ userId: normalizedUserId, tokenHash });

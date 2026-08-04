@@ -5,4 +5,3 @@ export * from "./ghostNumbers";
 export * from "./invites";
 export * from "./departures";
 export * from "./payments";
-export * from "./callPushTokens";

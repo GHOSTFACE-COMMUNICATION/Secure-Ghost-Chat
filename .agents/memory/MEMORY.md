@@ -1,9 +1,0 @@
-- [GitHub remote divergence](github-remote-divergence.md) — Secure-Ghost-Chat repo has an unrelated git history; move code via cherry-pick/`git show`, never plain pull/reset.
-- [GHOSTFACE brand + lock screen](ghostface-brand-and-lock.md) — accent is antique gold #bf9b30 (near-black monochrome); lock screen is an idle cipher seal that hold-to-decrypt reveals the secure keypad.
-- [GHOSTFACE payments](ghostface-payments.md) — crypto-only (USDC on Solana); Stripe was fully removed. Do not reintroduce a card/fiat path.
-- [GHOSTFACE real E2E encryption](ghostface-encryption.md) — real X3DH+Double Ratchet only, no sim/demo key path; public-only bundles, send hard-fails when not a real session; no JS test runner in the mobile app (use scripts/check-*.mjs); the api-server DOES have vitest (src/__tests__).
-- [Sealed-sender binding](sealed-sender-binding.md) — when the sender alias rides inside the encrypted payload, the X3DH bootstrap path must bind it to the alias's registered identity key (ikA) or any peer can impersonate any alias.
-- [db schema drift](db-schema-drift.md) — after editing lib/db schema, run `tsc -b lib/db` (stale dist d.ts breaks typecheck) and remember dev DB isn't auto-migrated (drizzle push or self-provisioning tests).
-- [Native call ring](native-call-ring.md) — locked-device ringing uses expo-callkit-telecom + @livekit/react-native-webrtc; identity-free VoIP payloads; one push transport per device.
-- [APNs credential debugging](apns-key-malformed.md) — creds now work; users mis-paste keys/IDs into secret forms, sender tolerates bare base64 + filename Key IDs; triage via /admin/test-ring-push.
-- Shadows: use `boxShadow()` from `@/lib/shadow` (folds color+opacity→rgba, blur=old shadowRadius). Do NOT reintroduce deprecated RN `shadow*` props — they log warnings.

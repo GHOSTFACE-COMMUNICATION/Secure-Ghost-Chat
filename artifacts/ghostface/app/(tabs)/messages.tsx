@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import EncryptionTools from "@/components/EncryptionTools";
 import GhostInvite from "@/components/GhostInvite";
 import { GoldGradient } from "@/components/GoldGradient";
@@ -24,6 +25,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
+import { CODE_REGEX, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
 import { getProfileColor } from "@/lib/chatColors";
 
 function formatTime(ts: number): string {
@@ -63,6 +65,20 @@ function addConvErrorMessage(alias: string, error?: string): string {
   }
 }
 
+function inviteErrorTitle(reason: string): string {
+  if (reason === "expired") return "Code Expired";
+  if (reason === "used")    return "Code Already Used";
+  if (reason === "offline") return "Network Unavailable";
+  return "Code Not Found";
+}
+
+function inviteErrorMessage(reason: string): string {
+  if (reason === "expired") return "This invite code has expired. Ask your contact to generate a new one.";
+  if (reason === "used")    return "This code has already been redeemed. Ask your contact for a new one.";
+  if (reason === "offline") return "Cannot reach the GHOSTFACE network. Check your connection and try again.";
+  return "This invite code was not found. Check the code and try again.";
+}
+
 type PageTab = "messages" | "tools" | "invite";
 
 export default function MessagesScreen() {
@@ -78,21 +94,6 @@ export default function MessagesScreen() {
   }, [wsConnected, hadConnection]);
 
   const [pageTab, setPageTab] = useState<PageTab>("messages");
-
-  // "New Code" quick action from the invite-expired alert (task #145): a
-  // regenInvite timestamp param routes here — switch to the Invite tab and
-  // forward the signal so GhostInvite auto-generates a fresh code.
-  const { regenInvite } = useLocalSearchParams<{ regenInvite?: string }>();
-  const [regenSignal, setRegenSignal] = useState<string | null>(null);
-  useEffect(() => {
-    if (typeof regenInvite === "string" && regenInvite) {
-      setPageTab("invite");
-      setRegenSignal(regenInvite);
-      // Clear the param immediately so stale route state can never replay
-      // the signal on later navigations.
-      router.setParams({ regenInvite: undefined });
-    }
-  }, [regenInvite]);
   const [showNew, setShowNew] = useState(false);
   const [newAlias, setNewAlias] = useState("");
 
@@ -133,16 +134,34 @@ export default function MessagesScreen() {
   const [addingChat, setAddingChat] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
 
-  const handleQRScan = async (alias: string) => {
+  const handleQRScan = async (decoded: string) => {
     setShowScanner(false);
     setAddingChat(true);
     try {
-      const result = await addConversation(alias);
-      Haptics.notificationAsync(
-        result.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error
-      );
-      if (!result.ok) {
-        Alert.alert(addConvErrorTitle(result.error), addConvErrorMessage(alias, result.error), [{ text: "OK" }]);
+      if (CODE_REGEX.test(decoded)) {
+        const lookup = await lookupInviteCode(decoded);
+        if (!lookup.ok) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          Alert.alert(inviteErrorTitle(lookup.reason), inviteErrorMessage(lookup.reason), [{ text: "OK" }]);
+          return;
+        }
+        const result = await addConversation(lookup.ownerAlias);
+        if (!result.ok) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          Alert.alert("Connection Failed", "Code valid — connection failed. Try again.", [{ text: "OK" }]);
+          return;
+        }
+        const consume = await consumeInviteCode(decoded);
+        if (!consume.ok && !consume.alreadyUsed) console.warn("[invite] QR consume failed in messages");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        const result = await addConversation(decoded);
+        Haptics.notificationAsync(
+          result.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error
+        );
+        if (!result.ok) {
+          Alert.alert(addConvErrorTitle(result.error), addConvErrorMessage(decoded, result.error), [{ text: "OK" }]);
+        }
       }
     } finally {
       setAddingChat(false);
@@ -156,16 +175,34 @@ export default function MessagesScreen() {
     if (trimmed.length < 2 || addingChat) return;
     setAddingChat(true);
     try {
-      const result = await addConversation(trimmed);
-      Haptics.notificationAsync(
-        result.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error
-      );
-      if (!result.ok) {
-        Alert.alert(
-          addConvErrorTitle(result.error),
-          addConvErrorMessage(trimmed.toUpperCase(), result.error),
-          [{ text: "OK" }]
+      if (CODE_REGEX.test(trimmed)) {
+        const lookup = await lookupInviteCode(trimmed);
+        if (!lookup.ok) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          Alert.alert(inviteErrorTitle(lookup.reason), inviteErrorMessage(lookup.reason), [{ text: "OK" }]);
+          return;
+        }
+        const result = await addConversation(lookup.ownerAlias);
+        if (!result.ok) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          Alert.alert("Connection Failed", "Code valid — connection failed. Try again.", [{ text: "OK" }]);
+          return;
+        }
+        const consume = await consumeInviteCode(trimmed);
+        if (!consume.ok && !consume.alreadyUsed) console.warn("[invite] typed-code consume failed in messages");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        const result = await addConversation(trimmed);
+        Haptics.notificationAsync(
+          result.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error
         );
+        if (!result.ok) {
+          Alert.alert(
+            addConvErrorTitle(result.error),
+            addConvErrorMessage(trimmed.toUpperCase(), result.error),
+            [{ text: "OK" }]
+          );
+        }
       }
     } finally {
       setAddingChat(false);
@@ -494,10 +531,7 @@ export default function MessagesScreen() {
       {pageTab === "tools" ? (
         <EncryptionTools />
       ) : pageTab === "invite" ? (
-        <GhostInvite
-          regenerateSignal={regenSignal}
-          onRegenerateConsumed={() => setRegenSignal(null)}
-        />
+        <GhostInvite />
       ) : (
         <FlatList
           ref={listRef}
@@ -578,7 +612,7 @@ export default function MessagesScreen() {
         animationType="slide"
         onRequestClose={() => setShowNew(false)}
       >
-        <View style={styles.overlay}>
+        <KeyboardAvoidingView behavior="padding" style={styles.overlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowNew(false)} />
             <View style={styles.sheet}>
               <Text style={styles.sheetTitle}>NEW SECURE CHANNEL</Text>
@@ -625,7 +659,7 @@ export default function MessagesScreen() {
                 <Text style={styles.cancelTxt}>CANCEL</Text>
               </Pressable>
             </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
     </TabScreenWrapper>

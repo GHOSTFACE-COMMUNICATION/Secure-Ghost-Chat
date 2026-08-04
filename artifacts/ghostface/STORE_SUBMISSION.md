@@ -188,7 +188,7 @@ Before submitting, complete the following in App Store Connect:
 
 5. **Age Rating**: Complete the content rating questionnaire (expected: 4+)
 
-6. **Export Compliance**: Select "No" for uses encryption exempt from EAR (ITSAppUsesNonExemptEncryption is set to `false` in app.json)
+6. **Export Compliance**: App uses real non-exempt encryption (Signal-protocol E2E messaging) — `ITSAppUsesNonExemptEncryption` is `true` in app.json. In the questionnaire, answer "Yes" to uses encryption, and "No" to qualifying for EAR Category 5 Part 2 exemptions, then complete the self-classification report step.
 
 ---
 
