@@ -106,6 +106,19 @@ function apnsConfig(): ApnsConfig | null {
 export function apnsSandboxMismatch(): boolean {
   return process.env.NODE_ENV !== "production" && process.env.APNS_USE_SANDBOX !== "1";
 }
+
+/**
+ * The APNs host the server would use for VoIP pushes, resolved from
+ * APNS_USE_SANDBOX exactly like apnsConfig() does (task #174 — surfaced in
+ * /admin/push-health so operators can spot a sandbox mismatch in one place).
+ */
+export function apnsResolvedHost(): { host: string; environment: "sandbox" | "production" } {
+  const sandbox = process.env.APNS_USE_SANDBOX === "1";
+  return {
+    host: sandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com",
+    environment: sandbox ? "sandbox" : "production",
+  };
+}
 let apnsJwtCache: { jwt: string; issuedAt: number } | null = null;
 
 /** ES256 provider-token JWT, cached ~40 min (APNs allows 20–60 min). */

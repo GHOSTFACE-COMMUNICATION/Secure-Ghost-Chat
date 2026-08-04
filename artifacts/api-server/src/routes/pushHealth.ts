@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { getPushHealthReport } from "../lib/pushCredentialHealth";
+import { apnsResolvedHost, apnsSandboxMismatch } from "../lib/nativeCallPushSender";
 
 /**
  * GET /admin/push-health (task #166) — credential-health check for the
@@ -15,7 +16,11 @@ const router: IRouter = Router();
 router.get("/admin/push-health", (_req: Request, res: Response) => {
   const report = getPushHealthReport();
   const unhealthy = report.transports.some((t) => t.configured && t.status === "alerting");
-  res.status(unhealthy ? 503 : 200).json(report);
+  // Task #174: surface which APNs server (sandbox vs production) is in use
+  // and whether a non-production server is pointed at the production host
+  // (silent BadDeviceToken failures) alongside the credential checks.
+  const apns = { ...apnsResolvedHost(), sandboxMismatch: apnsSandboxMismatch() };
+  res.status(unhealthy ? 503 : 200).json({ ...report, apns });
 });
 
 export default router;
