@@ -55,7 +55,20 @@ function b64url(input: Buffer | string): string {
 }
 
 function normalizePem(raw: string): string {
-  return raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw;
+  // Unescape literal \n sequences written by some secret-store UIs.
+  let s = raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw;
+  // If the value is bare base64 (no PEM header) — e.g. the user pasted only
+  // the body of the .p8 file — wrap it so Node's createPrivateKey can parse
+  // it. Apple .p8 files are PKCS#8 EC keys ("BEGIN PRIVATE KEY").
+  if (!s.includes("-----BEGIN")) {
+    const body =
+      s
+        .replace(/\s/g, "")
+        .match(/.{1,64}/g)
+        ?.join("\n") ?? s;
+    s = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
+  }
+  return s;
 }
 
 // ── APNs (iOS) ──────────────────────────────────────────────────────────────
@@ -64,8 +77,13 @@ type ApnsConfig = { key: string; keyId: string; teamId: string; bundleId: string
 
 function apnsConfig(): ApnsConfig | null {
   const key = process.env.APNS_VOIP_KEY;
-  const keyId = process.env.APNS_KEY_ID;
-  const teamId = process.env.APNS_TEAM_ID;
+  // Tolerate the key id being pasted as a filename fragment
+  // ("AuthKey_ABC123DEFG.p8" / "ABC123DEFG.p8") — the real id is 10 chars.
+  const keyId = (process.env.APNS_KEY_ID ?? "")
+    .trim()
+    .replace(/^AuthKey_/i, "")
+    .replace(/\.p8$/i, "");
+  const teamId = (process.env.APNS_TEAM_ID ?? "").trim();
   if (!key || !keyId || !teamId) return null;
   return {
     key: normalizePem(key),
