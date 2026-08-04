@@ -42,6 +42,11 @@ const NODE = 60;
 
 // ── Coin physics ──────────────────────────────────────────────────────────────
 const CYCLE = 5200; // ms per full spin-slow-fall cycle
+// Tap-spin impulse tuning: one tap ≈ a quick flick; 4–5 fast taps hit the cap
+// for a fast whirl; the 0.18^dt decay in the frame loop winds it down within
+// ~2 s (half-life ≈ 0.4 s).
+const TAP_KICK_DEG_S = 900; // deg/s added per tap
+const MAX_BOOST_DEG_S = 4000; // cap on stacked boost velocity
 const FAST_END = 0.3;
 const SLOW_END = 0.68;
 const FALL_END = 0.88;
@@ -159,8 +164,13 @@ export default function HomeScreen() {
       } else {
         boostVel.current = 0;
       }
-      const { rotY, tiltX, scaleX } = coinPhysics(now - startMs);
-      const totalRotY = (rotY + boostDeg.current) % 360;
+      const phys = coinPhysics(now - startMs);
+      // While the tap boost is strong, let it dominate: pull the coin toward
+      // an upright, full-width spin so the boost never fights the fall phase.
+      const boostMix = Math.min(boostVel.current / 1200, 1);
+      const tiltX = lerp(phys.tiltX, 0, boostMix);
+      const scaleX = lerp(phys.scaleX, 1, boostMix);
+      const totalRotY = (phys.rotY + boostDeg.current) % 360;
       coinRotY.setValue(totalRotY);
       coinTiltX.setValue(tiltX);
       coinScaleX.setValue(scaleX);
@@ -237,6 +247,9 @@ export default function HomeScreen() {
 
   const toggleMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Tap-spin kick: stacks across rapid taps, capped so mashing can't
+    // spin the coin absurdly fast or break edge-band/glow visuals.
+    boostVel.current = Math.min(boostVel.current + TAP_KICK_DEG_S, MAX_BOOST_DEG_S);
     setMenuOpen((open) => !open);
   };
 
@@ -402,10 +415,7 @@ export default function HomeScreen() {
             <View pointerEvents="box-none" style={styles.centerWrap}>
               <View style={styles.centerCol}>
                 <Pressable
-                  onPress={() => {
-                    boostVel.current = Math.min(boostVel.current + 1080, 4320);
-                    toggleMenu();
-                  }}
+                  onPress={toggleMenu}
                   hitSlop={24}
                   style={styles.centerHit}
                   accessibilityRole="button"
