@@ -10,7 +10,11 @@ import {
 } from "@solana/spl-token";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
-import { requireAdminSecret } from "../middlewares/adminAuth";
+import {
+  isAdminAuthorized,
+  isValidAdminSecret,
+  setAdminSessionCookie,
+} from "../middlewares/adminAuth";
 
 const router: IRouter = Router();
 
@@ -233,12 +237,92 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
   }
 });
 
-// ── GET /admin — Token management admin dashboard ─────────────────────────────
-// Task #168: gated behind ADMIN_SECRET. Browser access: /api/admin?key=<secret>
-router.get("/admin", requireAdminSecret, (_req: Request, res: Response) => {
-  const API = `/api`;
+// ── Admin login (task #182) ───────────────────────────────────────────────────
+// Browser access no longer uses ?key=<secret> in the URL (it leaks into browser
+// history / access logs / referrers). Instead the dashboard shows a login form
+// that POSTs the secret and sets an HttpOnly signed session cookie. A legacy
+// ?key= visit is still accepted but is immediately redirected with the key
+// stripped from the URL (handled in requireAdminSecret).
+
+function renderLoginPage(res: Response, error?: string) {
+  res.status(error ? 401 : 200);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
   res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>GHOSTFACE · ADMIN LOGIN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#000;color:#f0f0f0;font-family:'Geist Mono',monospace;min-height:100vh}
+  body{display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{background:#0a0a0a;border:1px solid #222;border-radius:10px;padding:32px;width:100%;max-width:380px}
+  h1{font-size:13px;font-weight:900;letter-spacing:4px;margin-bottom:6px}
+  .sub{font-size:10px;letter-spacing:2px;color:#555;margin-bottom:24px}
+  label{display:block;font-size:9px;letter-spacing:2px;color:#555;margin-bottom:8px}
+  input{width:100%;background:#000;border:1px solid #222;border-radius:6px;color:#f0f0f0;
+    font-family:inherit;font-size:13px;letter-spacing:1px;padding:12px;margin-bottom:16px;outline:none}
+  input:focus{border-color:#555}
+  button{width:100%;background:#f0f0f0;color:#000;border:none;border-radius:6px;
+    font-family:inherit;font-size:11px;font-weight:900;letter-spacing:3px;padding:12px;cursor:pointer}
+  button:hover{opacity:.9}
+  .err{font-size:10px;letter-spacing:1px;color:#FF3B30;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>TOKEN ADMIN</h1>
+  <div class="sub">AUTHENTICATION REQUIRED</div>
+  ${error ? `<div class="err">${error}</div>` : ""}
+  <form method="POST" action="/api/admin/login" autocomplete="off">
+    <label for="key">ADMIN SECRET</label>
+    <input id="key" name="key" type="password" autofocus autocomplete="off"/>
+    <button type="submit">UNLOCK</button>
+  </form>
+</div>
+</body>
+</html>`);
+}
+
+router.post("/admin/login", (req: Request, res: Response) => {
+  if (!process.env.ADMIN_SECRET) {
+    return res.status(503).json({ error: "admin endpoints disabled (ADMIN_SECRET not set)" });
+  }
+  const key = typeof req.body?.key === "string" ? req.body.key : "";
+  if (!isValidAdminSecret(key)) {
+    return renderLoginPage(res, "INVALID SECRET");
+  }
+  setAdminSessionCookie(req, res);
+  return res.redirect(303, "/api/admin");
+});
+
+// ── GET /admin — Token management admin dashboard ─────────────────────────────
+// Task #168: gated behind ADMIN_SECRET. Task #182: browser auth via login form
+// + HttpOnly session cookie; legacy ?key= is redirected with the key stripped.
+router.get(
+  "/admin",
+  (req: Request, res: Response, next) => {
+    if (!process.env.ADMIN_SECRET) {
+      return res.status(503).json({ error: "admin endpoints disabled (ADMIN_SECRET not set)" });
+    }
+    if (isAdminAuthorized(req)) return next();
+    const queryKey = typeof req.query["key"] === "string" ? req.query["key"] : "";
+    if (queryKey && isValidAdminSecret(queryKey)) {
+      // Valid legacy ?key= — set the session cookie and strip the secret from
+      // the URL so it never lands in browser history.
+      setAdminSessionCookie(req, res);
+      return res.redirect(302, "/api/admin");
+    }
+    return renderLoginPage(res, queryKey ? "INVALID SECRET" : undefined);
+  },
+  (_req: Request, res: Response) => {
+    const API = `/api`;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -747,6 +831,7 @@ document.getElementById('fColor').addEventListener('input', function() {
 </script>
 </body>
 </html>`);
-});
+  },
+);
 
 export default router;
