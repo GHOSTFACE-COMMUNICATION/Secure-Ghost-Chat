@@ -79,6 +79,15 @@ function apnsConfig(): ApnsConfig | null {
   };
 }
 
+/**
+ * Task #171: a dev server that forgets APNS_USE_SANDBOX=1 pushes dev-build
+ * VoIP tokens at the *production* APNs host, which rejects them as
+ * BadDeviceToken — silently from the app's perspective. Detect the
+ * mismatch: non-production NODE_ENV while targeting api.push.apple.com.
+ */
+export function apnsSandboxMismatch(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.APNS_USE_SANDBOX !== "1";
+}
 let apnsJwtCache: { jwt: string; issuedAt: number } | null = null;
 
 /** ES256 provider-token JWT, cached ~40 min (APNs allows 20–60 min). */
@@ -271,6 +280,7 @@ export async function sendNativeCallPush(
   try {
     if (tokenType === "apns-voip") {
       const cfg = apnsConfig();
+      if (cfg) warnIfApnsSandboxMismatch();
       result = cfg
         ? // APNs nests the event directly in the push dictionary.
           await sendApnsVoipPush(cfg, deviceToken, JSON.stringify({ incomingCall: event }))
@@ -297,3 +307,21 @@ export async function sendNativeCallPush(
 // Wire the health module's "is this transport configured?" probe without a
 // runtime import cycle (pushCredentialHealth must not import this module).
 setConfiguredCheck(isNativeCallPushConfigured);
+
+/**
+ * Logs a clear, once-per-process warning when a non-production server is
+ * pointed at the production APNs endpoint. Called at startup (index.ts)
+ * and defensively before each APNs send.
+ */
+export function warnIfApnsSandboxMismatch(): void {
+  if (warnedSandboxMismatch || !apnsSandboxMismatch()) return;
+  warnedSandboxMismatch = true;
+  logger.warn(
+    { nodeEnv: process.env.NODE_ENV ?? "(unset)", apnsHost: "api.push.apple.com" },
+    "[nativeCallPush] NODE_ENV is not 'production' but APNS_USE_SANDBOX is not '1' — " +
+      "APNs VoIP pushes will hit the PRODUCTION endpoint and dev-build device tokens " +
+      "will be rejected as BadDeviceToken. Set APNS_USE_SANDBOX=1 for dev sideloads.",
+  );
+}
+
+let warnedSandboxMismatch = false;

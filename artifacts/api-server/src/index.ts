@@ -5,6 +5,7 @@ import { logger } from "./lib/logger";
 import { createWsServer } from "./ws/manager";
 import { startRotationScheduler } from "./lib/rotationScheduler";
 import { startInviteExpiryScheduler } from "./lib/inviteExpiryScheduler";
+import { warnIfApnsSandboxMismatch } from "./lib/nativeCallPushSender";
 
 const rawPort = process.env["PORT"];
 
@@ -23,6 +24,10 @@ const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: "/api/ws" });
 createWsServer(wss);
 logger.info("WebSocket server attached at /api/ws");
+
+// Task #171: warn loudly at startup when a dev server would push dev-build
+// VoIP tokens at the production APNs host (silent BadDeviceToken failures).
+warnIfApnsSandboxMismatch();
 
 startRotationScheduler();
 startInviteExpiryScheduler();

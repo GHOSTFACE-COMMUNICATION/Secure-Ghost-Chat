@@ -8,6 +8,7 @@ Goal: confirm an incoming call rings a **locked** iPhone (CallKit full-screen sh
 - A Firebase project matching the `FCM_SERVICE_ACCOUNT` secret, with `com.ghostface.app` registered as an Android app.
 - A valid Expo access token (the current `EXPO_TOKEN` secret is **invalid/expired** — replace it, or log in locally with `eas login`).
 - The API server reachable from the phones (published deployment, or the dev URL while the workspace is running).
+- **Dev sideloads only:** set `APNS_USE_SANDBOX=1` on the API server so VoIP pushes target `api.sandbox.push.apple.com`. Development builds' tokens are rejected by the production APNs host as `BadDeviceToken` (the server logs a startup warning when `NODE_ENV` is not `production` but this var is unset). TestFlight/App Store builds use the production host — leave it unset there.
 
 ## 1. Build & sideload
 
