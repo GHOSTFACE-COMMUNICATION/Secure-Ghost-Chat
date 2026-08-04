@@ -1,5 +1,4 @@
-import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { timingSafeEqual } from "node:crypto";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { db, callPushTokensTable } from "@workspace/db";
 import { logger } from "../lib/logger";
@@ -8,25 +7,10 @@ import { sendNativeCallPush, type NativeTokenType } from "../lib/nativeCallPushS
 
 const router: IRouter = Router();
 
-/**
- * Shared-secret gate for admin endpoints (pattern for task #168 too):
- * requests must carry `x-admin-secret: <ADMIN_SECRET>`. When ADMIN_SECRET is
- * not configured the endpoints are disabled entirely (503) — never open.
- */
-export function requireAdminSecret(req: Request, res: Response, next: NextFunction) {
-  const configured = process.env.ADMIN_SECRET;
-  if (!configured) {
-    return res.status(503).json({ error: "admin endpoints disabled (ADMIN_SECRET not set)" });
-  }
-  const provided = req.header("x-admin-secret") ?? "";
-  const a = Buffer.from(provided);
-  const b = Buffer.from(configured);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    return res.status(401).json({ error: "unauthorized" });
-  }
-  next();
-  return undefined;
-}
+// Shared-secret gate moved to ../middlewares/adminAuth (task #168) so every
+// /admin surface uses the same credential. Re-exported for compatibility.
+import { requireAdminSecret } from "../middlewares/adminAuth";
+export { requireAdminSecret };
 
 /**
  * POST /admin/test-ring-push — fire a real native ring push to every device

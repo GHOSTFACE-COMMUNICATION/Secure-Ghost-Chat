@@ -10,6 +10,7 @@ import {
 } from "@solana/spl-token";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
+import { requireAdminSecret } from "../middlewares/adminAuth";
 
 const router: IRouter = Router();
 
@@ -233,7 +234,8 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
 });
 
 // ── GET /admin — Token management admin dashboard ─────────────────────────────
-router.get("/admin", (_req: Request, res: Response) => {
+// Task #168: gated behind ADMIN_SECRET. Browser access: /api/admin?key=<secret>
+router.get("/admin", requireAdminSecret, (_req: Request, res: Response) => {
   const API = `/api`;
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!DOCTYPE html>
