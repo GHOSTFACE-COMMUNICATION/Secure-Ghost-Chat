@@ -5,4 +5,5 @@
 - [Sealed-sender binding](sealed-sender-binding.md) — when the sender alias rides inside the encrypted payload, the X3DH bootstrap path must bind it to the alias's registered identity key (ikA) or any peer can impersonate any alias.
 - [db schema drift](db-schema-drift.md) — after editing lib/db schema, run `tsc -b lib/db` (stale dist d.ts breaks typecheck) and remember dev DB isn't auto-migrated (drizzle push or self-provisioning tests).
 - [Native call ring](native-call-ring.md) — locked-device ringing uses expo-callkit-telecom + @livekit/react-native-webrtc; identity-free VoIP payloads; one push transport per device.
+- [Dev APNS_VOIP_KEY malformed](apns-key-malformed.md) — stored key fails createPrivateKey; APNs sends report "error" until re-uploaded. Test via /admin/test-ring-push.
 - Shadows: use `boxShadow()` from `@/lib/shadow` (folds color+opacity→rgba, blur=old shadowRadius). Do NOT reintroduce deprecated RN `shadow*` props — they log warnings.
