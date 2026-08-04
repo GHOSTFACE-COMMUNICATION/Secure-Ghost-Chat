@@ -88,6 +88,29 @@ router.post("/calls/register-voip-token", async (req: Request, res: Response) =>
         set: { userId, platform, tokenType: resolvedTokenType, updatedAt: new Date() },
       });
 
+    // Task #173: once a device registers a native (apns-voip/fcm) token, any
+    // Expo alert tokens for the same alias+platform are stale leftovers from
+    // a pre-native install — the send-time dedupe already suppresses them, so
+    // deleting keeps call_push_tokens clean as devices migrate.
+    if (resolvedTokenType === "apns-voip" || resolvedTokenType === "fcm") {
+      const deleted = await db
+        .delete(callPushTokensTable)
+        .where(
+          and(
+            eq(callPushTokensTable.userId, userId),
+            eq(callPushTokensTable.platform, platform),
+            eq(callPushTokensTable.tokenType, "expo"),
+          ),
+        )
+        .returning({ token: callPushTokensTable.token });
+      if (deleted.length > 0) {
+        logger.info(
+          { alias: userId, platform, removed: deleted.length },
+          "[callPush] removed stale Expo call push tokens shadowed by native token",
+        );
+      }
+    }
+
     logger.info(
       { alias: userId, platform, tokenType: resolvedTokenType },
       "[callPush] VoIP push token registered",
