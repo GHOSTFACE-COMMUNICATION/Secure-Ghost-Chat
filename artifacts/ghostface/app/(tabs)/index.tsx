@@ -41,12 +41,15 @@ const ORBIT_RADIUS = 134;
 const NODE = 60;
 
 // ── Coin physics ──────────────────────────────────────────────────────────────
-const CYCLE = 5200; // ms per full spin-slow-fall cycle
+// Velocity model: the coin spins upright forever at BASE_SPIN_DEG_S (it never
+// tilts or falls). Taps add capped velocity kicks that decay back to the base
+// rate; holding the coin brakes it to a stop, and releasing spins it back up.
+const BASE_SPIN_DEG_S = 130; // idle spin rate
 // Tap-spin impulse tuning: one tap ≈ a quick flick; 4–5 fast taps hit the cap
 // for a fast whirl; the 0.18^dt decay in the frame loop winds it down within
 // ~2 s (half-life ≈ 0.4 s).
 const TAP_KICK_DEG_S = 900; // deg/s added per tap
-const MAX_BOOST_DEG_S = 4000; // cap on stacked boost velocity
+const MAX_BOOST_DEG_S = 4000; // cap on stacked velocity
 // Motion blur ramps in between these boost velocities (deg/s). Below the
 // start the face stays crisp; at the end the pre-blurred face fully covers
 // the crisp one so top-speed spins read as a whirl, not a strobing logo.
@@ -59,34 +62,8 @@ const BLUR_FULL_DEG_S = 3200;
 const HAPTIC_START_DEG_S = 700;
 const HAPTIC_SLOW_INTERVAL_MS = 220;
 const HAPTIC_FAST_INTERVAL_MS = 60;
-const FAST_END = 0.3;
-const SLOW_END = 0.68;
-const FALL_END = 0.88;
 
-function easeIn3(t: number) { return t * t * t; }
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
-
-function coinPhysics(ms: number): { rotY: number; tiltX: number; scaleX: number } {
-  const t = (ms % CYCLE) / CYCLE;
-  if (t < FAST_END) {
-    return { rotY: (t / FAST_END) * 1800, tiltX: 0, scaleX: 1 };
-  }
-  if (t < SLOW_END) {
-    const p = easeIn3((t - FAST_END) / (SLOW_END - FAST_END));
-    return { rotY: 1800 + p * 720, tiltX: lerp(0, 62, p), scaleX: 1 };
-  }
-  if (t < FALL_END) {
-    const p = (t - SLOW_END) / (FALL_END - SLOW_END);
-    const ep = easeIn3(p);
-    const wobble = lerp(6, 2, ep) * Math.sin(p * Math.PI * 14);
-    return {
-      rotY: 2520 + p * 180,
-      tiltX: lerp(62, 86, ep) + wobble,
-      scaleX: lerp(1, 0.15, 1 - Math.pow(1 - p, 3)),
-    };
-  }
-  return { rotY: 2700, tiltX: 88, scaleX: 0.08 };
-}
 
 type NavNode = {
   icon: IconName;
@@ -98,28 +75,30 @@ type NavNode = {
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { alias, vpnConnected, panicWipe, spinHapticsEnabled } = useApp();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [wipeArmed, setWipeArmed] = useState(false);
   const [isWiping, setIsWiping] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const wipeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wipeFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const wipeAnim = useRef(new Animated.Value(0)).current;
 
   // Decorative ring spin
   const spin = useRef(new Animated.Value(0)).current;
   // Coin physics values — driven by rAF, not Animated.timing
   const coinRotY = useRef(new Animated.Value(0)).current;
-  const coinTiltX = useRef(new Animated.Value(0)).current;
-  const coinScaleX = useRef(new Animated.Value(1)).current;
-  const coinGlow = useRef(new Animated.Value(0.6)).current;
   // 0..1 — how edge-on the coin is; drives the fake "thickness" rim band
   const coinEdge = useRef(new Animated.Value(0)).current;
   // 0..1 — motion-blur mix; crossfades a pre-blurred face over the crisp one
   const coinBlur = useRef(new Animated.Value(0)).current;
-  // Tap-to-spin impulse (deg/s), decays exponentially each frame
-  const boostVel = useRef(0);
-  const boostDeg = useRef(0);
+  // Spin velocity (deg/s) + accumulated angle; taps kick the velocity up,
+  // holding brakes it to zero, release spins it back up to the base rate.
+  const spinVel = useRef(BASE_SPIN_DEG_S);
+  const spinAngle = useRef(0);
+  const holdingCoin = useRef(false);
+  // Set on long-press so the release doesn't also fire onPress (menu toggle)
+  const didHoldCoin = useRef(false);
   const lastFrameMs = useRef(0);
   // Timestamp of the last spin-haptic tick (performance.now() ms)
   const lastHapticMs = useRef(0);
@@ -130,7 +109,6 @@ export default function HomeScreen() {
 
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
-  const wipeAnim = useRef(new Animated.Value(0)).current;
   const rafRef = useRef<number>(0);
 
   // Decorative ring + breathing fade — gated on screen focus
@@ -171,57 +149,52 @@ export default function HomeScreen() {
 
   // Coin physics loop — runs on JS thread, drives Animated.Values via setValue
   useEffect(() => {
-    const startMs = performance.now();
     function frame(now: number) {
       const dt = lastFrameMs.current
         ? Math.min((now - lastFrameMs.current) / 1000, 0.05)
         : 0;
       lastFrameMs.current = now;
-      // Integrate tap-spin impulse with exponential decay
-      if (boostVel.current > 1) {
-        boostDeg.current += boostVel.current * dt;
-        boostVel.current *= Math.pow(0.18, dt);
+      const v = spinVel.current;
+      if (holdingCoin.current) {
+        // Braking: hard exponential decay toward a full stop
+        spinVel.current = v < 2 ? 0 : v * Math.pow(0.015, dt);
+      } else if (v > BASE_SPIN_DEG_S) {
+        // Tap boost decays back down to the idle rate
+        spinVel.current =
+          BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.18, dt);
       } else {
-        boostVel.current = 0;
+        // Released after a hold: ease back up to the idle rate
+        spinVel.current =
+          BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.08, dt);
       }
-      const phys = coinPhysics(now - startMs);
-      // While the tap boost is strong, let it dominate: pull the coin toward
-      // an upright, full-width spin so the boost never fights the fall phase.
-      const boostMix = Math.min(boostVel.current / 1200, 1);
-      const tiltX = lerp(phys.tiltX, 0, boostMix);
-      const scaleX = lerp(phys.scaleX, 1, boostMix);
-      const totalRotY = (phys.rotY + boostDeg.current) % 360;
+      spinAngle.current = (spinAngle.current + spinVel.current * dt) % 360;
+      const totalRotY = spinAngle.current;
       coinRotY.setValue(totalRotY);
-      coinTiltX.setValue(tiltX);
-      coinScaleX.setValue(scaleX);
-      coinGlow.setValue(scaleX > 0.5 ? 0.65 : 0.2);
-      // Edge band peaks when the face is edge-on; fades out as the coin
-      // flattens into its fall phase so it never floats over the "puddle".
+      // Edge band peaks when the face is edge-on
       const edgeOn = Math.pow(Math.abs(Math.sin((totalRotY * Math.PI) / 180)), 3);
-      const flatFade = Math.max(0, Math.min(1, (scaleX - 0.3) / 0.7));
-      coinEdge.setValue(edgeOn * flatFade);
-      // Motion blur: ramp with boost velocity, smoothstep-shaped so it eases
+      coinEdge.setValue(edgeOn);
+      // Motion blur: ramp with spin velocity, smoothstep-shaped so it eases
       // in near top speed and fades out smoothly as the boost decays.
       const blurT = Math.max(
         0,
         Math.min(
           1,
-          (boostVel.current - BLUR_START_DEG_S) /
+          (spinVel.current - BLUR_START_DEG_S) /
             (BLUR_FULL_DEG_S - BLUR_START_DEG_S),
         ),
       );
       coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
-      // Haptic buzz: tick rate ramps with boost velocity. Only fires while a
-      // tap boost is active (never during the idle spin cycle) and no-ops on
+      // Haptic buzz: tick rate ramps with spin velocity. Only fires while a
+      // tap boost is active (never during the idle spin rate) and no-ops on
       // web where expo-haptics has no implementation. Skipped entirely when
       // the user disables "Spin haptics" in Settings (Task #192).
       if (
         spinHapticsRef.current &&
         Platform.OS !== "web" &&
-        boostVel.current > HAPTIC_START_DEG_S
+        spinVel.current > HAPTIC_START_DEG_S
       ) {
         const speedT = Math.min(
-          (boostVel.current - HAPTIC_START_DEG_S) /
+          (spinVel.current - HAPTIC_START_DEG_S) /
             (MAX_BOOST_DEG_S - HAPTIC_START_DEG_S),
           1,
         );
@@ -244,16 +217,6 @@ export default function HomeScreen() {
     rafRef.current = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
-
-  // Reveal/hide orbiting menu on tap
-  useEffect(() => {
-    Animated.timing(reveal, {
-      toValue: menuOpen ? 1 : 0,
-      duration: 360,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [menuOpen, reveal]);
 
   // Self-destruct bar fill: tracks the 3s hold in real time — fills while
   // armed, snaps full while wiping, drains quickly on release.
@@ -306,14 +269,15 @@ export default function HomeScreen() {
     if (!isWiping) setWipeArmed(false);
   };
 
-  // Opening the orbit menu hides the destruct bar — cancel any in-flight hold
-  // so a wipe can never complete invisibly.
+  // Reveal/hide orbiting menu on tap
   useEffect(() => {
-    if (menuOpen) {
-      if (wipeTimer.current) clearTimeout(wipeTimer.current);
-      setWipeArmed(false);
-    }
-  }, [menuOpen]);
+    Animated.timing(reveal, {
+      toValue: menuOpen ? 1 : 0,
+      duration: 360,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [menuOpen, reveal]);
 
   const go = (path: () => void) => () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -324,7 +288,7 @@ export default function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     // Tap-spin kick: stacks across rapid taps, capped so mashing can't
     // spin the coin absurdly fast or break edge-band/glow visuals.
-    boostVel.current = Math.min(boostVel.current + TAP_KICK_DEG_S, MAX_BOOST_DEG_S);
+    spinVel.current = Math.min(spinVel.current + TAP_KICK_DEG_S, MAX_BOOST_DEG_S);
     setMenuOpen((open) => !open);
   };
 
@@ -390,16 +354,10 @@ export default function HomeScreen() {
     outputRange: [1, 0],
   });
 
-  // Coin transform — driven by physics rAF loop via setValue
+  // Coin transform — driven by physics rAF loop via setValue. Always upright:
+  // the coin spins around its vertical axis and never tilts or falls.
   const coinTransform = [
     { perspective: 800 },
-    {
-      rotateX: coinTiltX.interpolate({
-        inputRange: [0, 90],
-        outputRange: ["0deg", "90deg"],
-        extrapolate: "clamp",
-      }),
-    },
     {
       rotateY: coinRotY.interpolate({
         inputRange: [0, 360],
@@ -407,7 +365,6 @@ export default function HomeScreen() {
         extrapolate: "clamp",
       }),
     },
-    { scaleX: coinScaleX },
   ];
 
   return (
@@ -451,7 +408,24 @@ export default function HomeScreen() {
             <View pointerEvents="box-none" style={styles.centerWrap}>
               <View style={styles.centerCol}>
                 <Pressable
-                  onPress={toggleMenu}
+                  onPress={() => {
+                    // A hold that stopped the coin shouldn't also toggle the menu
+                    if (didHoldCoin.current) return;
+                    toggleMenu();
+                  }}
+                  onLongPress={() => {
+                    didHoldCoin.current = true;
+                    holdingCoin.current = true;
+                  }}
+                  delayLongPress={220}
+                  onPressOut={() => {
+                    holdingCoin.current = false;
+                    // Reset after this tap cycle fully settles (onPress fires
+                    // after onPressOut on release of a long press)
+                    setTimeout(() => {
+                      didHoldCoin.current = false;
+                    }, 0);
+                  }}
                   hitSlop={24}
                   style={styles.centerHit}
                   accessibilityRole="button"
@@ -467,16 +441,6 @@ export default function HomeScreen() {
                       styles.coinEdgeBand,
                       {
                         opacity: Animated.multiply(coinEdge, circleOpacity),
-                        transform: [
-                          { perspective: 800 },
-                          {
-                            rotateX: coinTiltX.interpolate({
-                              inputRange: [0, 90],
-                              outputRange: ["0deg", "90deg"],
-                              extrapolate: "clamp",
-                            }),
-                          },
-                        ],
                       },
                     ]}
                   >
@@ -528,59 +492,6 @@ export default function HomeScreen() {
                 >
                   TAP TO REVEAL
                 </Animated.Text>
-
-                {/* Self-destruct bar — hold 3s to wipe; silent by contract.
-                    Hidden while the orbit menu is open so it never overlaps
-                    the bottom nav node's hit area. */}
-                <Animated.View
-                  style={{ opacity: hintOpacity }}
-                  pointerEvents={menuOpen ? "none" : "auto"}
-                >
-                <Pressable
-                  onPressIn={handleWipePressIn}
-                  onPressOut={handleWipePressOut}
-                  hitSlop={12}
-                  style={styles.destructBar}
-                  accessibilityRole="button"
-                  accessibilityLabel="Hold for three seconds to self-destruct"
-                >
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      styles.destructFill,
-                      {
-                        width: wipeAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ["0%", "100%"],
-                        }),
-                        opacity: wipeAnim.interpolate({
-                          inputRange: [0, 0.08, 1],
-                          outputRange: [0, 0.85, 1],
-                        }),
-                      },
-                    ]}
-                  />
-                  <View pointerEvents="none" style={styles.destructLabelRow}>
-                    <Ionicons
-                      name="flame"
-                      size={12}
-                      color={wipeArmed || isWiping ? "#fff" : "rgba(220,38,38,0.9)"}
-                    />
-                    <Text
-                      style={[
-                        styles.destructLabel,
-                        (wipeArmed || isWiping) && styles.destructLabelActive,
-                      ]}
-                    >
-                      {isWiping
-                        ? "WIPED"
-                        : wipeArmed
-                          ? "HOLD TO SELF-DESTRUCT"
-                          : "SELF-DESTRUCT"}
-                    </Text>
-                  </View>
-                </Pressable>
-                </Animated.View>
               </View>
             </View>
 
@@ -635,6 +546,58 @@ export default function HomeScreen() {
             })}
           </View>
         </View>
+
+        {/* Self-destruct bar — anchored low, well below the orbit menu so it
+            never overlaps the nav nodes. Hold 3s to wipe; silent by contract. */}
+        <View
+          pointerEvents="box-none"
+          style={[styles.destructWrap, { bottom: insets.bottom + 28 }]}
+        >
+          <Pressable
+            onPressIn={handleWipePressIn}
+            onPressOut={handleWipePressOut}
+            hitSlop={12}
+            style={styles.destructBar}
+            accessibilityRole="button"
+            accessibilityLabel="Hold for three seconds to self-destruct"
+          >
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.destructFill,
+                {
+                  width: wipeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["0%", "100%"],
+                  }),
+                  opacity: wipeAnim.interpolate({
+                    inputRange: [0, 0.08, 1],
+                    outputRange: [0, 0.85, 1],
+                  }),
+                },
+              ]}
+            />
+            <View pointerEvents="none" style={styles.destructLabelRow}>
+              <Ionicons
+                name="flame"
+                size={12}
+                color={wipeArmed || isWiping ? "#fff" : "rgba(220,38,38,0.9)"}
+              />
+              <Text
+                style={[
+                  styles.destructLabel,
+                  (wipeArmed || isWiping) && styles.destructLabelActive,
+                ]}
+              >
+                {isWiping
+                  ? "WIPED"
+                  : wipeArmed
+                    ? "HOLD TO SELF-DESTRUCT"
+                    : "SELF-DESTRUCT"}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
       </View>
     </TabScreenWrapper>
   );
@@ -643,40 +606,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
 
-  // Self-destruct bar (under the coin)
-  destructBar: {
-    marginTop: 22,
-    width: 210,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(220,38,38,0.55)",
-    backgroundColor: "rgba(127,29,29,0.14)",
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  destructFill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: RED,
-  },
-  destructLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  destructLabel: {
-    fontFamily: FONT_MONO,
-    fontSize: 9,
-    letterSpacing: 3,
-    color: "rgba(220,38,38,0.9)",
-  },
-  destructLabelActive: {
-    color: "#fff",
-  },
 
   // Alias header
   header: {
@@ -826,6 +755,47 @@ const styles = StyleSheet.create({
     fontSize: 9,
     letterSpacing: 4,
     color: "rgba(191,155,48,0.6)",
+  },
+
+  // Self-destruct bar (anchored near the bottom edge)
+  destructWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 40,
+  },
+  destructBar: {
+    width: 210,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(220,38,38,0.55)",
+    backgroundColor: "rgba(127,29,29,0.14)",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  destructFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: RED,
+  },
+  destructLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  destructLabel: {
+    fontFamily: FONT_MONO,
+    fontSize: 9,
+    letterSpacing: 3,
+    color: "rgba(220,38,38,0.9)",
+  },
+  destructLabelActive: {
+    color: "#fff",
   },
 
   // Nav nodes
