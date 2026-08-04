@@ -199,7 +199,10 @@ export function generateSafetyNumberFromKeys(
   myIKSignPub: string,
   theirIKSignPub: string,
 ): string {
-  const [keyA, keyB] = [myIKSignPub, theirIKSignPub].sort();
+  // Normalize hex case before sorting — the same key can arrive uppercase or
+  // lowercase depending on the path (server bundle vs. X3DH header), and both
+  // sides must derive the identical number.
+  const [keyA, keyB] = [myIKSignPub.toLowerCase(), theirIKSignPub.toLowerCase()].sort();
   const combined = strToBytes(`GHOSTFACE_SAFETY_NUMBER_v2:${keyA}:${keyB}`);
   const hash = sha256(combined);
   return Array.from({ length: 6 }, (_, i) => {

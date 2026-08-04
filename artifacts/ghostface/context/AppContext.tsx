@@ -39,7 +39,7 @@ import React, {
   useState,
 } from "react";
 import {
-  generateSafetyNumber,
+  generateSafetyNumberFromKeys,
 } from "@/lib/crypto";
 import {
   initSessionAliceWithHeader,
@@ -2292,6 +2292,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       let drSession: DRSession;
       let usedOPK = false;
       let pendingX3DHHeader: string;
+      let myIkPubForSafety: string; // hoisted out of the try for the safety number below
 
       try {
         const [myIKPriv, myIKPub, mySpkPriv, mySpkPub] = await Promise.all([
@@ -2341,6 +2342,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return { ok: false, error: "no_own_keys" };
         }
 
+        myIkPubForSafety = ikPubFinal;
         const { session, x3dhHeader } = initSessionAliceWithHeader(bundle, ikPrivFinal, ikPubFinal);
         drSession = session;
         usedOPK = !!bundle.opkPublicKey;
@@ -2352,7 +2354,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setState((prev) => {
         const id = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
-        const safetyNumber = generateSafetyNumber(prev.alias ?? "GHOST_USER", aliasUpper);
+        // Key-derived (Signal-style): bound to both parties' actual identity
+        // keys, so a MITM swapping keys produces a visibly different number.
+        const safetyNumber = generateSafetyNumberFromKeys(myIkPubForSafety, bundle.ikPublicKey);
         const newConv: Conversation = {
           id,
           alias: aliasUpper,
@@ -3285,7 +3289,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.warn("[DR] Glare with", senderAlias, "— sender wins; adopting rebuilt Bob session");
       }
 
-      const safetyNumber = generateSafetyNumber(latestStateRef.current.alias ?? "GHOST_USER", senderAlias);
+      // Key-derived from our IK and the sender's registry-verified ikA —
+      // matches what the initiator computed from our bundle.
+      const safetyNumber = generateSafetyNumberFromKeys(myIKPub, x3dhHeader.ikA);
 
       // ── Reaction arriving via first-message bootstrap (session re-init,
       // glare, or literally someone's first-ever contact). A reaction always
