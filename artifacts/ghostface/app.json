@@ -89,7 +89,8 @@
         {
           "faceIDPermission": "GHOSTFACE uses Face ID to protect your private messages and identity with biometric authentication."
         }
-      ]
+      ],
+      "./plugins/withAdiRegistration"
     ],
     "experiments": {
       "typedRoutes": true,

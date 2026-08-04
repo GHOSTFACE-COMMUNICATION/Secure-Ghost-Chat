@@ -14,7 +14,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router, Stack, usePathname } from "expo-router";
 import { usePreventScreenCapture } from "expo-screen-capture";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, AppState, AppStateStatus, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -26,6 +26,7 @@ import { useColors } from "@/hooks/useColors";
 import { boxShadow } from "@/lib/shadow";
 import LockScreen from "@/app/lock";
 import OnboardingScreen from "@/app/onboarding";
+import DecoyHomeScreen from "@/app/decoy-home";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -141,10 +142,28 @@ function IncomingCallOverlay() {
   );
 }
 
+// ── App-switcher snapshot cover ───────────────────────────────────────────────
+// Solid, not blurred: a BlurView has to capture/render whatever is behind it
+// first, which risks a frame of real content before the blur "catches up".
+// A plain opaque view has nothing to wait on — it's just there or it isn't.
+function PrivacySnapshotCover() {
+  const colors = useColors();
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFillObject,
+        { backgroundColor: colors.background, zIndex: 999999 },
+      ]}
+    />
+  );
+}
+
 // ── Root navigator ────────────────────────────────────────────────────────────
 function RootNavigator() {
-  const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall } = useApp();
+  const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall, decoyMode } = useApp();
   const appState = useRef(AppState.currentState);
+  const [privacyCoverVisible, setPrivacyCoverVisible] = useState(false);
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pathname = usePathname();
 
@@ -201,9 +220,30 @@ function RootNavigator() {
       "change",
       (nextAppState: AppStateStatus) => {
         const wasActive = appState.current === "active";
-        const isBackground =
-          nextAppState === "background" || nextAppState === "inactive";
-        if (wasActive && isBackground) {
+
+        // Privacy cover: goes up the instant we leave "active" for ANY
+        // reason — share sheet, Face ID prompt, picker, an incoming-call
+        // banner, or a genuine backgrounding all pass through "inactive"
+        // first, and iOS takes the app-switcher snapshot around that same
+        // transition. This is a pure visual overlay (see PrivacySnapshotCover
+        // below/its render site) — it never touches isLocked and never
+        // unmounts whatever screen is under it, so it doesn't regress the
+        // "don't tear down the screen on inactive" fix below.
+        if (wasActive && nextAppState === "inactive") {
+          setPrivacyCoverVisible(true);
+        }
+        if (nextAppState === "active") {
+          setPrivacyCoverVisible(false);
+        }
+
+        // Lock on a real backgrounding only. `"inactive"` also fires for
+        // transient loss of focus that never actually leaves the app — the
+        // native share sheet, an image/file picker, a Face ID prompt, an
+        // incoming call banner — and treating those as background used to
+        // slam the whole navigator into <LockScreen/>, unmounting whatever
+        // screen was open and destroying its local state mid-interaction.
+        const enteredBackground = nextAppState === "background";
+        if (wasActive && enteredBackground) {
           setLocked(true);
         }
         appState.current = nextAppState;
@@ -213,28 +253,42 @@ function RootNavigator() {
     return () => subscription.remove();
   }, [loaded, isOnboarded, setLocked]);
 
+  let mainContent: React.ReactNode;
+
   if (!loaded) {
-    return <View style={{ flex: 1, backgroundColor: "#000000" }} />;
-  }
-
-  if (isLocked) {
-    return <LockScreen />;
-  }
-
-  if (!isOnboarded) {
-    return <OnboardingScreen />;
+    mainContent = <View style={{ flex: 1, backgroundColor: "#000000" }} />;
+  } else if (isLocked) {
+    mainContent = <LockScreen />;
+  } else if (decoyMode) {
+    // Decoy PIN was entered — render a self-contained, fresh-install-looking
+    // screen instead of the real tab navigator. This never mounts (tabs),
+    // messages, wallet, or vpn screens, so real conversation/wallet state
+    // can never be reached from here, even by accident.
+    mainContent = <DecoyHomeScreen />;
+  } else if (!isOnboarded) {
+    mainContent = <OnboardingScreen />;
+  } else {
+    mainContent = (
+      <View style={{ flex: 1 }} {...panResponder.panHandlers}>
+        <Stack screenOptions={{ headerShown: false, animation: "none" }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="chat/[id]" />
+          <Stack.Screen name="call" />
+          <Stack.Screen name="paywall" />
+        </Stack>
+        {/* Incoming call overlay sits on top of everything when authenticated */}
+        {incomingCall && <IncomingCallOverlay />}
+      </View>
+    );
   }
 
   return (
-    <View style={{ flex: 1 }} {...panResponder.panHandlers}>
-      <Stack screenOptions={{ headerShown: false, animation: "none" }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="chat/[id]" />
-        <Stack.Screen name="call" />
-        <Stack.Screen name="paywall" />
-      </Stack>
-      {/* Incoming call overlay sits on top of everything when authenticated */}
-      {incomingCall && <IncomingCallOverlay />}
+    <View style={{ flex: 1 }}>
+      {mainContent}
+      {/* Layered on top of mainContent, never replacing it — mainContent's
+          mount state (and everything's local state inside it) is completely
+          untouched by this toggling on and off. */}
+      {privacyCoverVisible && <PrivacySnapshotCover />}
     </View>
   );
 }

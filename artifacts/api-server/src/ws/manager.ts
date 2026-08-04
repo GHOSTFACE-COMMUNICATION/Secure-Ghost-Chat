@@ -42,7 +42,16 @@ export interface WireMessage {
     | "call-ice"
     | "sms_inbound"
     | "departed"
-    | "invite-expired";
+    | "invite-expired"
+    | "ghostpad-create"
+    | "ghostpad-created"
+    | "ghostpad-join"
+    | "ghostpad-paired"
+    | "ghostpad-text"
+    | "ghostpad-wipe"
+    | "ghostpad-leave"
+    | "ghostpad-ended"
+    | "ghostpad-error";
   token?: string;
   alias?: string;
   to?: string;
@@ -58,6 +67,8 @@ export interface WireMessage {
   // so the panic-wipe flow can race the ack against a timeout.
   requestId?: string;
   /** Invite code carried by `invite-expired` events. */
+  // Also: Ghostpad pairing code — never persisted, only ever lives in the
+  // in-memory maps below for the few minutes it takes to be redeemed.
   code?: string;
 }
 
@@ -99,6 +110,49 @@ const CALL_SIGNAL_TYPES = new Set([
   "call-answer",
   "call-ice",
 ]);
+
+// ── Ghostpad: live shared scratchpad, never persisted ───────────────────────
+// A pairing code is redeemed once to link two sockets; from then on, text and
+// wipe events relay directly between them (same shape as CALL_SIGNAL_TYPES
+// above) and never touch the database. Both maps are pure in-memory routing
+// state — they hold no content, only which alias is waiting/paired with whom.
+const GHOSTPAD_CODE_TTL_MS = 5 * 60_000;
+const ghostpadCodes = new Map<string, { alias: string; expiresAt: number }>();
+const ghostpadPartners = new Map<string, string>(); // alias -> paired alias
+
+function generateGhostpadCode(): string {
+  let code: string;
+  do {
+    code = String(Math.floor(100000 + Math.random() * 900000));
+  } while (ghostpadCodes.has(code));
+  return code;
+}
+
+function sweepExpiredGhostpadCodes(): void {
+  const now = Date.now();
+  for (const [code, entry] of ghostpadCodes) {
+    if (entry.expiresAt <= now) ghostpadCodes.delete(code);
+  }
+}
+
+/** Tear down alias's pairing (if any) and tell the partner it ended. */
+function endGhostpadSession(alias: string): void {
+  const partnerAlias = ghostpadPartners.get(alias);
+  if (!partnerAlias) return;
+  ghostpadPartners.delete(alias);
+  ghostpadPartners.delete(partnerAlias);
+  const partner = connectedClients.get(partnerAlias);
+  if (partner && partner.ws.readyState === WebSocket.OPEN) {
+    partner.ws.send(JSON.stringify({ type: "ghostpad-ended" }));
+  }
+}
+
+/** Drop any pending (unredeemed) code this alias created. */
+function revokeGhostpadCode(alias: string): void {
+  for (const [code, entry] of ghostpadCodes) {
+    if (entry.alias === alias) ghostpadCodes.delete(code);
+  }
+}
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -241,7 +295,12 @@ export function createWsServer(wss: WebSocketServer): void {
     });
   }, 30_000);
 
-  wss.on("close", () => clearInterval(heartbeatInterval));
+  const ghostpadSweepInterval = setInterval(sweepExpiredGhostpadCodes, 60_000);
+
+  wss.on("close", () => {
+    clearInterval(heartbeatInterval);
+    clearInterval(ghostpadSweepInterval);
+  });
 
   wss.on("connection", (rawWs: WebSocket, _req: IncomingMessage) => {
     const ws = rawWs as LiveSocket;
@@ -252,7 +311,11 @@ export function createWsServer(wss: WebSocketServer): void {
     let authedDeliveryId: string | null = null;
 
     const cleanup = () => {
-      if (authedAlias) connectedClients.delete(authedAlias);
+      if (authedAlias) {
+        connectedClients.delete(authedAlias);
+        revokeGhostpadCode(authedAlias);
+        endGhostpadSession(authedAlias);
+      }
     };
 
     ws.on("close", cleanup);
@@ -382,6 +445,71 @@ export function createWsServer(wss: WebSocketServer): void {
           );
           logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
         }
+        return;
+      }
+
+      // ── Ghostpad — ephemeral shared scratchpad, never persisted ─────────────
+      if (msg.type === "ghostpad-create") {
+        // End any live pairing first — creating a new pad while paired must
+        // never leave a stale reverse link routing text to a prior partner.
+        endGhostpadSession(authedAlias);
+        revokeGhostpadCode(authedAlias); // one pending code per alias at a time
+        const code = generateGhostpadCode();
+        ghostpadCodes.set(code, {
+          alias: authedAlias,
+          expiresAt: Date.now() + GHOSTPAD_CODE_TTL_MS,
+        });
+        ws.send(JSON.stringify({ type: "ghostpad-created", code }));
+        return;
+      }
+
+      if (msg.type === "ghostpad-join") {
+        if (!msg.code) {
+          ws.send(JSON.stringify({ type: "ghostpad-error", text: "Code required" }));
+          return;
+        }
+        const entry = ghostpadCodes.get(msg.code);
+        if (!entry || entry.expiresAt <= Date.now()) {
+          ghostpadCodes.delete(msg.code);
+          ws.send(JSON.stringify({ type: "ghostpad-error", text: "Code expired or invalid" }));
+          return;
+        }
+        if (entry.alias === authedAlias) {
+          ws.send(JSON.stringify({ type: "ghostpad-error", text: "Cannot pair with yourself" }));
+          return;
+        }
+        ghostpadCodes.delete(msg.code); // single-use
+        const creatorAlias = entry.alias;
+        const creator = connectedClients.get(creatorAlias);
+        if (!creator || creator.ws.readyState !== WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ghostpad-error", text: "The other side disconnected" }));
+          return;
+        }
+        // Atomically end any existing pairings for BOTH sides before linking
+        // — a joiner (or creator) already paired elsewhere would otherwise
+        // leave a dangling one-way mapping that leaks pad events to an
+        // unintended prior partner.
+        endGhostpadSession(authedAlias);
+        endGhostpadSession(creatorAlias);
+        ghostpadPartners.set(authedAlias, creatorAlias);
+        ghostpadPartners.set(creatorAlias, authedAlias);
+        ws.send(JSON.stringify({ type: "ghostpad-paired" }));
+        creator.ws.send(JSON.stringify({ type: "ghostpad-paired" }));
+        logger.debug({ a: authedAlias, b: creatorAlias }, "Ghostpad paired");
+        return;
+      }
+
+      if (msg.type === "ghostpad-text" || msg.type === "ghostpad-wipe") {
+        const partnerAlias = ghostpadPartners.get(authedAlias);
+        const partner = partnerAlias ? connectedClients.get(partnerAlias) : undefined;
+        if (partner && partner.ws.readyState === WebSocket.OPEN) {
+          partner.ws.send(JSON.stringify({ type: msg.type, text: msg.text }));
+        }
+        return;
+      }
+
+      if (msg.type === "ghostpad-leave") {
+        endGhostpadSession(authedAlias);
         return;
       }
 

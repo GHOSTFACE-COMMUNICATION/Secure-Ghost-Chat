@@ -9,6 +9,7 @@ import numbersRouter from "./numbers";
 import invitesRouter from "./invites";
 import iceConfigRouter from "./iceConfig";
 import blobsRouter from "./blobs";
+import integrityRouter from "./integrity";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(numbersRouter);
 router.use(invitesRouter);
 router.use(iceConfigRouter);
 router.use(blobsRouter);
+router.use(integrityRouter);
 
 export default router;

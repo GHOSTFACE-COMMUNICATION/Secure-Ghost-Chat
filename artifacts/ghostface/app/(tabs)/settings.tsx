@@ -22,6 +22,7 @@ import { GhostLogo } from "@/components/GhostLogo";
 import { GoldGradient } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { SecureBadge } from "@/components/SecureBadge";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
@@ -93,6 +94,7 @@ export default function SettingsScreen() {
     alias,
     biometricEnabled,
     hasDuressPin,
+    hasDecoyPin,
     autoLockTimeout,
     duressGracePeriod,
     language,
@@ -108,10 +110,13 @@ export default function SettingsScreen() {
     setPin,
     checkPin,
     checkDuressPin,
+    checkDecoyPin,
     captureCurrentPinForTransition,
     checkPreviousMainPin,
     setDuressPin,
     clearDuressPin,
+    setDecoyPin,
+    clearDecoyPin,
     setLocked,
     panicWipe,
     setAutoLockTimeout,
@@ -258,6 +263,11 @@ export default function SettingsScreen() {
   const [duressPinConfirm, setDuressPinConfirm] = useState("");
   const [duressPinError, setDuressPinError] = useState("");
   const [duressPinSaved, setDuressPinSaved] = useState(false);
+  const [showDecoyPin, setShowDecoyPin] = useState(false);
+  const [decoyPin, setDecoyPinInput] = useState("");
+  const [decoyPinConfirm, setDecoyPinConfirm] = useState("");
+  const [decoyPinError, setDecoyPinError] = useState("");
+  const [decoyPinSaved, setDecoyPinSaved] = useState(false);
 
   // ── Satellite SMS fallback (Task #113) ───────────────────────────────────
   const [showSmsFallback, setShowSmsFallback] = useState(false);
@@ -362,6 +372,12 @@ export default function SettingsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
+    const matchesDecoy = await checkDecoyPin(newPin);
+    if (matchesDecoy) {
+      setPinError("MAIN PIN CANNOT MATCH YOUR DECOY PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
     await captureCurrentPinForTransition();
     await setPin(newPin);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -397,6 +413,12 @@ export default function SettingsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
+    const matchesDecoy = await checkDecoyPin(duressPin);
+    if (matchesDecoy) {
+      setDuressPinError("DURESS PIN CANNOT MATCH YOUR DECOY PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
     await setDuressPin(duressPin);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setDuressPinSaved(true);
@@ -416,6 +438,55 @@ export default function SettingsScreen() {
     setDuressPinInput("");
     setDuressPinConfirm("");
     setDuressPinError("");
+  };
+
+  const handleDecoyPinSave = async () => {
+    if (decoyPin.length < 4) {
+      setDecoyPinError("Minimum 4 digits");
+      return;
+    }
+    if (decoyPin !== decoyPinConfirm) {
+      setDecoyPinError("PINs do not match");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    const matchesMain = await checkPin(decoyPin);
+    if (matchesMain) {
+      setDecoyPinError("DECOY PIN CANNOT MATCH YOUR MAIN PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    const matchesPreviousMain = await checkPreviousMainPin(decoyPin);
+    if (matchesPreviousMain) {
+      setDecoyPinError("DECOY PIN CANNOT MATCH YOUR PREVIOUS MAIN PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    const matchesDuress = await checkDuressPin(decoyPin);
+    if (matchesDuress) {
+      setDecoyPinError("DECOY PIN CANNOT MATCH YOUR DURESS PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    await setDecoyPin(decoyPin);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setDecoyPinSaved(true);
+    setTimeout(() => {
+      setDecoyPinSaved(false);
+      setShowDecoyPin(false);
+      setDecoyPinInput("");
+      setDecoyPinConfirm("");
+      setDecoyPinError("");
+    }, 1500);
+  };
+
+  const handleClearDecoyPin = async () => {
+    await clearDecoyPin();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowDecoyPin(false);
+    setDecoyPinInput("");
+    setDecoyPinConfirm("");
+    setDecoyPinError("");
   };
 
   const styles = StyleSheet.create({
@@ -837,6 +908,35 @@ export default function SettingsScreen() {
           )}
           <Pressable
             style={styles.settingRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setDecoyPinInput("");
+              setDecoyPinConfirm("");
+              setDecoyPinError("");
+              setShowDecoyPin(true);
+            }}
+            testID="decoy-pin-row"
+          >
+            <View style={styles.settingIcon}>
+              <Ionicons name="eye-off-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingLabel}>DECOY PIN</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                UNLOCKS TO AN EMPTY, HARMLESS-LOOKING APP
+              </Text>
+            </View>
+            {hasDecoyPin ? (
+              <View style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ color: colors.primaryForeground, fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
+              </View>
+            ) : (
+              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+            )}
+          </Pressable>
+          <View style={styles.settingDivider} />
+          <Pressable
+            style={styles.settingRow}
             onPress={handleAutoLockPress}
             testID="auto-lock-row"
           >
@@ -923,6 +1023,29 @@ export default function SettingsScreen() {
               {idx < arr.length - 1 && <View style={styles.settingDivider} />}
             </View>
           ))}
+        </View>
+
+        <Text style={styles.sectionLabel}>TOOLS (BETA)</Text>
+        <View>
+          <Pressable
+            style={styles.settingRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/ghostpad");
+            }}
+            testID="ghostpad-row"
+          >
+            <View style={styles.settingIcon}>
+              <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingLabel}>GHOSTPAD</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                LIVE SHARED NOTEPAD — NEVER SAVED
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+          </Pressable>
         </View>
 
         <View style={styles.panicSection}>
@@ -1187,6 +1310,90 @@ export default function SettingsScreen() {
               )}
             </View>
         </View>
+      </Modal>
+
+      {/* Decoy PIN modal */}
+      <Modal
+        visible={showDecoyPin}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDecoyPin(false)}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDecoyPin(false)} />
+            <View style={styles.modalContent}>
+              {decoyPinSaved ? (
+                <Text style={styles.successText}>DECOY PIN SAVED</Text>
+              ) : (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="eye-off-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>DECOY PIN</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
+                    ENTERING THIS PIN ON THE LOCK SCREEN OPENS AN EMPTY, FRESH-LOOKING APP — YOUR REAL DATA STAYS HIDDEN, NOT WIPED
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={decoyPin}
+                    onChangeText={(t) => { setDecoyPinInput(t); setDecoyPinError(""); }}
+                    placeholder="DECOY PIN (4–8 DIGITS)"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="decoy-pin-input"
+                  />
+                  <PinStrengthIndicator
+                    pin={decoyPin}
+                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    mutedColor={colors.border}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={decoyPinConfirm}
+                    onChangeText={(t) => { setDecoyPinConfirm(t); setDecoyPinError(""); }}
+                    placeholder="CONFIRM DECOY PIN"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="decoy-pin-confirm-input"
+                  />
+                  {decoyPinError ? (
+                    <Text style={styles.errorText}>{decoyPinError}</Text>
+                  ) : null}
+                  <Pressable
+                    style={[
+                      styles.modalBtn,
+                      { backgroundColor: colors.primary },
+                      decoyPin.length < 4 && { opacity: 0.4 },
+                    ]}
+                    onPress={handleDecoyPinSave}
+                    disabled={decoyPin.length < 4}
+                    testID="decoy-pin-save-btn"
+                  >
+                    <Text style={styles.modalBtnText}>SET DECOY PIN</Text>
+                  </Pressable>
+                  {hasDecoyPin && (
+                    <Pressable
+                      style={[styles.modalBtn, { backgroundColor: colors.muted, marginBottom: 4 }]}
+                      onPress={handleClearDecoyPin}
+                      testID="decoy-pin-clear-btn"
+                    >
+                      <Text style={[styles.modalBtnText, { color: colors.destructive }]}>REMOVE DECOY PIN</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={styles.cancelBtn}
+                    onPress={() => setShowDecoyPin(false)}
+                  >
+                    <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Language picker modal */}

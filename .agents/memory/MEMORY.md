@@ -1,3 +1,4 @@
+- [GitHub remote divergence](github-remote-divergence.md) — Secure-Ghost-Chat repo has an unrelated git history; move code via cherry-pick/`git show`, never plain pull/reset.
 - [GHOSTFACE brand + lock screen](ghostface-brand-and-lock.md) — accent is antique gold #bf9b30 (near-black monochrome); lock screen is an idle cipher seal that hold-to-decrypt reveals the secure keypad.
 - [GHOSTFACE payments](ghostface-payments.md) — crypto-only (USDC on Solana); Stripe was fully removed. Do not reintroduce a card/fiat path.
 - [GHOSTFACE real E2E encryption](ghostface-encryption.md) — real X3DH+Double Ratchet only, no sim/demo key path; public-only bundles, send hard-fails when not a real session; no JS test runner (use scripts/check-*.mjs).
