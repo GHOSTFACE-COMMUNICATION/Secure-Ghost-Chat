@@ -96,6 +96,12 @@ export default function HomeScreen() {
   const coinTiltX = useRef(new Animated.Value(0)).current;
   const coinScaleX = useRef(new Animated.Value(1)).current;
   const coinGlow = useRef(new Animated.Value(0.6)).current;
+  // 0..1 — how edge-on the coin is; drives the fake "thickness" rim band
+  const coinEdge = useRef(new Animated.Value(0)).current;
+  // Tap-to-spin impulse (deg/s), decays exponentially each frame
+  const boostVel = useRef(0);
+  const boostDeg = useRef(0);
+  const lastFrameMs = useRef(0);
 
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
@@ -142,11 +148,28 @@ export default function HomeScreen() {
   useEffect(() => {
     const startMs = performance.now();
     function frame(now: number) {
+      const dt = lastFrameMs.current
+        ? Math.min((now - lastFrameMs.current) / 1000, 0.05)
+        : 0;
+      lastFrameMs.current = now;
+      // Integrate tap-spin impulse with exponential decay
+      if (boostVel.current > 1) {
+        boostDeg.current += boostVel.current * dt;
+        boostVel.current *= Math.pow(0.18, dt);
+      } else {
+        boostVel.current = 0;
+      }
       const { rotY, tiltX, scaleX } = coinPhysics(now - startMs);
-      coinRotY.setValue(rotY);
+      const totalRotY = (rotY + boostDeg.current) % 360;
+      coinRotY.setValue(totalRotY);
       coinTiltX.setValue(tiltX);
       coinScaleX.setValue(scaleX);
       coinGlow.setValue(scaleX > 0.5 ? 0.65 : 0.2);
+      // Edge band peaks when the face is edge-on; fades out as the coin
+      // flattens into its fall phase so it never floats over the "puddle".
+      const edgeOn = Math.pow(Math.abs(Math.sin((totalRotY * Math.PI) / 180)), 3);
+      const flatFade = Math.max(0, Math.min(1, (scaleX - 0.3) / 0.7));
+      coinEdge.setValue(edgeOn * flatFade);
       rafRef.current = requestAnimationFrame(frame);
     }
     rafRef.current = requestAnimationFrame(frame);
@@ -291,8 +314,8 @@ export default function HomeScreen() {
     },
     {
       rotateY: coinRotY.interpolate({
-        inputRange: [0, 3600],
-        outputRange: ["0deg", "3600deg"],
+        inputRange: [0, 360],
+        outputRange: ["0deg", "360deg"],
         extrapolate: "clamp",
       }),
     },
@@ -379,7 +402,10 @@ export default function HomeScreen() {
             <View pointerEvents="box-none" style={styles.centerWrap}>
               <View style={styles.centerCol}>
                 <Pressable
-                  onPress={toggleMenu}
+                  onPress={() => {
+                    boostVel.current = Math.min(boostVel.current + 1080, 4320);
+                    toggleMenu();
+                  }}
                   hitSlop={24}
                   style={styles.centerHit}
                   accessibilityRole="button"
@@ -387,6 +413,29 @@ export default function HomeScreen() {
                 >
                   {/* Outer ambient glow */}
                   <View pointerEvents="none" style={styles.globeGlow} />
+
+                  {/* Fake thickness: gold edge band flashes when edge-on */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.coinEdgeBand,
+                      {
+                        opacity: Animated.multiply(coinEdge, circleOpacity),
+                        transform: [
+                          { perspective: 800 },
+                          {
+                            rotateX: coinTiltX.interpolate({
+                              inputRange: [0, 90],
+                              outputRange: ["0deg", "90deg"],
+                              extrapolate: "clamp",
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <View style={styles.coinEdgeHighlight} />
+                  </Animated.View>
 
                   {/* Physics-driven spinning coin with metallic rim */}
                   <Animated.View
@@ -591,8 +640,31 @@ const styles = StyleSheet.create({
     boxShadow: [
       boxShadow(GOLD, 0.7, 18),
       "inset 0 2px 6px rgba(255,235,120,0.5)",
+      "inset 0 -4px 10px rgba(50,32,0,0.6)",
     ].join(", "),
     overflow: "hidden",
+  },
+  // Fake coin thickness — vertical gold band shown when the coin is edge-on
+  coinEdgeBand: {
+    position: "absolute",
+    width: 16,
+    height: 190,
+    top: (196 - 190) / 2,
+    left: (196 - 16) / 2,
+    borderRadius: 8,
+    backgroundColor: "#8a6a12",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: [
+      boxShadow(GOLD, 0.8, 14),
+      "inset 0 0 4px rgba(30,20,0,0.7)",
+    ].join(", "),
+  },
+  coinEdgeHighlight: {
+    width: 4,
+    height: 176,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,222,110,0.75)",
   },
   coinImage: {
     width: 176,
