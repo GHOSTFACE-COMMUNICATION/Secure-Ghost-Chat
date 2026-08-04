@@ -52,6 +52,13 @@ const MAX_BOOST_DEG_S = 4000; // cap on stacked boost velocity
 // the crisp one so top-speed spins read as a whirl, not a strobing logo.
 const BLUR_START_DEG_S = 1400;
 const BLUR_FULL_DEG_S = 3200;
+// Haptic spin buzz: light ticks whose rate ramps with boost velocity so fast
+// tap-spins feel physical. Below the start threshold there are no ticks, so
+// the idle spin cycle stays silent. Interval shrinks from SLOW→FAST as the
+// boost approaches the cap. No-op on web (expo-haptics has no web impl).
+const HAPTIC_START_DEG_S = 700;
+const HAPTIC_SLOW_INTERVAL_MS = 220;
+const HAPTIC_FAST_INTERVAL_MS = 60;
 const FAST_END = 0.3;
 const SLOW_END = 0.68;
 const FALL_END = 0.88;
@@ -114,6 +121,8 @@ export default function HomeScreen() {
   const boostVel = useRef(0);
   const boostDeg = useRef(0);
   const lastFrameMs = useRef(0);
+  // Timestamp of the last spin-haptic tick (performance.now() ms)
+  const lastHapticMs = useRef(0);
 
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
@@ -198,6 +207,29 @@ export default function HomeScreen() {
         ),
       );
       coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
+      // Haptic buzz: tick rate ramps with boost velocity. Only fires while a
+      // tap boost is active (never during the idle spin cycle) and no-ops on
+      // web where expo-haptics has no implementation.
+      if (Platform.OS !== "web" && boostVel.current > HAPTIC_START_DEG_S) {
+        const speedT = Math.min(
+          (boostVel.current - HAPTIC_START_DEG_S) /
+            (MAX_BOOST_DEG_S - HAPTIC_START_DEG_S),
+          1,
+        );
+        const interval = lerp(
+          HAPTIC_SLOW_INTERVAL_MS,
+          HAPTIC_FAST_INTERVAL_MS,
+          speedT,
+        );
+        if (now - lastHapticMs.current >= interval) {
+          lastHapticMs.current = now;
+          Haptics.impactAsync(
+            speedT > 0.6
+              ? Haptics.ImpactFeedbackStyle.Medium
+              : Haptics.ImpactFeedbackStyle.Light,
+          ).catch(() => {});
+        }
+      }
       rafRef.current = requestAnimationFrame(frame);
     }
     rafRef.current = requestAnimationFrame(frame);
