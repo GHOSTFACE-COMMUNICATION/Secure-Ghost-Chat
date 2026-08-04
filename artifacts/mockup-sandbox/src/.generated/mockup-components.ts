@@ -20,7 +20,6 @@ export const modules: ModuleMap = {
   "./components/mockups/ghostface-home/VaultCipher.tsx": () => import("../components/mockups/ghostface-home/VaultCipher.tsx"),
   "./components/mockups/ghostface-home/VaultCompass.tsx": () => import("../components/mockups/ghostface-home/VaultCompass.tsx"),
   "./components/mockups/ghostface-home/VaultEngraved.tsx": () => import("../components/mockups/ghostface-home/VaultEngraved.tsx"),
-  "./components/mockups/ghostface-call/DarkChannel.tsx": () => import("../components/mockups/ghostface-call/DarkChannel.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/AliasFocus.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/AliasFocus.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/BriefingFeed.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/BriefingFeed.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/Chats.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/Chats.tsx"),
