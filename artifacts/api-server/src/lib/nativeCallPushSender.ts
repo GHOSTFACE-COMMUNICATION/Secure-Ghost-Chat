@@ -31,6 +31,7 @@
 import { createPrivateKey, createSign, randomUUID, sign as cryptoSign } from "node:crypto";
 import http2 from "node:http2";
 import { logger } from "./logger";
+import { recordPushResult, setConfiguredCheck } from "./pushCredentialHealth";
 import type { CallPushData } from "./callPushSender";
 
 // ── Payload ─────────────────────────────────────────────────────────────────
@@ -266,13 +267,33 @@ export async function sendNativeCallPush(
   data: CallPushData,
 ): Promise<"ok" | "bad-token" | "error" | "unconfigured"> {
   const event = buildIncomingCallEvent(data);
-  if (tokenType === "apns-voip") {
-    const cfg = apnsConfig();
-    if (!cfg) return "unconfigured";
-    // APNs nests the event directly in the push dictionary.
-    return sendApnsVoipPush(cfg, deviceToken, JSON.stringify({ incomingCall: event }));
+  let result: "ok" | "bad-token" | "error" | "unconfigured";
+  try {
+    if (tokenType === "apns-voip") {
+      const cfg = apnsConfig();
+      result = cfg
+        ? // APNs nests the event directly in the push dictionary.
+          await sendApnsVoipPush(cfg, deviceToken, JSON.stringify({ incomingCall: event }))
+        : "unconfigured";
+    } else {
+      const cfg = fcmConfig();
+      result = cfg ? await sendFcmDataMessage(cfg, deviceToken, event) : "unconfigured";
+    }
+  } catch (err) {
+    // Thrown credential failures (bad .p8 → createPrivateKey/sign throws,
+    // malformed service-account key → createSign throws, OAuth fetch network
+    // failure, …) must count toward the credential-health alarm exactly like
+    // returned "error" results — otherwise a broken key that throws would
+    // never trip the alert.
+    logger.warn({ err, tokenType }, "[nativeCallPush] Push send threw");
+    result = "error";
   }
-  const cfg = fcmConfig();
-  if (!cfg) return "unconfigured";
-  return sendFcmDataMessage(cfg, deviceToken, event);
+  // Credential-health tracking (task #166): a spike of "error" results on one
+  // transport means the APNs key / FCM service account has likely gone bad.
+  recordPushResult(tokenType, result);
+  return result;
 }
+
+// Wire the health module's "is this transport configured?" probe without a
+// runtime import cycle (pushCredentialHealth must not import this module).
+setConfiguredCheck(isNativeCallPushConfigured);

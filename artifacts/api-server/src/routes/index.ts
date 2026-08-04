@@ -11,6 +11,7 @@ import iceConfigRouter from "./iceConfig";
 import blobsRouter from "./blobs";
 import integrityRouter from "./integrity";
 import callPushRouter from "./callPush";
+import pushHealthRouter from "./pushHealth";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(iceConfigRouter);
 router.use(blobsRouter);
 router.use(integrityRouter);
 router.use(callPushRouter);
+router.use(pushHealthRouter);
 
 export default router;
