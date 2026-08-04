@@ -7,3 +7,4 @@ description: Two recurring failure modes after editing lib/db schema files
 
 **Why:** hit both in one session — typecheck failed and an e2e insert failed on a column that existed in the schema source but nowhere else.
 **How to apply:** any schema change → rebuild db types, and either push the schema or make tests self-provisioning.
+- `pnpm --filter db push` can hang on an interactive prompt (unrelated pending constraints, e.g. invites unique) in non-TTY shells and silently apply nothing. Fallback: create the new table directly with `psql "$DATABASE_URL"` matching the Drizzle schema exactly.

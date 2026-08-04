@@ -14,6 +14,7 @@ import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
 import { ensureDeliveryId } from "../utils/delivery";
+import { hasCallPushTokens, sendCallPush } from "../lib/callPushSender";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
 // Compressed frames are an untrusted, attacker-controllable input even
@@ -100,6 +101,47 @@ async function aliasForDeliveryId(deliveryId: string): Promise<string | null> {
   if (!row) return null;
   deliveryIdToAlias.set(deliveryId, row.userId);
   return row.userId;
+}
+
+// ── Pending rings: bridge call-ring across a push wake-up (task #150) ───────
+// When a call-ring targets an offline alias that has push tokens, we send an
+// identity-free wake push and park the ring here. If the callee's WS
+// authenticates within the ring window, we replay the call-ring over the
+// socket — so the caller's alias travels ONLY over the WS channel, never in
+// the push payload (see artifacts/ghostface/lib/callPush.ts contract). Pure
+// in-memory routing state; entries expire with the caller's 30 s ring
+// timeout (plus slack for connect latency) and are dropped on hangup.
+const PENDING_RING_TTL_MS = 35_000;
+interface PendingRing {
+  fromAlias: string;
+  callId: string;
+  callMode: string;
+  expiresAt: number;
+}
+const pendingRings = new Map<string, PendingRing>(); // callee alias -> ring
+
+function sweepExpiredPendingRings(): void {
+  const now = Date.now();
+  for (const [alias, ring] of pendingRings) {
+    if (ring.expiresAt <= now) pendingRings.delete(alias);
+  }
+}
+
+/** Replay a parked call-ring to a freshly-authenticated callee, if any. */
+function deliverPendingRing(alias: string, ws: WebSocket): void {
+  const ring = pendingRings.get(alias);
+  if (!ring) return;
+  pendingRings.delete(alias);
+  if (ring.expiresAt <= Date.now()) return;
+  ws.send(
+    JSON.stringify({
+      type: "call-ring",
+      from: ring.fromAlias,
+      callId: ring.callId,
+      callMode: ring.callMode,
+    }),
+  );
+  logger.debug({ to: alias, from: ring.fromAlias }, "Replayed pending call-ring after push wake");
 }
 
 const CALL_SIGNAL_TYPES = new Set([
@@ -296,10 +338,12 @@ export function createWsServer(wss: WebSocketServer): void {
   }, 30_000);
 
   const ghostpadSweepInterval = setInterval(sweepExpiredGhostpadCodes, 60_000);
+  const pendingRingSweepInterval = setInterval(sweepExpiredPendingRings, 15_000);
 
   wss.on("close", () => {
     clearInterval(heartbeatInterval);
     clearInterval(ghostpadSweepInterval);
+    clearInterval(pendingRingSweepInterval);
   });
 
   wss.on("connection", (rawWs: WebSocket, _req: IncomingMessage) => {
@@ -362,6 +406,7 @@ export function createWsServer(wss: WebSocketServer): void {
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
         await deliverPendingInviteExpiries(authedAlias, ws);
+        deliverPendingRing(authedAlias, ws);
         return;
       }
 
@@ -433,17 +478,43 @@ export function createWsServer(wss: WebSocketServer): void {
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           recipient.ws.send(JSON.stringify({ ...msg, from: authedAlias }));
           logger.debug({ type: msg.type, from: authedAlias, to: toAlias }, "Call signal relayed");
+          // A hangup ends any parked ring for this callee too (caller gave up
+          // between push send and callee wake).
+          if (msg.type === "call-hangup") pendingRings.delete(toAlias);
         } else if (msg.type === "call-ring") {
-          // Callee is offline — bounce hangup back to caller immediately
-          ws.send(
-            JSON.stringify({
-              type: "call-hangup",
-              from: toAlias,
+          // Callee is offline. If they registered a call push token, wake the
+          // device with an identity-free push, park the ring for replay when
+          // their WS authenticates, and let the caller keep ringing (their
+          // client enforces the 30 s no-answer timeout). Otherwise bounce a
+          // hangup back immediately, as before.
+          const canPush = await hasCallPushTokens(toAlias);
+          if (canPush && msg.callId) {
+            pendingRings.set(toAlias, {
+              fromAlias: authedAlias,
               callId: msg.callId,
-              payload: "offline",
-            }),
-          );
-          logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+              callMode: msg.callMode ?? "voice",
+              expiresAt: Date.now() + PENDING_RING_TTL_MS,
+            });
+            void sendCallPush(toAlias, {
+              callId: msg.callId,
+              mode: msg.callMode === "video" ? "video" : "voice",
+            });
+            logger.debug({ from: authedAlias, to: toAlias }, "Callee offline: call push sent");
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: "call-hangup",
+                from: toAlias,
+                callId: msg.callId,
+                payload: "offline",
+              }),
+            );
+            logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+          }
+        } else if (msg.type === "call-hangup") {
+          // Caller hung up while the callee was still offline — drop the
+          // parked ring so a late wake doesn't ring a dead call.
+          pendingRings.delete(toAlias);
         }
         return;
       }

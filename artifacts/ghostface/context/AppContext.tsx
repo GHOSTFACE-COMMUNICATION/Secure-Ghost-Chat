@@ -1,4 +1,5 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
+import { registerForCallPush } from "@/lib/callPush";
 import {
   classifyLinkQuality,
   isLowBandwidthActive,
@@ -1742,6 +1743,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void refreshEntitlement();
     }
   }, [state.alias, state.deviceToken, refreshEntitlement]);
+
+  // Task #150: register this device's push token so incoming calls ring even
+  // when the app is closed. Best-effort; no-ops on web/Expo Go or when
+  // notification permission is denied (see lib/callPush.ts).
+  useEffect(() => {
+    if (state.alias && state.deviceToken) {
+      const apiBase = getApiBase();
+      if (apiBase) void registerForCallPush(apiBase, state.alias, state.deviceToken);
+    }
+  }, [state.alias, state.deviceToken]);
 
   const setDuressGracePeriod = useCallback(async (seconds: number) => {
     const VALID_GRACE = [1, 2, 3, 5];

@@ -25,6 +25,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2",
     "drizzle-orm": "catalog:",
+    "expo-server-sdk": "^7.0.0",
     "express": "^5",
     "express-rate-limit": "^8.5.1",
     "google-auth-library": "^10.5.0",
