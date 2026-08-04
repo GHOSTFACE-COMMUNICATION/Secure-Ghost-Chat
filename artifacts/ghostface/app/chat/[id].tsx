@@ -237,6 +237,7 @@ export default function ChatScreen() {
   const playingSoundRef = useRef<Audio.Sound | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [, setTick] = useState(0);
+  const [actionSheetMsgId, setActionSheetMsgId] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
 
@@ -620,7 +621,6 @@ export default function ChatScreen() {
   // below it — replaces the old bare Alert/prompt-based menu. Looks the
   // target message up fresh by id at render time (below, near the FlatList)
   // rather than snapshotting fromMe/text at press time.
-  const [actionSheetMsgId, setActionSheetMsgId] = useState<string | null>(null);
 
   const handleLongPress = (msgId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
