@@ -140,6 +140,10 @@ author = "agent"
 task = "workflow.run"
 args = "ghostface-lint"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "check-disappearing"
+
 [[workflows.workflow]]
 name = "ghostface-lint"
 author = "agent"
@@ -147,6 +151,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/ghostface run lint"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "check-disappearing"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/ghostface && node scripts/check-disappearing-messages.mjs"
 
 [workflows.workflow.metadata]
 isValidation = true
