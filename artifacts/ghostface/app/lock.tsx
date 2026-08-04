@@ -877,7 +877,7 @@ export default function LockScreen() {
           {biometricError ? <Text style={styles.errorText}>{biometricError}</Text> : null}
         </>
       ) : (
-        <View style={styles.gate}>
+        <View style={styles.gate} testID="decrypt-seal">
           <Animated.View
             style={[
               styles.compassWrap,
