@@ -7,6 +7,7 @@ import {
   type NativeTokenType,
 } from "./nativeCallPushSender";
 import { db, callPushTokensTable, identityKeysTable } from "@workspace/db";
+import { filterExpoRowsShadowedByNative } from "./callPushDedupe";
 
 /**
  * Sends the Phase 2/3 calling push: wakes a device whose app is closed so an
@@ -80,8 +81,7 @@ export async function sendCallPush(alias: string, data: CallPushData): Promise<v
     // ── Native full-screen ring (task #152): apns-voip / fcm tokens ─────────
     // These wake devices carrying the expo-callkit-telecom module — CallKit
     // sheet on iOS, Core-Telecom full-screen intent on Android. Sent first
-    // and independently of the Expo alert path; a device registers exactly
-    // one transport, so nothing rings twice.
+    // and independently of the Expo alert path.
     const nativeRows = rows.filter((r) => r.tokenType === "apns-voip" || r.tokenType === "fcm");
     const nativeBadIds: number[] = [];
     await Promise.all(
@@ -102,7 +102,19 @@ export async function sendCallPush(alias: string, data: CallPushData): Promise<v
     }
 
     // ── Expo alert-push fallback path (task #150) ────────────────────────────
-    const expoRows = rows.filter((r) => r.tokenType === "expo");
+    // Double-ring guard (task #172): when a platform already has a native
+    // token with configured credentials, the native push shows the
+    // full-screen ring — suppress the Expo alert for that platform so the
+    // device doesn't get a redundant "Incoming call" banner on top of it.
+    const allExpoRows = rows.filter((r) => r.tokenType === "expo");
+    const expoRows = filterExpoRowsShadowedByNative(rows, allExpoRows, isNativeCallPushConfigured);
+    const suppressed = allExpoRows.length - expoRows.length;
+    if (suppressed > 0) {
+      logger.debug(
+        { suppressed },
+        "[callPush] Expo alert push suppressed; native ring covers the platform",
+      );
+    }
     const valid = expoRows.filter((r) => Expo.isExpoPushToken(r.token));
     const invalidIds = expoRows.filter((r) => !Expo.isExpoPushToken(r.token)).map((r) => r.id);
     if (invalidIds.length > 0) {
