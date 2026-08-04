@@ -5,6 +5,7 @@ import { logger } from "./lib/logger";
 import { createWsServer } from "./ws/manager";
 import { startRotationScheduler } from "./lib/rotationScheduler";
 import { startInviteExpiryScheduler } from "./lib/inviteExpiryScheduler";
+import { startPushHealthMonitor } from "./lib/pushHealthMonitor";
 import { warnIfApnsSandboxMismatch } from "./lib/nativeCallPushSender";
 
 const rawPort = process.env["PORT"];
@@ -31,6 +32,9 @@ warnIfApnsSandboxMismatch();
 
 startRotationScheduler();
 startInviteExpiryScheduler();
+// Task #183: automatic alerting when push credentials break — periodically
+// polls /api/admin/push-health and pushes to a configurable webhook.
+startPushHealthMonitor();
 
 httpServer.listen(port, () => {
   logger.info({ port }, "Server listening");
