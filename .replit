@@ -199,15 +199,3 @@ channel = "stable-25_05"
 
 [userenv.development]
 APNS_USE_SANDBOX = "1"
-
-[[ports]]
-localPort = 8080
-externalPort = 6800
-
-[[ports]]
-localPort = 8081
-externalPort = 5173
-
-[[ports]]
-localPort = 23573
-externalPort = 8099
