@@ -102,6 +102,8 @@ export default function SettingsScreen() {
     lowBandwidthActive,
     linkQuality,
     setLowBandwidthMode,
+    spinHapticsEnabled,
+    setSpinHapticsEnabled,
     smsFallbackNumbers,
     smsFallbackMessage,
     setSmsFallbackNumbers,
@@ -758,6 +760,25 @@ export default function SettingsScreen() {
               thumbColor={colors.foreground}
               ios_backgroundColor={colors.border}
               testID="biometric-switch"
+            />
+          </View>
+          <View style={styles.settingDivider} />
+          {/* ── Spin haptics (Task #192) ─────────────────────────────── */}
+          <View style={styles.settingRow}>
+            <View style={styles.settingIcon}>
+              <Ionicons name="radio-outline" size={18} color={colors.primary} />
+            </View>
+            <Text style={styles.settingLabel}>SPIN HAPTICS</Text>
+            <Switch
+              value={spinHapticsEnabled}
+              onValueChange={(val) => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setSpinHapticsEnabled(val).catch(() => {});
+              }}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.foreground}
+              ios_backgroundColor={colors.border}
+              testID="spin-haptics-switch"
             />
           </View>
           <View style={styles.settingDivider} />

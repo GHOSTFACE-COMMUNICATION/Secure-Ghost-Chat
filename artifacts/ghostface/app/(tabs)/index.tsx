@@ -97,7 +97,7 @@ type NavNode = {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { alias, vpnConnected, panicWipe } = useApp();
+  const { alias, vpnConnected, panicWipe, spinHapticsEnabled } = useApp();
   const [wipeArmed, setWipeArmed] = useState(false);
   const [isWiping, setIsWiping] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -123,6 +123,10 @@ export default function HomeScreen() {
   const lastFrameMs = useRef(0);
   // Timestamp of the last spin-haptic tick (performance.now() ms)
   const lastHapticMs = useRef(0);
+  // Mirror the "Spin haptics" setting into a ref so the rAF loop (mounted
+  // once, empty dep array) always reads the current value without re-running.
+  const spinHapticsRef = useRef(spinHapticsEnabled);
+  spinHapticsRef.current = spinHapticsEnabled;
 
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
@@ -209,8 +213,13 @@ export default function HomeScreen() {
       coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
       // Haptic buzz: tick rate ramps with boost velocity. Only fires while a
       // tap boost is active (never during the idle spin cycle) and no-ops on
-      // web where expo-haptics has no implementation.
-      if (Platform.OS !== "web" && boostVel.current > HAPTIC_START_DEG_S) {
+      // web where expo-haptics has no implementation. Skipped entirely when
+      // the user disables "Spin haptics" in Settings (Task #192).
+      if (
+        spinHapticsRef.current &&
+        Platform.OS !== "web" &&
+        boostVel.current > HAPTIC_START_DEG_S
+      ) {
         const speedT = Math.min(
           (boostVel.current - HAPTIC_START_DEG_S) /
             (MAX_BOOST_DEG_S - HAPTIC_START_DEG_S),
