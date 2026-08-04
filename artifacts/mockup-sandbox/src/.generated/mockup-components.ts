@@ -20,7 +20,6 @@ export const modules: ModuleMap = {
   "./components/mockups/ghostface-home/VaultCipher.tsx": () => import("../components/mockups/ghostface-home/VaultCipher.tsx"),
   "./components/mockups/ghostface-home/VaultCompass.tsx": () => import("../components/mockups/ghostface-home/VaultCompass.tsx"),
   "./components/mockups/ghostface-home/VaultEngraved.tsx": () => import("../components/mockups/ghostface-home/VaultEngraved.tsx"),
-  "./components/mockups/ghostface-messages/SignalDeck.tsx": () => import("../components/mockups/ghostface-messages/SignalDeck.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/AliasFocus.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/AliasFocus.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/BriefingFeed.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/BriefingFeed.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/Chats.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/Chats.tsx"),
@@ -41,5 +40,6 @@ export const modules: ModuleMap = {
   "./components/mockups/ghostface-home-copy-zOoTA920/Vault.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/Vault.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/VaultBreathing.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/VaultBreathing.tsx"),
   "./components/mockups/ghostface-home-copy-zOoTA920/VaultCompass.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/VaultCompass.tsx"),
-  "./components/mockups/ghostface-home-copy-zOoTA920/VaultEngraved.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/VaultEngraved.tsx")
+  "./components/mockups/ghostface-home-copy-zOoTA920/VaultEngraved.tsx": () => import("../components/mockups/ghostface-home-copy-zOoTA920/VaultEngraved.tsx"),
+  "./components/mockups/ghostface-messages/SignalDeck.tsx": () => import("../components/mockups/ghostface-messages/SignalDeck.tsx")
 };
