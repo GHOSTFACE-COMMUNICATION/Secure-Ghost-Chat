@@ -1,8 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, messagesTable, identityKeysTable, deviceTokensTable } from "@workspace/db";
+import { db, messagesTable, identityKeysTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { createHash } from "crypto";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
+import { getAuthedAliasUnified } from "../middlewares/deviceAuth";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
 import { ensureDeliveryId } from "../utils/delivery";
@@ -15,27 +15,10 @@ const pendingPollLimiter = new RateLimiter({ windowMs: 60_000, max: 120 });
 // 60 user-exists lookups per minute per IP (prevents alias enumeration)
 const userExistsLimiter = new RateLimiter({ windowMs: 60_000, max: 60 });
 
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
+// JWT access tokens carry the alias themselves; legacy opaque tokens still
+// require the ?alias= query param for the hashed device_tokens lookup.
 async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
-  const alias = req.query.alias as string | undefined;
-  if (!alias) return null;
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(
-      and(
-        eq(deviceTokensTable.userId, normalizeAlias(alias)),
-        eq(deviceTokensTable.tokenHash, hash),
-      ),
-    );
-  return row ? normalizeAlias(alias) : null;
+  return getAuthedAliasUnified(req, req.query.alias as string | undefined);
 }
 
 router.get("/users/exists/:alias", async (req: Request, res: Response) => {

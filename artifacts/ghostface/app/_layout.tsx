@@ -15,7 +15,7 @@ import { router, Stack, usePathname } from "expo-router";
 import { usePreventScreenCapture } from "expo-screen-capture";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, AppStateStatus, Platform, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, AppState, AppStateStatus, PanResponder, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -31,13 +31,6 @@ import DecoyHomeScreen from "@/app/decoy-home";
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
-
-// Disabled in dev so you can capture screenshots for testing & store listings.
-function ScreenCaptureBlocker() {
-  usePreventScreenCapture();
-  return null;
-}
-const blockScreenCapture = Platform.OS !== "web" && !__DEV__;
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 function IncomingCallOverlay() {
@@ -282,18 +275,6 @@ function RootNavigator() {
           <Stack.Screen name="chat/[id]" />
           <Stack.Screen name="call" />
           <Stack.Screen name="paywall" />
-          {/* Solana/USDC crypto paywall — Apple Guideline 3.1.1 forbids in-app
-              crypto payments on iOS. Stack.Protected genuinely drops this
-              screen from the navigator's route table when guard is false;
-              a bare conditional <Stack.Screen> does NOT do this — expo-router
-              silently re-appends any undeclared file route (see
-              useScreens.js:getSortedChildren "add remaining children"), so
-              the previous version of this guard never actually blocked the
-              route or the ghostface://paywall-crypto deep link. Android/web
-              keep it. */}
-          <Stack.Protected guard={Platform.OS !== "ios"}>
-            <Stack.Screen name="paywall-crypto" />
-          </Stack.Protected>
         </Stack>
         {/* Incoming call overlay sits on top of everything when authenticated */}
         {incomingCall && <IncomingCallOverlay />}
@@ -313,6 +294,16 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  // Block screenshots & screen recording app-wide. On Android this sets
+  // FLAG_SECURE so captures come out black; on iOS recordings are blacked out.
+  // Native-only: on web expo-screen-capture throws an UnavailabilityError
+  // that takes down the whole preview, so skip it there.
+  if (Platform.OS !== "web") {
+    // Platform.OS is constant for the app's lifetime, so this conditional
+    // hook call never changes between renders.
+    usePreventScreenCapture();
+  }
+
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -333,7 +324,6 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      {blockScreenCapture && <ScreenCaptureBlocker />}
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView style={{ flex: 1 }}>

@@ -1,7 +1,16 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, prekeysTable, identityKeysTable, deviceTokensTable, pool } from "@workspace/db";
+import {
+  db,
+  prekeysTable,
+  identityKeysTable,
+  deviceTokensTable,
+  refreshTokensTable,
+  pool,
+} from "@workspace/db";
 import { eq, and, count as drizzleCount } from "drizzle-orm";
 import { createHash, randomBytes } from "crypto";
+import { bearerToken, resolveBearerUser } from "../middlewares/deviceAuth";
+import { signAccessToken, signRefreshToken, hashRefreshToken } from "../lib/jwt";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
 import { ensureDeliveryId, generateDeliveryId } from "../utils/delivery";
@@ -67,27 +76,25 @@ function isValidPqkemPubKey(k: unknown): k is string {
  * Attach as route-level middleware on all mutating prekey operations.
  */
 async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const token = bearerToken(req);
 
   if (!token) {
     res.status(401).json({ error: "Authorization: Bearer <token> header required" });
     return;
   }
 
+  // JWT access tokens are verified statelessly (no DB query); expired or
+  // tampered JWTs are rejected outright. Legacy opaque device tokens fall
+  // back to the hashed device_tokens lookup during the transition window.
   const userId = req.params["userId"] as string;
-  const hash = hashToken(token);
+  const authed = await resolveBearerUser(token, userId);
 
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(and(eq(deviceTokensTable.userId, userId), eq(deviceTokensTable.tokenHash, hash)));
-
-  if (!row) {
-    res.status(403).json({ error: "Invalid or mismatched device token for userId" });
+  if (!authed) {
+    res.status(403).json({ error: "Invalid, expired, or mismatched token for userId" });
     return;
   }
 
+  res.locals.userId = authed;
   next();
 }
 
@@ -183,11 +190,49 @@ router.post("/prekeys/register", async (req: Request, res: Response) => {
       return res.status(409).json({ error: "Alias already registered" });
     }
 
+    // Legacy opaque device token — still written/returned for backward
+    // compatibility during the JWT transition window (task #198).
     const token = randomBytes(32).toString("hex");
     const tokenHash = hashToken(token);
+
+    if (existing) {
+      // Demo recovery: device lost its SecureStore (token + private keys).
+      // Re-issue a fresh device token and replace identity keys so the
+      // device can resume real X3DH sessions. This is intentional for the
+      // demo and removes the prior "first-writer wins" guarantee.
+      await db.transaction(async (tx) => {
+        await tx
+          .update(deviceTokensTable)
+          .set({ tokenHash })
+          .where(eq(deviceTokensTable.userId, normalizedUserId));
+        await tx
+          .update(identityKeysTable)
+          .set({
+            ikPublicKey,
+            spkPublicKey,
+            ikSignPublicKey: ikSignPublicKey ?? null,
+            spkSignature: spkSignature ?? null,
+            pqkemPublicKey: pqkemPublicKey ?? null,
+            pqkemSignature: pqkemSignature ?? null,
+          })
+          .where(eq(identityKeysTable.userId, normalizedUserId));
+      });
+      // Preserve the existing delivery id across a re-issue (it's a stable
+      // routing handle); only mint one if the row predates task #128.
+      const deliveryId = await ensureDeliveryId(normalizedUserId);
+      return res.status(200).json({ token, userId: normalizedUserId, deliveryId, reissued: true });
+    }
+
     const deliveryId = generateDeliveryId();
+    const accessToken = signAccessToken(normalizedUserId);
+    const refresh = signRefreshToken(normalizedUserId);
     await db.transaction(async (tx) => {
       await tx.insert(deviceTokensTable).values({ userId: normalizedUserId, tokenHash });
+      await tx.insert(refreshTokensTable).values({
+        userId: normalizedUserId,
+        tokenHash: hashRefreshToken(refresh.token),
+        expiresAt: refresh.expiresAt,
+      });
       await tx.insert(identityKeysTable).values({
         userId: normalizedUserId,
         deliveryId,
@@ -200,8 +245,15 @@ router.post("/prekeys/register", async (req: Request, res: Response) => {
       });
     });
 
-    // Return the plain-text token — client must store this securely
-    return res.status(201).json({ token, userId: normalizedUserId, deliveryId });
+    // Return the JWT pair (new) plus the plain-text legacy token — the
+    // client must store these securely.
+    return res.status(201).json({
+      accessToken,
+      refreshToken: refresh.token,
+      token,
+      userId: normalizedUserId,
+      deliveryId,
+    });
   } catch (err) {
     return res.status(500).json({ error: toErrorMessage(err) });
   }

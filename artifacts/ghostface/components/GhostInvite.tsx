@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -16,7 +15,6 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { QRScanner, encodeContactQR, encodeInviteQR } from "@/components/QRScanner";
 import { GoldGradient } from "@/components/GoldGradient";
-import { CODE_REGEX, type RedeemFailReason, type RedeemResult, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
 
 const TIMER_OPTIONS = [
   { label: "10 MIN", ms: 10 * 60 * 1000 },
@@ -27,10 +25,7 @@ const TIMER_OPTIONS = [
 
 function getApiBase(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (!domain) {
-    if (__DEV__) console.error("[ghostface] EXPO_PUBLIC_DOMAIN is not set — invite API calls will be skipped. Set it in .env or eas.json.");
-    return "";
-  }
+  if (!domain) return "";
   return `https://${domain}/api`;
 }
 
@@ -53,6 +48,8 @@ function fmtCountdown(ms: number): string {
   if (h > 0) return `${h}H ${m % 60}M ${s % 60}S`;
   return `${m}M ${s % 60}S`;
 }
+
+const CODE_REGEX = /^GF-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
 
 /**
  * POST the invite code to the server so it maps to the owner's real alias.
@@ -77,9 +74,52 @@ async function registerInviteOnServer(
   }
 }
 
+type RedeemFailReason = "bad_format" | "not_found" | "expired" | "used" | "offline";
+type RedeemResult =
+  | { ok: true; ownerAlias: string }
+  | { ok: false; reason: RedeemFailReason };
+
+async function lookupInviteCode(code: string): Promise<RedeemResult> {
+  const apiBase = getApiBase();
+  if (!apiBase) return { ok: false, reason: "offline" };
+  try {
+    const res = await fetch(`${apiBase}/invites/${encodeURIComponent(code.toUpperCase())}`);
+    if (res.ok) {
+      const data = (await res.json()) as { ownerAlias: string };
+      return { ok: true, ownerAlias: data.ownerAlias };
+    }
+    if (res.status === 410) {
+      const data = (await res.json()) as { error?: string };
+      const reason: RedeemFailReason =
+        typeof data.error === "string" && data.error.toLowerCase().includes("expir")
+          ? "expired"
+          : "used";
+      return { ok: false, reason };
+    }
+    return { ok: false, reason: "not_found" };
+  } catch {
+    return { ok: false, reason: "offline" };
+  }
+}
+
 type RedeemState = "idle" | "success" | RedeemFailReason;
 
-export default function GhostInvite() {
+interface GhostInviteProps {
+  /**
+   * One-shot auto-regenerate signal (task #145). When this changes to a new
+   * non-null value (a timestamp string from the invite-expired alert's
+   * "New Code" action), a fresh invite code is generated exactly once.
+   */
+  regenerateSignal?: string | null;
+  /**
+   * Called after the signal has been consumed so the parent can clear it —
+   * without this, remounting the (conditionally rendered) component with a
+   * stale signal would regenerate again.
+   */
+  onRegenerateConsumed?: () => void;
+}
+
+export default function GhostInvite({ regenerateSignal, onRegenerateConsumed }: GhostInviteProps) {
   const colors = useColors();
   const { addConversation, alias: myAlias } = useApp();
   const [showScanner, setShowScanner] = useState(false);
@@ -88,7 +128,6 @@ export default function GhostInvite() {
   const [expiresAt, setExpiresAt] = useState(() => Date.now() + TIMER_OPTIONS[0].ms);
   const [remaining, setRemaining] = useState(TIMER_OPTIONS[0].ms);
   const [copied, setCopied] = useState(false);
-  const [copiedShare, setCopiedShare] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [redeemInput, setRedeemInput] = useState("");
   const [redeemState, setRedeemState] = useState<RedeemState>("idle");
@@ -126,33 +165,32 @@ export default function GhostInvite() {
       return;
     }
 
-    const lookup = await lookupInviteCode(redeemInput);
-    if (!lookup.ok) {
+    const result = await lookupInviteCode(redeemInput);
+
+    if (!result.ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRedeemState(lookup.reason);
+      setRedeemState(result.reason);
       setTimeout(() => setRedeemState("idle"), 4000);
       return;
     }
 
-    const added = await addConversation(lookup.ownerAlias);
-    if (!added.ok) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRedeemState("connection_failed");
+    try {
+      const added = await addConversation(result.ownerAlias);
+      if (!added.ok) {
+        setRedeemState("not_found");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setTimeout(() => setRedeemState("idle"), 4000);
+        return;
+      }
+      setRedeemAlias(result.ownerAlias);
+      setRedeemInput("");
+      setRedeemState("success");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => setRedeemState("idle"), 4000);
-      return;
+    } catch {
+      setRedeemState("not_found");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
-
-    // Handshake confirmed — now atomically consume the code
-    const consume = await consumeInviteCode(redeemInput);
-    if (!consume.ok && !consume.alreadyUsed) {
-      console.warn("[invite] consume failed after successful redeem");
-    }
-
-    setRedeemAlias(lookup.ownerAlias);
-    setRedeemInput("");
-    setRedeemState("success");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setTimeout(() => setRedeemState("idle"), 4000);
   };
 
   const reset = useCallback(
@@ -170,6 +208,19 @@ export default function GhostInvite() {
     },
     [timerIdx, myAlias],
   );
+
+  // Auto-regenerate when the invite-expired alert's "New Code" action routes
+  // here. The ref guards against double-firing within this mount; the
+  // onRegenerateConsumed callback tells the parent to clear the signal so it
+  // can never replay across remounts of this (conditionally rendered) view.
+  const lastRegenSignalRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (regenerateSignal && lastRegenSignalRef.current !== regenerateSignal) {
+      lastRegenSignalRef.current = regenerateSignal;
+      reset();
+      onRegenerateConsumed?.();
+    }
+  }, [regenerateSignal, reset, onRegenerateConsumed]);
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
@@ -192,24 +243,6 @@ export default function GhostInvite() {
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const buildInviteShareText = (c: string) =>
-    `Join me on GHOSTFACE 👻\nMy invite code: ${c}\n\niOS: https://apps.apple.com/app/id6781518828\nAndroid: https://play.google.com/store/apps/details?id=com.ghostface.app`;
-
-  const handleCopyShare = async () => {
-    await Clipboard.setStringAsync(buildInviteShareText(code));
-    setCopiedShare(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setTimeout(() => setCopiedShare(false), 2000);
-  };
-
-  const handleSend = async () => {
-    try {
-      await Share.share({ message: buildInviteShareText(code) });
-    } catch {
-      // user cancelled or share sheet unavailable
-    }
-  };
-
   const handleTimer = (idx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setTimerIdx(idx);
@@ -225,43 +258,33 @@ export default function GhostInvite() {
    *  - a plain alias — start conversation directly
    */
   const handleQRScan = async (decoded: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
     if (CODE_REGEX.test(decoded)) {
-      // Scanned an invite code QR — lookup → add → consume
-      const lookup = await lookupInviteCode(decoded);
-      if (!lookup.ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setRedeemState(lookup.reason);
-        setTimeout(() => setRedeemState("idle"), 4000);
-        return;
+      // Scanned an invite code QR — resolve to real alias via server
+      const result = await lookupInviteCode(decoded);
+      if (result.ok) {
+        const added = await addConversation(result.ownerAlias);
+        if (added.ok) {
+          setRedeemAlias(result.ownerAlias);
+          setRedeemState("success");
+        } else {
+          setRedeemState("not_found");
+        }
+      } else {
+        setRedeemState(result.reason);
       }
-      const added = await addConversation(lookup.ownerAlias);
-      if (!added.ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setRedeemState("connection_failed");
-        setTimeout(() => setRedeemState("idle"), 4000);
-        return;
-      }
-      const consume = await consumeInviteCode(decoded);
-      if (!consume.ok && !consume.alreadyUsed) {
-        console.warn("[invite] QR consume failed after successful add");
-      }
-      setRedeemAlias(lookup.ownerAlias);
-      setRedeemState("success");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(() => setRedeemState("idle"), 4000);
     } else {
       // Scanned a contact QR (ghostface://add/<alias>)
       const added = await addConversation(decoded);
       if (added.ok) {
         setRedeemAlias(decoded);
         setRedeemState("success");
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
         setRedeemState("not_found");
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
-      setTimeout(() => setRedeemState("idle"), 4000);
     }
+    setTimeout(() => setRedeemState("idle"), 4000);
   };
 
   const redeemErrorLabel = (): string => {
@@ -271,7 +294,6 @@ export default function GhostInvite() {
       case "expired":    return "CODE HAS EXPIRED";
       case "used":       return "CODE ALREADY USED";
       case "offline":    return "SERVER UNREACHABLE";
-      case "connection_failed": return "CODE VALID — CONNECTION FAILED, TRY AGAIN";
       default:           return "COULD NOT REDEEM";
     }
   };
@@ -519,36 +541,6 @@ export default function GhostInvite() {
       fontWeight: "800",
       letterSpacing: 3,
     },
-    shareRow: {
-      flexDirection: "row" as const,
-      gap: 10,
-      width: "100%" as const,
-    },
-    shareBtn: {
-      flex: 1,
-      flexDirection: "row" as const,
-      alignItems: "center" as const,
-      justifyContent: "center" as const,
-      gap: 6,
-      paddingVertical: 11,
-      backgroundColor: colors.muted,
-      borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    shareBtnActive: {
-      backgroundColor: "rgba(32,138,239,0.15)",
-      borderColor: colors.primary,
-    },
-    shareBtnTxt: {
-      color: colors.mutedForeground,
-      fontSize: 10,
-      fontWeight: "700",
-      letterSpacing: 2,
-    },
-    shareBtnTxtActive: {
-      color: colors.primary,
-    },
   });
 
   return (
@@ -645,29 +637,6 @@ export default function GhostInvite() {
                 {expired ? "CODE DESTROYED" : `DESTROYS IN  ${fmtCountdown(remaining)}`}
               </Text>
             </View>
-
-            {/* Copy + Send */}
-            {!expired && (
-              <View style={styles.shareRow}>
-                <Pressable
-                  style={[styles.shareBtn, copiedShare && styles.shareBtnActive]}
-                  onPress={handleCopyShare}
-                >
-                  <Ionicons
-                    name={copiedShare ? "checkmark" : "copy-outline"}
-                    size={14}
-                    color={copiedShare ? colors.primary : colors.mutedForeground}
-                  />
-                  <Text style={[styles.shareBtnTxt, copiedShare && styles.shareBtnTxtActive]}>
-                    {copiedShare ? "COPIED" : "COPY"}
-                  </Text>
-                </Pressable>
-                <Pressable style={styles.shareBtn} onPress={handleSend}>
-                  <Ionicons name="share-outline" size={14} color={colors.mutedForeground} />
-                  <Text style={styles.shareBtnTxt}>SEND</Text>
-                </Pressable>
-              </View>
-            )}
 
           </View>
         </View>

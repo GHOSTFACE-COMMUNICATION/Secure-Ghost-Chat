@@ -12,24 +12,32 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusDot } from "@/components/StatusDot";
-import { getApiBase, useApp } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { VPN_SERVERS } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
 
-// The "connecting…" spinner used to run for a fixed, made-up 1500/1200ms —
-// a fake connection time, since there's no real tunnel being negotiated.
-// This does one genuine round trip instead, so however long the spinner
-// shows is how long a real request actually took, not an invented number.
-async function performHandshake(): Promise<void> {
-  const apiBase = getApiBase();
-  const url = apiBase ? `${apiBase}/healthz` : "https://api.ipify.org?format=json";
-  try {
-    await fetch(url);
-  } catch {
-    // Nothing meaningful left to wait on if even this fails.
-  }
+function LatencyBar({ latency }: { latency: number }) {
+  const colors = useColors();
+  const color =
+    latency < 30 ? colors.foreground : latency < 70 ? colors.warning : colors.destructive;
+  const bars = latency < 30 ? 3 : latency < 70 ? 2 : 1;
+  return (
+    <View style={{ flexDirection: "row", gap: 2, alignItems: "flex-end" }}>
+      {[1, 2, 3].map((b) => (
+        <View
+          key={b}
+          style={{
+            width: 4,
+            height: 4 + b * 3,
+            borderRadius: 1,
+            backgroundColor: b <= bars ? color : "#333",
+          }}
+        />
+      ))}
+    </View>
+  );
 }
 
 export default function VPNScreen() {
@@ -40,12 +48,6 @@ export default function VPNScreen() {
   const [connecting, setConnecting] = useState(false);
   const [currentIp, setCurrentIp] = useState<string | null>(null);
   const [ipLoading, setIpLoading] = useState(true);
-  // Genuinely measured round-trip time to a real endpoint — there's no
-  // per-region VPN infrastructure behind this screen, so a distinct ms
-  // figure per server would just be a fabricated number. This one figure
-  // is real; it stands in for "current network latency" rather than
-  // pretending to benchmark six different regions.
-  const [pingMs, setPingMs] = useState<number | null>(null);
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const { scrollRef: listRef, onScroll: onListScroll } = useScrollPersist<FlatList>("flatlist");
 
@@ -54,18 +56,11 @@ export default function VPNScreen() {
     async function fetchIp() {
       try {
         setIpLoading(true);
-        const started = Date.now();
         const res = await fetch("https://api.ipify.org?format=json");
         const data = await res.json();
-        if (!cancelled) {
-          setCurrentIp(data.ip ?? null);
-          setPingMs(Date.now() - started);
-        }
+        if (!cancelled) setCurrentIp(data.ip ?? null);
       } catch {
-        if (!cancelled) {
-          setCurrentIp(null);
-          setPingMs(null);
-        }
+        if (!cancelled) setCurrentIp(null);
       } finally {
         if (!cancelled) setIpLoading(false);
       }
@@ -93,13 +88,19 @@ export default function VPNScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     if (vpnConnected) {
       disconnectVPN();
-    } else {
-      const target = vpnServer ?? VPN_SERVERS[0];
+    } else if (vpnServer) {
       setConnecting(true);
-      performHandshake().finally(() => {
-        connectVPN(target);
+      setTimeout(() => {
+        connectVPN(vpnServer);
         setConnecting(false);
-      });
+      }, 1500);
+    } else {
+      const first = VPN_SERVERS[0];
+      setConnecting(true);
+      setTimeout(() => {
+        connectVPN(first);
+        setConnecting(false);
+      }, 1500);
     }
   };
 
@@ -108,10 +109,10 @@ export default function VPNScreen() {
     if (vpnConnected) {
       setConnecting(true);
       disconnectVPN();
-      performHandshake().finally(() => {
+      setTimeout(() => {
         connectVPN(server);
         setConnecting(false);
-      });
+      }, 1200);
     } else {
       connectVPN(server);
     }
@@ -244,6 +245,14 @@ export default function VPNScreen() {
       fontSize: 11,
       marginTop: 2,
     },
+    serverMeta: {
+      alignItems: "flex-end",
+      gap: 4,
+    },
+    latencyText: {
+      fontSize: 11,
+      letterSpacing: 1,
+    },
     serverDivider: {
       height: 1,
       backgroundColor: colors.border,
@@ -338,7 +347,7 @@ export default function VPNScreen() {
               </Text>
               <Text style={styles.serverLabel}>
                 {(vpnConnected || vpnAutoReconnecting) && vpnServer
-                  ? `${vpnServer.flag} ${vpnServer.name}`
+                  ? `${vpnServer.flag} ${vpnServer.name} — ${vpnServer.latency}ms`
                   : "TAP SHIELD TO CONNECT"}
               </Text>
 
@@ -416,9 +425,9 @@ export default function VPNScreen() {
                 </View>
               </View>
               <View style={styles.statCard}>
-                <Text style={styles.statLabel}>PING</Text>
+                <Text style={styles.statLabel}>LATENCY</Text>
                 <Text style={styles.statValue}>
-                  {pingMs !== null ? pingMs : "--"}{" "}
+                  {vpnServer ? vpnServer.latency : "--"}{" "}
                   <Text style={styles.statUnit}>ms</Text>
                 </Text>
                 <View style={styles.progressBar}>
@@ -426,13 +435,13 @@ export default function VPNScreen() {
                     style={[
                       styles.progressFill,
                       {
-                        width: pingMs !== null
-                          ? `${Math.min((pingMs / 150) * 100, 100)}%`
+                        width: vpnServer
+                          ? `${Math.min((vpnServer.latency / 150) * 100, 100)}%`
                           : "0%",
                         backgroundColor:
-                          pingMs !== null && pingMs < 30
+                          vpnServer && vpnServer.latency < 30
                             ? colors.foreground
-                            : pingMs !== null && pingMs < 70
+                            : vpnServer && vpnServer.latency < 70
                             ? colors.warning
                             : colors.destructive,
                       },
@@ -471,6 +480,24 @@ export default function VPNScreen() {
                     <Text style={{ color: colors.mutedForeground, fontWeight: "400" as const }}>{" · "}{item.shortRegion}</Text>
                   </Text>
                   <Text style={styles.serverRegion}>{item.region}</Text>
+                </View>
+                <View style={styles.serverMeta}>
+                  <LatencyBar latency={item.latency} />
+                  <Text
+                    style={[
+                      styles.latencyText,
+                      {
+                        color:
+                          item.latency < 30
+                            ? colors.foreground
+                            : item.latency < 70
+                            ? colors.warning
+                            : colors.destructive,
+                      },
+                    ]}
+                  >
+                    {item.latency}ms
+                  </Text>
                 </View>
                 {isActive && (
                   <Ionicons

@@ -387,6 +387,86 @@ for (const check of LBW_CHECKS) {
   }
 }
 
+// ── hold-to-decrypt lock screen checks ────────────────────────────────────────
+//
+// 11. The gate branch (shown on mount when hasPin is true) must carry
+//     testID="decrypt-seal" so automated checks can assert the keypad is absent.
+// 12. testID="keypad" must appear inside the `decryptRevealed` conditional, not
+//     in the gate branch — the keypad must be invisible until the seal is opened.
+// 13. The AppState listener that fires on background must call
+//     setDecryptRevealed(false) so an interrupted hold can never complete after
+//     the app returns.
+
+const lockSrc = readOrBail(LOCK_SCREEN);
+if (lockSrc) {
+  // 11. decrypt-seal testID is present.
+  if (/testID=["']decrypt-seal["']/.test(lockSrc)) {
+    pass("lock screen gate branch carries testID=\"decrypt-seal\"");
+  } else {
+    fail(
+      "lock screen gate branch is missing testID=\"decrypt-seal\"",
+      "Add testID=\"decrypt-seal\" to the <View style={styles.gate}> so tests can assert\n" +
+        "that the keypad is absent on mount.",
+    );
+  }
+
+  // 12. testID="keypad" must be gated on decryptRevealed.
+  //     Strategy: locate the `hasPin && decryptRevealed` branch opener, then
+  //     confirm that testID="keypad" appears AFTER it but BEFORE the `} : (` else
+  //     boundary.  If testID="keypad" appears outside that range the keypad would
+  //     leak into the sealed gate view.
+  const decryptBranchMarker = "hasPin && decryptRevealed";
+  const elseBoundaryMarker = ") : (";
+  const keypadTestId = 'testID="keypad"';
+
+  const decryptIdx = lockSrc.indexOf(decryptBranchMarker);
+  const elseIdx = lockSrc.indexOf(elseBoundaryMarker, decryptIdx);
+  const keypadIdx = lockSrc.indexOf(keypadTestId);
+
+  if (decryptIdx === -1) {
+    fail(
+      "lock screen missing decryptRevealed conditional",
+      `Expected a branch guarded by "${decryptBranchMarker}" in ${LOCK_SCREEN}.`,
+    );
+  } else if (keypadIdx === -1) {
+    fail(
+      "lock screen missing testID=\"keypad\"",
+      "The PIN keypad Animated.View must carry testID=\"keypad\".",
+    );
+  } else if (keypadIdx > decryptIdx && (elseIdx === -1 || keypadIdx < elseIdx)) {
+    pass("testID=\"keypad\" is rendered only inside the decryptRevealed branch");
+  } else {
+    fail(
+      "testID=\"keypad\" appears outside the decryptRevealed branch",
+      "The keypad must be rendered exclusively inside the `hasPin && decryptRevealed` branch\n" +
+        "so a user without a valid hold gesture cannot reach the PIN entry UI.",
+    );
+  }
+
+  // 13. The AppState listener that fires on non-active transitions must re-seal
+  //     the screen by calling setDecryptRevealed(false).
+  //     We extract the body of the listener whose branch reads `state !== "active"`
+  //     and verify it contains setDecryptRevealed(false).
+  const appStateBody = extractBracedBody(
+    lockSrc,
+    'const sub = AppState.addEventListener("change", (state) => {',
+  );
+  if (!appStateBody) {
+    fail(
+      "lock screen AppState listener body could not be located",
+      'Expected `AppState.addEventListener("change", (state) => {` in lock.tsx.',
+    );
+  } else if (/setDecryptRevealed\s*\(\s*false\s*\)/.test(appStateBody)) {
+    pass("AppState background listener calls setDecryptRevealed(false) to re-seal the screen");
+  } else {
+    fail(
+      "AppState background listener does not re-seal the screen",
+      "setDecryptRevealed(false) must be called when app state is not \"active\" so an\n" +
+        "interrupted hold cannot complete after the user returns to the app.",
+    );
+  }
+}
+
 // ── summary ────────────────────────────────────────────────────────────────────
 
 if (exitCode === 0) {

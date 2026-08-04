@@ -1,0 +1,79 @@
+import { useEffect, useState } from "react";
+import { View, Text, TouchableOpacity, ScrollView } from "react-native";
+import { colors } from "../../constants/colors";
+import { useApp } from "../../context/AppContext";
+
+export default function NumbersScreen() {
+  const { token } = useApp();
+  const [numbers, setNumbers] = useState([]);
+
+  async function loadNumbers() {
+    const res = await fetch("https://api.ghostface.co.nz/api/numbers", {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    setNumbers(await res.json());
+  }
+
+  async function provision() {
+    await fetch("https://api.ghostface.co.nz/api/numbers/provision", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        country: "NZ",
+        capabilities: ["sms"]
+      })
+    });
+    loadNumbers();
+  }
+
+  useEffect(() => {
+    loadNumbers();
+  }, []);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.black }}>
+      <ScrollView style={{ padding: 20 }}>
+        <Text style={{ color: colors.fg, fontSize: 24, marginBottom: 20 }}>
+          Ghostface Numbers
+        </Text>
+
+        {numbers.map((n: any) => (
+          <View
+            key={n.id}
+            style={{
+              padding: 16,
+              backgroundColor: "#0D0D0D",
+              borderColor: "#1E1E1E",
+              borderWidth: 1,
+              marginBottom: 12
+            }}
+          >
+            <Text style={{ color: colors.fg, fontSize: 18 }}>
+              {n.phoneNumber}
+            </Text>
+            <Text style={{ color: colors.accent, marginTop: 4 }}>
+              {n.status.toUpperCase()}
+            </Text>
+          </View>
+        ))}
+
+        <TouchableOpacity
+          onPress={provision}
+          style={{
+            marginTop: 20,
+            padding: 16,
+            backgroundColor: colors.accent,
+            borderRadius: 8
+          }}
+        >
+          <Text style={{ color: "#000", textAlign: "center", fontSize: 18 }}>
+            Acquire Number
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+}

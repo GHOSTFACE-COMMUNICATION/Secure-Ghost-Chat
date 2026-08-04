@@ -18,7 +18,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -217,10 +216,6 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { width: winWidth } = useWindowDimensions();
-  // iPhone SE/mini-class widths (375pt) can't fit the timer's text label
-  // alongside three action buttons without crowding — icon-only there.
-  const timerCompact = winWidth < 380;
   const { conversations, alias, sendMessage, sendReaction, retryMessage, deleteMessage, clearConversation, setDisappearTimer, setConversationBgColor, markMessagesViewed, verifyConversation, deleteConversation, lowBandwidthActive, wsConnected } = useApp();
   const [text, setText] = useState("");
   const [showInfo, setShowInfo] = useState(false);
@@ -259,10 +254,9 @@ export default function ChatScreen() {
 
   const conv = conversations.find((c) => c.id === id);
 
-  // Tick every second whenever a disappear timer could be live in this
-  // conversation — either our own outgoing default (disappearAfterSec) or
-  // any message carrying a receiver-side ttlMs (envelope-sourced, so it can
-  // be present even when we've never set a local disappear timer ourselves).
+  // Tick every second when a disappear timer is active — keeps countdown badges
+  // live (also when any received message carries its own TTL, which can be
+  // present even when we've never set a local disappear timer ourselves).
   const hasTtlMessages = conv?.messages.some((m) => m.ttlMs) ?? false;
   useEffect(() => {
     if (!conv?.disappearAfterSec && !hasTtlMessages) return;
@@ -280,8 +274,7 @@ export default function ChatScreen() {
       if (!conv) return;
       const unviewed = conv.messages.filter((m) => m.ttlMs && !m.viewedAt).map((m) => m.id);
       if (unviewed.length > 0) markMessagesViewed(conv.id, unviewed);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [conv?.id, conv?.messages]),
+    }, [conv, markMessagesViewed]),
   );
 
   if (!conv) {
@@ -686,14 +679,14 @@ export default function ChatScreen() {
     headerTimerBadge: {
       flexDirection: "row" as const,
       alignItems: "center" as const,
-      gap: 3,
+      gap: 2,
       backgroundColor: `${colors.destructive}20`,
-      borderRadius: 6,
-      paddingHorizontal: 7,
-      paddingVertical: 5,
+      borderRadius: 4,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
     },
     headerTimerTxt: {
-      fontSize: 10,
+      fontSize: 8,
       fontWeight: "800" as const,
       letterSpacing: 1,
       color: colors.destructive,
@@ -1037,13 +1030,21 @@ export default function ChatScreen() {
           <Text style={styles.headerAlias}>{conv.alias}</Text>
           <View style={styles.headerSub}>
             <StatusDot active size={5} pulse={false} />
-            <Text style={styles.headerSubText} numberOfLines={1}>
+            <Text style={styles.headerSubText}>
               {conv.drSession
                 ? conv.drSession.alice.pq
                   ? "POST-QUANTUM · DOUBLE RATCHET · CHACHA20"
                   : "DOUBLE RATCHET · X3DH · CHACHA20"
                 : "SECURE · CHACHA20-POLY1305"}
             </Text>
+            {conv.disappearAfterSec && (
+              <View style={styles.headerTimerBadge}>
+                <Ionicons name="timer-outline" size={8} color={colors.destructive} />
+                <Text style={styles.headerTimerTxt}>
+                  {currentDisappear.label}
+                </Text>
+              </View>
+            )}
             {lowBandwidthActive && (
               <View
                 style={{
@@ -1066,47 +1067,22 @@ export default function ChatScreen() {
           </View>
         </View>
         <View style={styles.headerActions}>
-          {conv.disappearAfterSec && (
-            <View
-              style={styles.headerTimerBadge}
-              accessibilityLabel={`Disappearing messages: ${currentDisappear.label}`}
-            >
-              <Ionicons name="timer-outline" size={11} color={colors.destructive} />
-              {!timerCompact && (
-                <Text style={styles.headerTimerTxt}>{currentDisappear.label}</Text>
-              )}
-            </View>
-          )}
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Date.now().toString() } });
-            }}
-            testID="voice-call-btn"
-          >
+          <Pressable style={styles.callBtn} onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Date.now().toString() } });
+          }} testID="voice-call-btn">
             <Ionicons name="call-outline" size={20} color={colors.primary} />
           </Pressable>
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Date.now().toString() } });
-            }}
-            testID="video-call-btn"
-          >
+          <Pressable style={styles.callBtn} onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Date.now().toString() } });
+          }} testID="video-call-btn">
             <Ionicons name="videocam-outline" size={20} color={colors.primary} />
           </Pressable>
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowInfo(true);
-            }}
-          >
+          <Pressable style={styles.callBtn} onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            setShowInfo(true);
+          }}>
             <Ionicons
               name={conv.verified ? "shield-checkmark" : "shield-checkmark-outline"}
               size={20}
@@ -1918,9 +1894,6 @@ export default function ChatScreen() {
               <View style={styles.sheetBody}>
                 <Text style={styles.safetyNote}>
                   Messages auto-delete after the set time. Screenshots are blocked on both sides.
-                </Text>
-                <Text style={[styles.safetyNote, { opacity: 0.6, marginTop: -4 }]}>
-                  This timer is enforced by the app on each device — it cannot be guaranteed against a modified client.
                 </Text>
                 <View style={styles.disappearOptions}>
                   {DISAPPEAR_OPTIONS.map((opt) => {

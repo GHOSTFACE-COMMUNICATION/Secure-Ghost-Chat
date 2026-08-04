@@ -63,8 +63,7 @@ router.post("/integrity/verify", async (req: Request, res: Response) => {
     });
 
     const verdict = data.tokenPayloadExternal;
-    const deviceRecognitionVerdict =
-      verdict?.deviceIntegrity?.deviceRecognitionVerdict ?? [];
+    const deviceRecognitionVerdict = verdict?.deviceIntegrity?.deviceRecognitionVerdict ?? [];
     const appRecognitionVerdict = verdict?.appIntegrity?.appRecognitionVerdict;
 
     const strong = deviceRecognitionVerdict.includes("MEETS_STRONG_INTEGRITY");
@@ -78,7 +77,11 @@ router.post("/integrity/verify", async (req: Request, res: Response) => {
 
     if (!verified) {
       logger.warn(
-        { alias: alias ? normalizeAlias(alias) : undefined, deviceRecognitionVerdict, appRecognitionVerdict },
+        {
+          alias: alias ? normalizeAlias(alias) : undefined,
+          deviceRecognitionVerdict,
+          appRecognitionVerdict,
+        },
         "[integrity] check failed",
       );
     }

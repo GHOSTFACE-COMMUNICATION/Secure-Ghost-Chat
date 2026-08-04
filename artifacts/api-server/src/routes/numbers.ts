@@ -1,11 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, ghostNumbersTable, ghostSmsTable, deviceTokensTable } from "@workspace/db";
+import { db, ghostNumbersTable, ghostSmsTable } from "@workspace/db";
 import { eq, and, desc, or, sql } from "drizzle-orm";
-import { createHash } from "crypto";
+import { getAuthedAliasUnified } from "../middlewares/deviceAuth";
 import { vonageClient } from "../lib/vonage";
 import { pool } from "@workspace/db";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
-import { normalizeAlias } from "../utils/alias";
 import { broadcastToAlias } from "../ws/manager";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
@@ -26,27 +25,10 @@ const smsInboxLimiter = new RateLimiter({ windowMs: 60_000, max: 30 });
 
 const ALLOWED_ROTATION_DAYS = new Set([0, 7, 30, 90]);
 
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
+// JWT access tokens carry the alias themselves; legacy opaque tokens still
+// require the ?alias= query param for the hashed device_tokens lookup.
 async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
-  const alias = req.query.alias as string | undefined;
-  if (!alias) return null;
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(
-      and(
-        eq(deviceTokensTable.userId, normalizeAlias(alias)),
-        eq(deviceTokensTable.tokenHash, hash),
-      ),
-    );
-  return row ? normalizeAlias(alias) : null;
+  return getAuthedAliasUnified(req, req.query.alias as string | undefined);
 }
 
 const COUNTRY_NAMES: Record<string, string> = {

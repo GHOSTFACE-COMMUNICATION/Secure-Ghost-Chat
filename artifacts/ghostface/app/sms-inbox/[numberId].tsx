@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
+import { authFetch } from "@/lib/api";
 import { useColors } from "@/hooks/useColors";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
@@ -58,7 +59,7 @@ export default function SmsInboxScreen() {
     // `loaded`-gated effect will retry once AsyncStorage has rehydrated.
     if (!alias || !deviceToken || !numberId) return false;
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/numbers/${numberId}/sms?alias=${alias}`,
         {
           headers: {

@@ -1,0 +1,113 @@
+fbc39255/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/DimmingView.kt:68:9 The corresponding parameter in the supertype 'ReactCompoundViewGroup' is named 'touchX'. This may cause problems when calling this function with named arguments.
+Fri, 15 May 2026 10:39:40 GMT
+
+w: file:///home/expo/workingdir/build/node_modules/.pnpm/react-native-screens@4.16.0_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.1.17_df748bb3ee5bf4738a0a530afbc39255/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/bottomsheet/DimmingView.kt:69:9 The corresponding parameter in the supertype 'ReactCompoundViewGroup' is named 'touchY'. This may cause problems when calling this function with named arguments.
+Fri, 15 May 2026 10:39:40 GMT
+
+w: file:///home/expo/workingdir/build/node_modules/.pnpm/react-native-screens@4.16.0_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.1.17_df748bb3ee5bf4738a0a530afbc39255/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/tabs/TabsHostViewManager.kt:37:9 The corresponding parameter in the supertype 'TabsHostViewManager' is named 'view'. This may cause problems when calling this function with named arguments.
+Fri, 15 May 2026 10:39:41 GMT
+
+> Task :react-native-worklets:processDebugJavaRes NO-SOURCE
+Fri, 15 May 2026 10:39:43 GMT
+
+> Task :app:checkDebugDuplicateClasses
+Fri, 15 May 2026 10:39:43 GMT
+
+> Task :expo-dev-menu:compileDebugKotlin
+Fri, 15 May 2026 10:39:43 GMT
+
+[stderr] 
+
+e: file:///home/expo/workingdir/build/node_modules/.pnpm/expo-dev-menu@56.0.9_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@1_f15c22fc9a27c01776eb4837ae46436a/node_modules/expo-dev-menu/android/src/debug/java/expo/modules/devmenu/DevMenuPackage.kt:50:9 'onDidCreateReactActivityDelegateNotification' overrides nothing.
+Fri, 15 May 2026 10:39:43 GMT
+
+[stderr] 
+
+e: file:///home/expo/workingdir/build/node_modules/.pnpm/expo-dev-menu@56.0.9_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@1_f15c22fc9a27c01776eb4837ae46436a/node_modules/expo-dev-menu/android/src/debug/java/expo/modules/devmenu/modules/DevMenuModule.kt:14:34 Unresolved reference 'OptimizedRecord'.
+Fri, 15 May 2026 10:39:43 GMT
+
+[stderr] 
+
+e: file:///home/expo/workingdir/build/node_modules/.pnpm/expo-dev-menu@56.0.9_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@types+react@1_f15c22fc9a27c01776eb4837ae46436a/node_modules/expo-dev-menu/android/src/debug/java/expo/modules/devmenu/modules/DevMenuModule.kt:16:2 Unresolved reference 'OptimizedRecord'.
+Fri, 15 May 2026 10:39:43 GMT
+
+> Task :expo-dev-menu:compileDebugKotlin FAILED
+Fri, 15 May 2026 10:39:44 GMT
+
+> Task :react-native-screens:compileDebugJavaWithJavac
+Fri, 15 May 2026 10:40:13 GMT
+
+> Task :app:mergeExtDexDebug
+Fri, 15 May 2026 10:40:45 GMT
+
+[Incubating] Problems report is available at: file:///home/expo/workingdir/build/artifacts/ghostface/android/build/reports/problems/problems-report.html
+Fri, 15 May 2026 10:40:45 GMT
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+Fri, 15 May 2026 10:40:45 GMT
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+Fri, 15 May 2026 10:40:45 GMT
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+Fri, 15 May 2026 10:40:45 GMT
+
+409 actionable tasks: 409 executed
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+FAILURE: Build failed with an exception.
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+* What went wrong:
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+Execution failed for task ':expo-dev-menu:compileDebugKotlin'.
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+   > Compilation error. See log for more details
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+* Try:
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+> Run with --stacktrace option to get the stack trace.
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+> Run with --info or --debug option to get more log output.
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+> Run with --scan to get full insights.
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+> Get more help at https://help.gradle.org.
+Fri, 15 May 2026 10:40:45 GMT
+
+[stderr] 
+
+BUILD FAILED in 4m 8s
+Fri, 15 May 2026 10:40:45 GMT
+
+Error: Gradle build failed with unknown error. See logs for the "Run gradlew" phase for more information.

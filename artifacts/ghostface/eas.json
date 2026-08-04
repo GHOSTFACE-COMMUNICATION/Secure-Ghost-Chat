@@ -5,7 +5,6 @@
   },
   "build": {
     "development": {
-      "node": "22.13.0",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
@@ -16,7 +15,6 @@
       }
     },
     "development:device": {
-      "node": "22.13.0",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
@@ -27,20 +25,15 @@
       }
     },
     "preview": {
-      "node": "22.13.0",
       "distribution": "internal",
       "ios": {
         "simulator": false
       },
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_DOMAIN": "api-server-production-b252.up.railway.app"
       }
     },
     "production": {
-      "node": "22.13.0",
       "autoIncrement": true,
       "ios": {
         "buildConfiguration": "Release",
@@ -49,19 +42,13 @@
       "android": {
         "buildType": "app-bundle",
         "distribution": "store"
-      },
-      "env": {
-        "EXPO_PUBLIC_DOMAIN": "api-server-production-b252.up.railway.app"
       }
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6781518828",
-        "ascApiKeyPath": "/Users/ghostface/Downloads/AuthKey_X27ZGN9585.p8",
-        "ascApiKeyId": "X27ZGN9585",
-        "ascApiKeyIssuerId": "abba23f8-558e-49d5-bdc6-f80952590f8e"
+        "ascAppId": "$APPLE_ASC_APP_ID"
       },
       "android": {
         "track": "production",

@@ -1,0 +1,92 @@
+// services/virtualNumbers.ts
+import axios from "axios";
+import { db } from "../db";
+import { virtualNumbers, smsMessages } from "../db/schema";
+import { normalizeAlias } from "../utils/alias";
+import { broadcastToAlias } from "../ws";
+
+export class VirtualNumberService {
+  constructor(private provider: "vonage" | "twilio" | "telnyx") {}
+
+  async purchaseNumber(alias: string) {
+    const cleanAlias = normalizeAlias(alias);
+
+    // Example: Vonage number purchase
+    const res = await axios.post("https://rest.nexmo.com/number/buy", {
+      api_key: process.env.VONAGE_KEY,
+      api_secret: process.env.VONAGE_SECRET,
+      country: "NZ",
+      msisdn: process.env.VONAGE_NUMBER_POOL,
+    });
+
+    const number = res.data.msisdn;
+
+    await db.insert(virtualNumbers).values({
+      alias: cleanAlias,
+      number,
+      provider: this.provider,
+      createdAt: new Date(),
+    });
+
+    return number;
+  }
+
+  async handleInboundSMS(payload: any) {
+    const from = payload.msisdn || payload.from;
+    const to = payload.to;
+    const text = payload.text;
+
+    const numberRecord = await db.query.virtualNumbers.findFirst({
+      where: (v) => v.number.eq(to),
+    });
+
+    if (!numberRecord) return;
+
+    await db.insert(smsMessages).values({
+      alias: numberRecord.alias,
+      fromNumber: from,
+      toNumber: to,
+      message: text,
+      createdAt: new Date(),
+    });
+
+    // Push to WebSocket client
+    broadcastToAlias(numberRecord.alias, {
+      type: "sms_inbound",
+      from,
+      to,
+      text,
+    });
+  }
+
+  async sendSMS(alias: string, to: string, text: string) {
+    const cleanAlias = normalizeAlias(alias);
+
+    const numberRecord = await db.query.virtualNumbers.findFirst({
+      where: (v) => v.alias.eq(cleanAlias),
+    });
+
+    if (!numberRecord) throw new Error("Alias has no virtual number");
+
+    // Example: Vonage send SMS
+    await axios.post("https://rest.nexmo.com/sms/json", {
+      api_key: process.env.VONAGE_KEY,
+      api_secret: process.env.VONAGE_SECRET,
+      from: numberRecord.number,
+      to,
+      text,
+    });
+
+    await db.insert(smsMessages).values({
+      alias: cleanAlias,
+      fromNumber: numberRecord.number,
+      toNumber: to,
+      message: text,
+      createdAt: new Date(),
+    });
+
+    return true;
+  }
+}
+
+export const virtualNumberService = new VirtualNumberService("vonage");

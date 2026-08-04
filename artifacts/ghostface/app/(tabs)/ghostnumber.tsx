@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
+import { authFetch } from "@/lib/api";
 import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
@@ -93,7 +94,7 @@ export default function GhostNumberScreen() {
   const fetchNumbers = useCallback(async (): Promise<boolean> => {
     if (!alias || !deviceToken) return false;
     try {
-      const res = await fetch(`${API_BASE}/numbers?alias=${alias}`, {
+      const res = await authFetch(`${API_BASE}/numbers?alias=${alias}`, {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -147,7 +148,7 @@ export default function GhostNumberScreen() {
     }
     setProvisioning(true);
     try {
-      const res = await fetch(`${API_BASE}/numbers/provision?alias=${alias}`, {
+      const res = await authFetch(`${API_BASE}/numbers/provision?alias=${alias}`, {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ country: "NZ", capabilities: ["sms"] }),
@@ -176,7 +177,7 @@ export default function GhostNumberScreen() {
           onPress: async () => {
             setReleasing(number.id);
             try {
-              const res = await fetch(
+              const res = await authFetch(
                 `${API_BASE}/numbers/${number.id}?alias=${alias}`,
                 { method: "DELETE", headers: authHeaders() }
               );
@@ -200,7 +201,7 @@ export default function GhostNumberScreen() {
     if (!alias || !deviceToken) return;
     setSavingRotation(number.id);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/numbers/${number.id}/rotation?alias=${alias}`,
         {
           method: "PATCH",
@@ -233,7 +234,7 @@ export default function GhostNumberScreen() {
           onPress: async () => {
             setRotatingNow(number.id);
             try {
-              const res = await fetch(
+              const res = await authFetch(
                 `${API_BASE}/numbers/${number.id}/rotate-now?alias=${alias}`,
                 { method: "POST", headers: authHeaders() }
               );

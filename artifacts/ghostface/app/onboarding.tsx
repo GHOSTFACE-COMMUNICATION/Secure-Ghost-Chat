@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import {
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -11,51 +12,21 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GoldGradient } from "@/components/GoldGradient";
-import { getApiBase, useApp } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { normalizeAlias } from "@/utils/alias";
 
-// Larger pool than we ever show at once — the suggestion row rotates through
-// a random slice of this every few seconds so returning users don't see the
-// same six every time.
-const ALIAS_POOL = [
-  "PHANTOM_9", "NULL_BYTE", "WRAITH_7", "CIPHER_X", "GHOST_01", "VOID_EXE",
-  "SHADE_11", "ECHO_ZERO", "STATIC_Q", "NOMAD_88", "RELIC_X9", "DRIFTER_3",
-  "MASK_404", "HOLLOW_7", "CINDER_Q", "SIGNAL_0", "REDACT_9", "GHOST_X1",
-  "OBLIVION4", "SPECTRE_2", "UNKNOWN_7", "GLITCH_99", "VAPOR_ID", "NIGHT_OPS",
+const SUGGESTED_ALIASES = [
+  "PHANTOM_9",
+  "NULL_BYTE",
+  "WRAITH_7",
+  "CIPHER_X",
+  "GHOST_01",
+  "VOID_EXE",
 ];
-const SUGGESTIONS_SHOWN = 6;
-const ROTATE_INTERVAL_MS = 4500;
-
-function sampleAliases(count: number): string[] {
-  const pool = [...ALIAS_POOL];
-  const picked: string[] = [];
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    const idx = Math.floor(Math.random() * pool.length);
-    picked.push(pool.splice(idx, 1)[0]);
-  }
-  return picked;
-}
-
-/** Checks the same identity_keys-backed lookup used to route messages
- * (GET /api/users/exists/:alias) — a hit means the alias is already
- * registered, not just "someone else typed it once." */
-async function checkAliasTaken(alias: string): Promise<boolean | null> {
-  const apiBase = getApiBase();
-  if (!apiBase) return null;
-  try {
-    const res = await fetch(`${apiBase}/users/exists/${encodeURIComponent(alias)}`);
-    if (res.status === 404) return false;
-    if (!res.ok) return null;
-    return true;
-  } catch {
-    return null;
-  }
-}
 
 export default function OnboardingScreen() {
   const colors = useColors();
@@ -66,44 +37,9 @@ export default function OnboardingScreen() {
   const [pin, setPinText] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
   const [pinError, setPinError] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>(() => sampleAliases(SUGGESTIONS_SHOWN));
-  const [aliasStatus, setAliasStatus] = useState<
-    "idle" | "checking" | "available" | "taken" | "unknown"
-  >("idle");
-  const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const checkSeq = useRef(0);
-
-  // Rotate the suggestion chips through the wider pool every few seconds.
-  useEffect(() => {
-    const id = setInterval(() => {
-      setSuggestions(sampleAliases(SUGGESTIONS_SHOWN));
-    }, ROTATE_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  // Debounced "is this alias already registered" check against the same
-  // lookup messages.ts uses to route to an existing identity.
-  useEffect(() => {
-    const trimmed = alias.trim();
-    if (checkTimer.current) clearTimeout(checkTimer.current);
-    if (trimmed.length < 3) {
-      setAliasStatus("idle");
-      return;
-    }
-    setAliasStatus("checking");
-    const seq = ++checkSeq.current;
-    checkTimer.current = setTimeout(async () => {
-      const taken = await checkAliasTaken(normalizeAlias(trimmed));
-      if (checkSeq.current !== seq) return; // alias changed since this fired
-      setAliasStatus(taken === null ? "unknown" : taken ? "taken" : "available");
-    }, 450);
-    return () => {
-      if (checkTimer.current) clearTimeout(checkTimer.current);
-    };
-  }, [alias]);
 
   const handleAliasConfirm = async () => {
-    if (alias.trim().length < 3 || aliasStatus === "taken" || aliasStatus === "checking") return;
+    if (alias.trim().length < 3) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setStep("pin");
   };
@@ -182,13 +118,6 @@ export default function OnboardingScreen() {
       paddingVertical: 14,
       marginBottom: 12,
     },
-    aliasStatusText: {
-      fontSize: 10,
-      letterSpacing: 2,
-      fontWeight: "700" as const,
-      marginTop: -6,
-      marginBottom: 10,
-    },
     suggestions: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -201,8 +130,6 @@ export default function OnboardingScreen() {
       borderRadius: colors.radius,
       paddingHorizontal: 12,
       paddingVertical: 6,
-      alignItems: "center",
-      justifyContent: "center",
     },
     suggestionText: {
       color: colors.mutedForeground,
@@ -346,7 +273,7 @@ export default function OnboardingScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <GhostLogo size={120} color={colors.foreground} />
+          <GhostLogo size={320} color={colors.foreground} />
           <Text style={styles.tagline}>NO FACE. NO TRACE.</Text>
           <Text style={styles.appName}>GHOSTFACE</Text>
         </View>
@@ -366,30 +293,8 @@ export default function OnboardingScreen() {
               testID="alias-input"
             />
 
-            {aliasStatus !== "idle" && (
-              <Text
-                style={[
-                  styles.aliasStatusText,
-                  {
-                    color:
-                      aliasStatus === "taken"
-                        ? colors.destructive
-                        : aliasStatus === "available"
-                        ? colors.primary
-                        : colors.mutedForeground,
-                  },
-                ]}
-                testID="alias-status"
-              >
-                {aliasStatus === "checking" && "CHECKING AVAILABILITY…"}
-                {aliasStatus === "available" && "AVAILABLE"}
-                {aliasStatus === "taken" && "ALREADY TAKEN — TRY ANOTHER"}
-                {aliasStatus === "unknown" && "COULDN'T VERIFY — YOU CAN STILL CONTINUE"}
-              </Text>
-            )}
-
             <View style={styles.suggestions}>
-              {suggestions.map((s) => (
+              {SUGGESTED_ALIASES.map((s) => (
                 <Pressable
                   key={s}
                   style={styles.suggestionChip}
@@ -398,16 +303,6 @@ export default function OnboardingScreen() {
                   <Text style={styles.suggestionText}>{s}</Text>
                 </Pressable>
               ))}
-              <Pressable
-                style={styles.suggestionChip}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setSuggestions(sampleAliases(SUGGESTIONS_SHOWN));
-                }}
-                testID="shuffle-suggestions"
-              >
-                <Ionicons name="shuffle" size={14} color={colors.primary} />
-              </Pressable>
             </View>
 
             {/* First Login Special — Free Ghost Number */}
@@ -430,17 +325,10 @@ export default function OnboardingScreen() {
             <Pressable
               style={[
                 styles.confirmBtn,
-                (alias.trim().length < 3 ||
-                  aliasStatus === "taken" ||
-                  aliasStatus === "checking") &&
-                  styles.confirmBtnDisabled,
+                alias.trim().length < 3 && styles.confirmBtnDisabled,
               ]}
               onPress={handleAliasConfirm}
-              disabled={
-                alias.trim().length < 3 ||
-                aliasStatus === "taken" ||
-                aliasStatus === "checking"
-              }
+              disabled={alias.trim().length < 3}
               testID="alias-confirm"
             >
               <GoldGradient style={styles.confirmBtnInner}>

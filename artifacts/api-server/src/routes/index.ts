@@ -10,10 +10,15 @@ import invitesRouter from "./invites";
 import iceConfigRouter from "./iceConfig";
 import blobsRouter from "./blobs";
 import integrityRouter from "./integrity";
+import authRouter from "./auth";
+import callPushRouter from "./callPush";
+import pushHealthRouter from "./pushHealth";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
 router.use(cryptoRouter);
 router.use(walletRouter);
 router.use(tokensRouter);
@@ -24,5 +29,8 @@ router.use(invitesRouter);
 router.use(iceConfigRouter);
 router.use(blobsRouter);
 router.use(integrityRouter);
+router.use(callPushRouter);
+router.use(pushHealthRouter);
+router.use(adminRouter);
 
 export default router;

@@ -4,15 +4,17 @@ import {
   db,
   messagesTable,
   identityKeysTable,
-  deviceTokensTable,
   departuresTable,
+  invitesTable,
+  callPushTokensTable,
 } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
-import { createHash } from "crypto";
+import { eq, and, isNull, lte } from "drizzle-orm";
+import { resolveBearerUser } from "../middlewares/deviceAuth";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
 import { ensureDeliveryId } from "../utils/delivery";
+import { hasCallPushTokens, sendCallPush } from "../lib/callPushSender";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
 // Compressed frames are an untrusted, attacker-controllable input even
@@ -41,6 +43,7 @@ export interface WireMessage {
     | "call-ice"
     | "sms_inbound"
     | "departed"
+    | "invite-expired"
     | "ghostpad-create"
     | "ghostpad-created"
     | "ghostpad-join"
@@ -64,7 +67,8 @@ export interface WireMessage {
   // Task #113: client-generated id echoed back as `departed_ack.requestId`
   // so the panic-wipe flow can race the ack against a timeout.
   requestId?: string;
-  // Ghostpad pairing code — never persisted, only ever lives in the
+  /** Invite code carried by `invite-expired` events. */
+  // Also: Ghostpad pairing code — never persisted, only ever lives in the
   // in-memory maps below for the few minutes it takes to be redeemed.
   code?: string;
 }
@@ -97,6 +101,53 @@ async function aliasForDeliveryId(deliveryId: string): Promise<string | null> {
   if (!row) return null;
   deliveryIdToAlias.set(deliveryId, row.userId);
   return row.userId;
+}
+
+// ── Pending rings: bridge call-ring across a push wake-up (task #150) ───────
+// When a call-ring targets an offline alias that has push tokens, we send an
+// identity-free wake push and park the ring here. If the callee's WS
+// authenticates within the ring window, we replay the call-ring over the
+// socket — so the caller's alias travels ONLY over the WS channel, never in
+// the push payload (see artifacts/ghostface/lib/callPush.ts contract). Pure
+// in-memory routing state; entries expire with the caller's 30 s ring
+// timeout (plus slack for connect latency) and are dropped on hangup.
+// The TTL is overridable via env ONLY so the WS-level check script
+// (scripts/check-pending-ring.mjs) can exercise real expiry in seconds
+// instead of 35 s. Production deployments never set this variable.
+const PENDING_RING_TTL_MS = (() => {
+  const raw = Number(process.env["PENDING_RING_TTL_MS"]);
+  return Number.isFinite(raw) && raw > 0 ? raw : 35_000;
+})();
+interface PendingRing {
+  fromAlias: string;
+  callId: string;
+  callMode: string;
+  expiresAt: number;
+}
+const pendingRings = new Map<string, PendingRing>(); // callee alias -> ring
+
+function sweepExpiredPendingRings(): void {
+  const now = Date.now();
+  for (const [alias, ring] of pendingRings) {
+    if (ring.expiresAt <= now) pendingRings.delete(alias);
+  }
+}
+
+/** Replay a parked call-ring to a freshly-authenticated callee, if any. */
+function deliverPendingRing(alias: string, ws: WebSocket): void {
+  const ring = pendingRings.get(alias);
+  if (!ring) return;
+  pendingRings.delete(alias);
+  if (ring.expiresAt <= Date.now()) return;
+  ws.send(
+    JSON.stringify({
+      type: "call-ring",
+      from: ring.fromAlias,
+      callId: ring.callId,
+      callMode: ring.callMode,
+    }),
+  );
+  logger.debug({ to: alias, from: ring.fromAlias }, "Replayed pending call-ring after push wake");
 }
 
 const CALL_SIGNAL_TYPES = new Set([
@@ -150,19 +201,12 @@ function revokeGhostpadCode(alias: string): void {
     if (entry.alias === alias) ghostpadCodes.delete(code);
   }
 }
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
 async function validateToken(alias: string, token: string): Promise<boolean> {
   try {
-    const hash = hashToken(token);
-    const [row] = await db
-      .select()
-      .from(deviceTokensTable)
-      .where(and(eq(deviceTokensTable.userId, alias), eq(deviceTokensTable.tokenHash, hash)));
-    return !!row;
+    // JWT access token (task #198): verified statelessly; the subject must
+    // match the alias the socket claims to be.
+    const authed = await resolveBearerUser(token, alias);
+    return authed !== null;
   } catch {
     return false;
   }
@@ -230,6 +274,46 @@ async function deliverPendingDepartures(alias: string, ws: WebSocket): Promise<v
   }
 }
 
+/**
+ * Push any expired-but-unredeemed invite notices addressed to this alias.
+ * Each matching row is sent as `{ type:"invite-expired", code }`, then
+ * ownerNotifiedAt is stamped so the notice is never replayed.
+ * Called on every successful WS auth, mirroring deliverPendingDepartures.
+ */
+async function deliverPendingInviteExpiries(alias: string, ws: WebSocket): Promise<void> {
+  try {
+    const pending = await db
+      .select()
+      .from(invitesTable)
+      .where(
+        and(
+          eq(invitesTable.ownerAlias, normalizeAlias(alias)),
+          eq(invitesTable.redeemed, false),
+          lte(invitesTable.expiresAt, new Date()),
+          isNull(invitesTable.ownerNotifiedAt),
+        ),
+      );
+
+    for (const row of pending) {
+      ws.send(JSON.stringify({ type: "invite-expired", code: row.code }));
+    }
+
+    if (pending.length > 0) {
+      await Promise.all(
+        pending.map((row) =>
+          db
+            .update(invitesTable)
+            .set({ ownerNotifiedAt: new Date() })
+            .where(eq(invitesTable.id, row.id)),
+        ),
+      );
+      logger.info({ alias, count: pending.length }, "Delivered pending invite-expiry notices");
+    }
+  } catch (err) {
+    logger.error({ err, alias }, "Failed to deliver pending invite-expiry notices");
+  }
+}
+
 export function createWsServer(wss: WebSocketServer): void {
   // ── Protocol-level heartbeat ─────────────────────────────────────────────
   // Every 30 s the server sends a native WebSocket ping frame to every client.
@@ -253,10 +337,12 @@ export function createWsServer(wss: WebSocketServer): void {
   }, 30_000);
 
   const ghostpadSweepInterval = setInterval(sweepExpiredGhostpadCodes, 60_000);
+  const pendingRingSweepInterval = setInterval(sweepExpiredPendingRings, 15_000);
 
   wss.on("close", () => {
     clearInterval(heartbeatInterval);
     clearInterval(ghostpadSweepInterval);
+    clearInterval(pendingRingSweepInterval);
   });
 
   wss.on("connection", (rawWs: WebSocket, _req: IncomingMessage) => {
@@ -318,6 +404,8 @@ export function createWsServer(wss: WebSocketServer): void {
 
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
+        await deliverPendingInviteExpiries(authedAlias, ws);
+        deliverPendingRing(authedAlias, ws);
         return;
       }
 
@@ -389,26 +477,58 @@ export function createWsServer(wss: WebSocketServer): void {
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           recipient.ws.send(JSON.stringify({ ...msg, from: authedAlias }));
           logger.debug({ type: msg.type, from: authedAlias, to: toAlias }, "Call signal relayed");
+          // A hangup ends any parked ring for this callee too (caller gave up
+          // between push send and callee wake).
+          if (msg.type === "call-hangup") pendingRings.delete(toAlias);
         } else if (msg.type === "call-ring") {
-          // Callee is offline — bounce hangup back to caller immediately
-          ws.send(
-            JSON.stringify({
-              type: "call-hangup",
-              from: toAlias,
+          // Callee is offline. If they registered a call push token, wake the
+          // device with an identity-free push, park the ring for replay when
+          // their WS authenticates, and let the caller keep ringing (their
+          // client enforces the 30 s no-answer timeout). Otherwise bounce a
+          // hangup back immediately, as before.
+          const canPush = await hasCallPushTokens(toAlias);
+          if (canPush && msg.callId) {
+            pendingRings.set(toAlias, {
+              fromAlias: authedAlias,
               callId: msg.callId,
-              payload: "offline",
-            }),
-          );
-          logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+              callMode: msg.callMode ?? "voice",
+              expiresAt: Date.now() + PENDING_RING_TTL_MS,
+            });
+            void sendCallPush(toAlias, {
+              callId: msg.callId,
+              mode: msg.callMode === "video" ? "video" : "voice",
+            });
+            logger.debug({ from: authedAlias, to: toAlias }, "Callee offline: call push sent");
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: "call-hangup",
+                from: toAlias,
+                callId: msg.callId,
+                payload: "offline",
+              }),
+            );
+            logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+          }
+        } else if (msg.type === "call-hangup") {
+          // Caller hung up while the callee was still offline — drop the
+          // parked ring so a late wake doesn't ring a dead call.
+          pendingRings.delete(toAlias);
         }
         return;
       }
 
       // ── Ghostpad — ephemeral shared scratchpad, never persisted ─────────────
       if (msg.type === "ghostpad-create") {
+        // End any live pairing first — creating a new pad while paired must
+        // never leave a stale reverse link routing text to a prior partner.
+        endGhostpadSession(authedAlias);
         revokeGhostpadCode(authedAlias); // one pending code per alias at a time
         const code = generateGhostpadCode();
-        ghostpadCodes.set(code, { alias: authedAlias, expiresAt: Date.now() + GHOSTPAD_CODE_TTL_MS });
+        ghostpadCodes.set(code, {
+          alias: authedAlias,
+          expiresAt: Date.now() + GHOSTPAD_CODE_TTL_MS,
+        });
         ws.send(JSON.stringify({ type: "ghostpad-created", code }));
         return;
       }
@@ -435,6 +555,12 @@ export function createWsServer(wss: WebSocketServer): void {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "The other side disconnected" }));
           return;
         }
+        // Atomically end any existing pairings for BOTH sides before linking
+        // — a joiner (or creator) already paired elsewhere would otherwise
+        // leave a dangling one-way mapping that leaks pad events to an
+        // unintended prior partner.
+        endGhostpadSession(authedAlias);
+        endGhostpadSession(creatorAlias);
         ghostpadPartners.set(authedAlias, creatorAlias);
         ghostpadPartners.set(creatorAlias, authedAlias);
         ws.send(JSON.stringify({ type: "ghostpad-paired" }));
@@ -536,6 +662,15 @@ export function createWsServer(wss: WebSocketServer): void {
           }
         }
         logger.info({ from: authedAlias, count: unique.length }, "Departure broadcast");
+
+        // Task #153: a departed (panic-wiped) device must stop receiving
+        // call-wake pushes. Delete every call push token registered for this
+        // alias — best-effort, never blocks the ack below.
+        try {
+          await db.delete(callPushTokensTable).where(eq(callPushTokensTable.userId, authedAlias));
+        } catch (err) {
+          logger.warn({ err, alias: authedAlias }, "Failed to purge call push tokens on departure");
+        }
         // Task #113: the client uses this ack to decide whether to fall
         // through to the SMS satellite fallback. We emit the ack only
         // AFTER the broadcast loop completes, so an ack guarantees the
@@ -581,3 +716,8 @@ export function broadcastToAlias(alias: string, message: Omit<WireMessage, "toke
 }
 
 export { connectedClients };
+
+// Exposed for tests only (e.g. verifying restart-survival of invite-expiry
+// notices). Do not call from production code paths — the WS auth flow is
+// the sole runtime caller.
+export const __testing = { deliverPendingInviteExpiries };

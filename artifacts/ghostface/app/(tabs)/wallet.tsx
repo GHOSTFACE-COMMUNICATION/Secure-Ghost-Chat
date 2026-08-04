@@ -17,7 +17,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { GoldGradient } from "@/components/GoldGradient";
 import { SecureBadge } from "@/components/SecureBadge";
 import { useApp } from "@/context/AppContext";
@@ -41,7 +40,6 @@ export default function WalletScreen() {
   const {
     fdBalance,
     casperBalance,
-    appTokens,
     walletAddress,
     transactions,
     connectedWalletAddress,
@@ -143,12 +141,6 @@ export default function WalletScreen() {
   };
 
   const balance = activeToken === "FD" ? fdBalance : casperBalance;
-  // appTokens is ordered by id ascending (id 1 = CASPER, id 2 = the second
-  // app token) — fetched live from the api-server rather than hardcoded, so
-  // renaming/redeploying a token doesn't need a client release.
-  const casperSymbol = appTokens[0]?.symbol ?? "CASPER";
-  const secondTokenSymbol = appTokens[1]?.symbol ?? "FD";
-  const activeSymbol = activeToken === "FD" ? secondTokenSymbol : casperSymbol;
   const filteredTx = transactions.filter((t) => t.token === activeToken);
 
   const styles = StyleSheet.create({
@@ -659,7 +651,7 @@ export default function WalletScreen() {
                 { color: activeToken === "FD" ? colors.primaryForeground : colors.mutedForeground },
               ]}
             >
-              {secondTokenSymbol}
+              FD
             </Text>
           </Pressable>
           <Pressable
@@ -678,7 +670,7 @@ export default function WalletScreen() {
                 { color: activeToken === "CASPER" ? colors.primaryForeground : colors.mutedForeground },
               ]}
             >
-              {casperSymbol}
+              CASPER
             </Text>
           </Pressable>
         </View>
@@ -688,7 +680,7 @@ export default function WalletScreen() {
           <Text style={styles.balanceAmount}>
             {balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </Text>
-          <Text style={styles.balanceToken}>{activeSymbol}</Text>
+          <Text style={styles.balanceToken}>{activeToken}</Text>
           <View style={styles.solBadge}>
             <Ionicons name="radio-button-on" size={10} color="#8A8A8A" />
             <Text style={styles.solText}>SOLANA NETWORK</Text>
@@ -796,7 +788,7 @@ export default function WalletScreen() {
         animationType="slide"
         onRequestClose={() => setShowConnect(false)}
       >
-        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+        <View style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowConnect(false)} />
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>LINK WALLET</Text>
@@ -834,7 +826,7 @@ export default function WalletScreen() {
                 <Text style={styles.cancelText}>CANCEL</Text>
               </Pressable>
             </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* ── SEND MODAL ──────────────────────────────────── */}
@@ -844,7 +836,7 @@ export default function WalletScreen() {
         animationType="slide"
         onRequestClose={() => setShowSend(false)}
       >
-        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+        <View style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowSend(false)} />
             <View style={styles.modalContent}>
               {sent ? (
@@ -856,34 +848,27 @@ export default function WalletScreen() {
                 </>
               ) : (
                 <>
-                  <Text style={styles.modalTitle}>SEND {activeSymbol}</Text>
-                  <View style={{ backgroundColor: "rgba(138,138,138,0.1)", borderRadius: 8, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 12 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 10, letterSpacing: 2, textAlign: "center" }}>
-                      COMING SOON — TRANSFERS NOT YET ACTIVE
-                    </Text>
-                  </View>
+                  <Text style={styles.modalTitle}>SEND {activeToken}</Text>
                   <TextInput
-                    style={[styles.modalInput, { opacity: 0.4 }]}
+                    style={styles.modalInput}
                     value={sendAddress}
                     onChangeText={setSendAddress}
                     placeholder="RECIPIENT ADDRESS"
                     placeholderTextColor={colors.mutedForeground}
                     autoCorrect={false}
-                    editable={false}
                   />
                   <TextInput
-                    style={[styles.modalInput, { opacity: 0.4 }]}
+                    style={styles.modalInput}
                     value={sendAmount}
                     onChangeText={setSendAmount}
                     placeholder="AMOUNT"
                     placeholderTextColor={colors.mutedForeground}
                     keyboardType="decimal-pad"
-                    editable={false}
                   />
                   <Pressable
-                    style={[styles.modalBtnPrimary, { opacity: 0.4 }]}
+                    style={[styles.modalBtnPrimary, (!sendAmount || !sendAddress) && { opacity: 0.4 }]}
                     onPress={handleSend}
-                    disabled={true}
+                    disabled={!sendAmount || !sendAddress}
                   >
                     <GoldGradient style={styles.modalBtnPrimaryInner}>
                       <Text style={styles.modalBtnText}>CONFIRM SEND</Text>
@@ -895,7 +880,7 @@ export default function WalletScreen() {
                 </>
               )}
             </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* ── RECEIVE MODAL ───────────────────────────────── */}
@@ -908,7 +893,7 @@ export default function WalletScreen() {
         <View style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowReceive(false)} />
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>RECEIVE {activeSymbol}</Text>
+              <Text style={styles.modalTitle}>RECEIVE {activeToken}</Text>
               <View style={styles.qrPlaceholder}>
                 <Ionicons name="qr-code" size={80} color={colors.primary} />
               </View>

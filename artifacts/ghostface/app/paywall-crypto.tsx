@@ -19,6 +19,7 @@ import { GhostLogo } from "@/components/GhostLogo";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
@@ -156,7 +157,7 @@ function SolanaPaywallContent() {
     try {
       setLoading(plan.id);
       setError(null);
-      const res = await fetch(`${API_BASE}/crypto/payment-intent`, {
+      const res = await authFetch(`${API_BASE}/crypto/payment-intent`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -185,7 +186,7 @@ function SolanaPaywallContent() {
 
     const poll = async () => {
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `${API_BASE}/crypto/payment-status?alias=${encodeURIComponent(alias)}&reference=${encodeURIComponent(reference)}`,
           { headers: { Authorization: `Bearer ${deviceToken}` } },
         );

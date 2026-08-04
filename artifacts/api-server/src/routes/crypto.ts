@@ -1,12 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash } from "crypto";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { validateTransfer } from "@solana/pay";
 import BigNumber from "bignumber.js";
 import { eq, and } from "drizzle-orm";
-import { db, deviceTokensTable, ghostPaymentsTable, ghostEntitlementsTable } from "@workspace/db";
+import { db, ghostPaymentsTable, ghostEntitlementsTable } from "@workspace/db";
+import { getAuthedAliasUnified } from "../middlewares/deviceAuth";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
-import { normalizeAlias } from "../utils/alias";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
 import {
@@ -34,28 +33,10 @@ const statusLimiter = new RateLimiter({ windowMs: 60_000, max: 60 });
 // `pnpm --filter db push` (see scripts/post-merge.sh) — the single source of
 // truth for the database schema.
 
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-/** Resolve the authenticated alias from a Bearer device token + ?alias=. */
+/** Resolve the authenticated alias from a Bearer token (JWT or legacy). */
 async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
   const alias = (req.query.alias as string | undefined) ?? (req.body?.alias as string | undefined);
-  if (!alias) return null;
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(
-      and(
-        eq(deviceTokensTable.userId, normalizeAlias(alias)),
-        eq(deviceTokensTable.tokenHash, hash),
-      ),
-    );
-  return row ? normalizeAlias(alias) : null;
+  return getAuthedAliasUnified(req, alias);
 }
 
 /** True for a Postgres unique-constraint violation (replay), not a generic fault. */

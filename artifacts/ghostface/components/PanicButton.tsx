@@ -196,7 +196,7 @@ function GhostWipeScreen({ onDone }: { onDone: () => void }) {
           opacity: textOpacity,
         }}
       >
-        <Ionicons name="nuclear" size={44} color="#FF3B30" allowFontScaling={false} />
+        <Ionicons name="nuclear" size={44} color="#FF3B30" />
         <Text style={ss.wipedHeading}>DATA WIPED</Text>
         <Text style={ss.wipedSub}>ALL TRACES ELIMINATED</Text>
       </Animated.View>
@@ -225,11 +225,9 @@ const ss = StyleSheet.create({
 
 interface PanicButtonProps {
   onWipe: () => Promise<void>;
-  /** Uniform size multiplier for width/padding/icon/text. Defaults to 1 (full size). */
-  scale?: number;
 }
 
-export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
+export function PanicButton({ onWipe }: PanicButtonProps) {
   const colors = useColors();
   const [panicHeld, setPanicHeld] = useState(false);
   const [panicProgress, setPanicProgress] = useState(0);
@@ -277,13 +275,8 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
         </View>
       </Modal>
 
-      <View style={{ width: `${scale * 100}%`, alignSelf: "center" }}>
-        <Text
-          style={[
-            styles.label,
-            { color: colors.mutedForeground, fontSize: 10 * scale, marginBottom: 12 * scale },
-          ]}
-        >
+      <View>
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>
           HOLD 3 SECONDS TO WIPE ALL DATA
         </Text>
         <Pressable
@@ -301,19 +294,16 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
             locations={[0, 0.45, 0.75, 1]}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
-            style={[
-              styles.btn,
-              { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
-            ]}
+            style={[styles.btn, { borderRadius: colors.radius }]}
           >
             {panicHeld && (
               <View
                 style={[styles.progressFill, { width: `${panicProgress}%` }]}
               />
             )}
-            <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-            <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
-              {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
+            <Ionicons name="nuclear-outline" size={22} color="#ffffff" />
+            <Text style={styles.btnText}>
+              {panicHeld ? "WIPING..." : "PANIC WIPE"}
             </Text>
           </LinearGradient>
         </Pressable>
