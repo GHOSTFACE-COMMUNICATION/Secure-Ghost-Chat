@@ -181,6 +181,37 @@ export async function registerVoipToken(
   }
 }
 
+/**
+ * Best-effort unregister of ALL call push tokens for `alias` (task #153).
+ * Called from the panic-wipe path BEFORE local state is cleared, so a wiped
+ * device stops receiving "Incoming call" wake pushes immediately instead of
+ * waiting for Expo to report the token dead (the server also purges tokens
+ * on the departed broadcast — this is the belt to that suspender).
+ *
+ * SILENCE CONTRACT: pure network call — no haptics, audio, toasts, or
+ * alerts, and all failures are swallowed. A bystander must not be able to
+ * detect the wipe (see scripts/check-panic-wipe-silence.js).
+ */
+export async function unregisterCallPush(
+  apiBase: string,
+  alias: string,
+  deviceToken: string,
+): Promise<void> {
+  if (!apiBase || !alias || !deviceToken) return;
+  try {
+    await fetch(`${apiBase}/calls/unregister-voip-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify({ alias }),
+    });
+  } catch {
+    // Best-effort — the server-side departed purge is the guarantee.
+  }
+}
+
 // ── Native full-screen ring (task #152) ────────────────────────────────────
 // PushKit VoIP registration + CallKit report/answer/end (iOS) and the
 // Core-Telecom full-screen-intent ring (Android) now live in

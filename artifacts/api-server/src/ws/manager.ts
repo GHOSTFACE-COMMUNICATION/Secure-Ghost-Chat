@@ -7,6 +7,7 @@ import {
   deviceTokensTable,
   departuresTable,
   invitesTable,
+  callPushTokensTable,
 } from "@workspace/db";
 import { eq, and, isNull, lte } from "drizzle-orm";
 import { createHash } from "crypto";
@@ -669,6 +670,15 @@ export function createWsServer(wss: WebSocketServer): void {
           }
         }
         logger.info({ from: authedAlias, count: unique.length }, "Departure broadcast");
+
+        // Task #153: a departed (panic-wiped) device must stop receiving
+        // call-wake pushes. Delete every call push token registered for this
+        // alias — best-effort, never blocks the ack below.
+        try {
+          await db.delete(callPushTokensTable).where(eq(callPushTokensTable.userId, authedAlias));
+        } catch (err) {
+          logger.warn({ err, alias: authedAlias }, "Failed to purge call push tokens on departure");
+        }
         // Task #113: the client uses this ack to decide whether to fall
         // through to the SMS satellite fallback. We emit the ack only
         // AFTER the broadcast loop completes, so an ack guarantees the

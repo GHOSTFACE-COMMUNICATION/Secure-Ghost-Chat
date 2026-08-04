@@ -1,5 +1,4 @@
 import { Expo, type ExpoPushMessage } from "expo-server-sdk";
-import { db, callPushTokensTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
 import {
@@ -7,6 +6,7 @@ import {
   sendNativeCallPush,
   type NativeTokenType,
 } from "./nativeCallPushSender";
+import { db, callPushTokensTable, identityKeysTable } from "@workspace/db";
 
 /**
  * Sends the Phase 2/3 calling push: wakes a device whose app is closed so an
@@ -39,12 +39,21 @@ export async function hasCallPushTokens(alias: string): Promise<boolean> {
     .select({ tokenType: callPushTokensTable.tokenType })
     .from(callPushTokensTable)
     .where(eq(callPushTokensTable.userId, alias));
-  return rows.some(
+  const actionable = rows.some(
     (r) =>
       r.tokenType === "expo" ||
       ((r.tokenType === "apns-voip" || r.tokenType === "fcm") &&
         isNativeCallPushConfigured(r.tokenType)),
   );
+  if (!actionable) return false;
+  // Identity-key gate (task #153): tokens without a live identity are stale
+  // leftovers from a wipe — treat the alias as unpushable and prune.
+  if (!(await aliasHasIdentityKeys(alias))) {
+    await db.delete(callPushTokensTable).where(eq(callPushTokensTable.userId, alias));
+    logger.info({ alias }, "[callPush] Pruned tokens for alias with no identity keys");
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -55,6 +64,13 @@ export async function hasCallPushTokens(alias: string): Promise<boolean> {
  */
 export async function sendCallPush(alias: string, data: CallPushData): Promise<void> {
   try {
+    // Defense-in-depth for the identity-key gate in hasCallPushTokens():
+    // never push to an alias whose identity keys are gone, even if a caller
+    // reaches this function directly.
+    if (!(await aliasHasIdentityKeys(alias))) {
+      await db.delete(callPushTokensTable).where(eq(callPushTokensTable.userId, alias));
+      return;
+    }
     const rows = await db
       .select()
       .from(callPushTokensTable)
@@ -139,4 +155,19 @@ export async function sendCallPush(alias: string, data: CallPushData): Promise<v
   } catch (err) {
     logger.warn({ err }, "[callPush] Failed to send call push");
   }
+}
+
+/**
+ * Task #153: an alias with no registered identity keys is gone (never
+ * registered, or wiped/departed). No push may ever target it — a wiped
+ * device must not keep buzzing with "Incoming call" wake pushes. Any
+ * lingering call push tokens for such an alias are pruned on sight.
+ */
+async function aliasHasIdentityKeys(alias: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: identityKeysTable.id })
+    .from(identityKeysTable)
+    .where(eq(identityKeysTable.userId, alias))
+    .limit(1);
+  return rows.length > 0;
 }

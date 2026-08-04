@@ -133,7 +133,7 @@ export function initNativeCallUi(
     });
 
     // ── VoIP push token ───────────────────────────────────────────────────
-    m.addVoIPPushTokenUpdatedListener(({ token, type }) => {
+    m.addVoIPPushTokenUpdatedListener(({ token, type }: { token?: string; type: "APNS_VOIP" | "FCM" }) => {
       if (token) registerToken(token, type);
     });
   }

@@ -99,4 +99,48 @@ router.post("/calls/register-voip-token", async (req: Request, res: Response) =>
   }
 });
 
+/**
+ * POST /api/calls/unregister-voip-token — best-effort client-side cleanup
+ * before a panic wipe (task #153). Deletes ALL call push tokens registered
+ * for `alias`, so a wiped device stops receiving "Incoming call" wake pushes
+ * immediately. Same device-token auth as registration.
+ *
+ * body: { alias: string }
+ * response: 204 No Content on success.
+ */
+router.post("/calls/unregister-voip-token", async (req: Request, res: Response) => {
+  try {
+    const { alias } = req.body as { alias?: unknown };
+    if (typeof alias !== "string" || alias.trim().length === 0) {
+      return res.status(400).json({ error: "alias is required" });
+    }
+    const userId = normalizeAlias(alias);
+
+    const auth = req.headers.authorization ?? "";
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    if (!bearer) {
+      return res.status(401).json({ error: "Authorization: Bearer <token> header required" });
+    }
+    const [row] = await db
+      .select()
+      .from(deviceTokensTable)
+      .where(
+        and(
+          eq(deviceTokensTable.userId, userId),
+          eq(deviceTokensTable.tokenHash, hashToken(bearer)),
+        ),
+      );
+    if (!row) {
+      return res.status(403).json({ error: "Invalid or mismatched device token for alias" });
+    }
+
+    await db.delete(callPushTokensTable).where(eq(callPushTokensTable.userId, userId));
+    logger.info({ alias: userId }, "[callPush] VoIP push tokens unregistered");
+    return res.status(204).end();
+  } catch (err) {
+    logger.error({ err }, "[callPush] unregister-voip-token failed");
+    return res.status(500).json({ error: "Internal error" });
+  }
+});
+
 export default router;

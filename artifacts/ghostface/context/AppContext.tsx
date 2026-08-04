@@ -1,5 +1,5 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
-import { registerForCallPush, registerVoipToken } from "@/lib/callPush";
+import { registerForCallPush, registerVoipToken, unregisterCallPush } from "@/lib/callPush";
 import { initNativeCallUi, takeNativeCallAction } from "@/lib/nativeCallUi";
 import {
   classifyLinkQuality,
@@ -2437,6 +2437,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // SMS handoff would always run against an empty list (Task #113).
     const snapshotNumbers = latestStateRef.current.smsFallbackNumbers;
     const snapshotMessage = latestStateRef.current.smsFallbackMessage;
+
+    // Task #153: best-effort unregister of this device's call push tokens
+    // BEFORE the wipe clears the device token — a wiped phone must not keep
+    // buzzing with "Incoming call" wake pushes. Fire-and-forget: never
+    // delays the wipe, and the server also purges tokens on the departed
+    // broadcast. SILENCE CONTRACT: pure network call, failures swallowed.
+    try {
+      const { alias: wipeAlias, deviceToken: wipeDeviceToken } = latestStateRef.current;
+      const apiBase = getApiBase();
+      if (apiBase && wipeAlias && wipeDeviceToken) {
+        void unregisterCallPush(apiBase, wipeAlias, wipeDeviceToken);
+      }
+    } catch {
+      // Best-effort — see above.
+    }
 
     // Best-effort: notify known real contacts that we are gone, so their
     // app can flag this conversation as self-destructed. Must happen BEFORE
