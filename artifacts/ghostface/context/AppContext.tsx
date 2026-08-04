@@ -1,5 +1,6 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
-import { registerForCallPush } from "@/lib/callPush";
+import { registerForCallPush, registerVoipToken } from "@/lib/callPush";
+import { initNativeCallUi, takeNativeCallAction } from "@/lib/nativeCallUi";
 import {
   classifyLinkQuality,
   isLowBandwidthActive,
@@ -1744,13 +1745,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.alias, state.deviceToken, refreshEntitlement]);
 
-  // Task #150: register this device's push token so incoming calls ring even
-  // when the app is closed. Best-effort; no-ops on web/Expo Go or when
-  // notification permission is denied (see lib/callPush.ts).
+  // Task #150/#152: register this device for call wake-ups. In dev/production
+  // builds the native module (expo-callkit-telecom) provides the true
+  // full-screen ring — PushKit VoIP + CallKit on iOS, Core-Telecom on
+  // Android — and registers its transport token instead. Elsewhere (web,
+  // Expo Go, module-less builds) we fall back to the Expo alert push.
+  // Best-effort; no-ops when notification permission is denied.
   useEffect(() => {
     if (state.alias && state.deviceToken) {
       const apiBase = getApiBase();
-      if (apiBase) void registerForCallPush(apiBase, state.alias, state.deviceToken);
+      if (!apiBase) return;
+      const alias = state.alias;
+      const deviceToken = state.deviceToken;
+      const nativeActive = initNativeCallUi((token, type) => {
+        void registerVoipToken(
+          apiBase,
+          token,
+          Platform.OS === "ios" ? "ios" : "android",
+          alias,
+          deviceToken,
+          type === "APNS_VOIP" ? "apns-voip" : "fcm",
+        );
+      });
+      // Only register the alert-push fallback when the native ring isn't
+      // available — a device holding both would ring twice per call.
+      if (!nativeActive) void registerForCallPush(apiBase, alias, deviceToken);
     }
   }, [state.alias, state.deviceToken]);
 
@@ -3010,9 +3029,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // ── Call signals ─────────────────────────────────────────────────────────
     if (wsMsg.type && CALL_SIGNAL_TYPES.has(wsMsg.type) && wsMsg.from) {
       if (wsMsg.type === "call-ring") {
+        const ringCallId = wsMsg.callId ?? "unknown";
+        const ringFrom = wsMsg.from!.toUpperCase();
+        const ringMode = (wsMsg.callMode as "voice" | "video") ?? "voice";
+        // Task #152: if the user already answered/declined this call from the
+        // native CallKit / Core-Telecom UI (lock screen, closed app), honor
+        // that instead of showing the in-app ring banner again.
+        const nativeAction = takeNativeCallAction(ringCallId);
+        if (nativeAction === "answered") {
+          router.push({
+            pathname: "/call",
+            params: { alias: ringFrom, mode: ringMode, role: "callee", callId: ringCallId },
+          });
+          return;
+        }
+        if (nativeAction === "declined") {
+          const ws = wsRef.current;
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: "call-hangup", to: ringFrom, callId: ringCallId }));
+          }
+          return;
+        }
         setState((prev) => ({
           ...prev,
-          incomingCall: { callId: wsMsg.callId ?? "unknown", from: wsMsg.from!.toUpperCase(), mode: (wsMsg.callMode as "voice" | "video") ?? "voice" },
+          incomingCall: { callId: ringCallId, from: ringFrom, mode: ringMode },
         }));
       } else {
         callSignalListenerRef.current?.({ type: wsMsg.type, from: wsMsg.from.toUpperCase(), payload: wsMsg.payload, callId: wsMsg.callId, callMode: wsMsg.callMode });

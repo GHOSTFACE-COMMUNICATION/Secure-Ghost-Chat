@@ -62,6 +62,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "expo-callkit-telecom",
       [
         "expo-router",
         {

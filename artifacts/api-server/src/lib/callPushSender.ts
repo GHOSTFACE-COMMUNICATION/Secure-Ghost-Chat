@@ -2,6 +2,11 @@ import { Expo, type ExpoPushMessage } from "expo-server-sdk";
 import { db, callPushTokensTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
+import {
+  isNativeCallPushConfigured,
+  sendNativeCallPush,
+  type NativeTokenType,
+} from "./nativeCallPushSender";
 
 /**
  * Sends the Phase 2/3 calling push: wakes a device whose app is closed so an
@@ -22,17 +27,24 @@ export type CallPushData = {
 const expo = new Expo();
 
 /**
- * Returns true if `alias` has at least one registered call-push token.
+ * Returns true if `alias` has at least one *actionable* call-push token.
  * Used by the call-ring path to decide between "push and keep ringing"
- * and "bounce offline immediately".
+ * and "bounce offline immediately". Expo tokens are always actionable;
+ * native tokens (apns-voip / fcm, task #152) only count when their
+ * transport's credentials are configured — otherwise the ring would park
+ * against a push that can never be sent.
  */
 export async function hasCallPushTokens(alias: string): Promise<boolean> {
   const rows = await db
-    .select({ id: callPushTokensTable.id })
+    .select({ tokenType: callPushTokensTable.tokenType })
     .from(callPushTokensTable)
-    .where(eq(callPushTokensTable.userId, alias))
-    .limit(1);
-  return rows.length > 0;
+    .where(eq(callPushTokensTable.userId, alias));
+  return rows.some(
+    (r) =>
+      r.tokenType === "expo" ||
+      ((r.tokenType === "apns-voip" || r.tokenType === "fcm") &&
+        isNativeCallPushConfigured(r.tokenType)),
+  );
 }
 
 /**
@@ -49,12 +61,43 @@ export async function sendCallPush(alias: string, data: CallPushData): Promise<v
       .where(eq(callPushTokensTable.userId, alias));
     if (rows.length === 0) return;
 
-    const valid = rows.filter((r) => Expo.isExpoPushToken(r.token));
-    const invalidIds = rows.filter((r) => !Expo.isExpoPushToken(r.token)).map((r) => r.id);
+    // ── Native full-screen ring (task #152): apns-voip / fcm tokens ─────────
+    // These wake devices carrying the expo-callkit-telecom module — CallKit
+    // sheet on iOS, Core-Telecom full-screen intent on Android. Sent first
+    // and independently of the Expo alert path; a device registers exactly
+    // one transport, so nothing rings twice.
+    const nativeRows = rows.filter((r) => r.tokenType === "apns-voip" || r.tokenType === "fcm");
+    const nativeBadIds: number[] = [];
+    await Promise.all(
+      nativeRows.map(async (r) => {
+        const result = await sendNativeCallPush(r.tokenType as NativeTokenType, r.token, data);
+        if (result === "bad-token") nativeBadIds.push(r.id);
+        else if (result === "unconfigured") {
+          logger.warn(
+            { tokenType: r.tokenType },
+            "[callPush] Native call push credentials missing; token skipped",
+          );
+        }
+      }),
+    );
+    if (nativeBadIds.length > 0) {
+      await db.delete(callPushTokensTable).where(inArray(callPushTokensTable.id, nativeBadIds));
+      logger.info({ count: nativeBadIds.length }, "[callPush] Pruned dead native push tokens");
+    }
+
+    // ── Expo alert-push fallback path (task #150) ────────────────────────────
+    const expoRows = rows.filter((r) => r.tokenType === "expo");
+    const valid = expoRows.filter((r) => Expo.isExpoPushToken(r.token));
+    const invalidIds = expoRows.filter((r) => !Expo.isExpoPushToken(r.token)).map((r) => r.id);
     if (invalidIds.length > 0) {
       await db.delete(callPushTokensTable).where(inArray(callPushTokensTable.id, invalidIds));
     }
-    if (valid.length === 0) return;
+    if (valid.length === 0) {
+      if (nativeRows.length > 0) {
+        logger.debug({ devices: nativeRows.length }, "[callPush] Native call push sent");
+      }
+      return;
+    }
 
     const messages: ExpoPushMessage[] = valid.map((r) => ({
       to: r.token,

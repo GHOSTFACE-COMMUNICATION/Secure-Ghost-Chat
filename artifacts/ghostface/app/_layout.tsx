@@ -15,7 +15,7 @@ import { router, Stack, usePathname } from "expo-router";
 import { usePreventScreenCapture } from "expo-screen-capture";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, AppStateStatus, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, AppState, AppStateStatus, PanResponder, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -296,7 +296,13 @@ function RootNavigator() {
 export default function RootLayout() {
   // Block screenshots & screen recording app-wide. On Android this sets
   // FLAG_SECURE so captures come out black; on iOS recordings are blacked out.
-  usePreventScreenCapture();
+  // Native-only: on web expo-screen-capture throws an UnavailabilityError
+  // that takes down the whole preview, so skip it there.
+  if (Platform.OS !== "web") {
+    // Platform.OS is constant for the app's lifetime, so this conditional
+    // hook call never changes between renders.
+    usePreventScreenCapture();
+  }
 
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,

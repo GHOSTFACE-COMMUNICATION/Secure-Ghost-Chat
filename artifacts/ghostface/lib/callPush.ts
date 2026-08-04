@@ -10,17 +10,31 @@ import Constants from "expo-constants";
 // the WebSocket and the server replays the parked call-ring over that
 // socket, so the normal in-app incoming-call UI takes over.
 //
-// iOS VoIP/CallKit considerations (Phase 2 report): a true PushKit VoIP
-// push + native CallKit sheet (full-screen ring while locked, no user tap
-// needed) requires react-native-callkeep + react-native-voip-push-
-// notification, both of which have open New Architecture / Expo SDK 54
-// problems. Until those settle, iOS gets a standard high-priority alert
-// push (rings/vibrates, user taps to answer) — the same limitation applies
-// in Expo Go, where remote push is unsupported entirely (SDK 53+), so
-// registration silently no-ops there and dev/production builds are needed.
+// iOS VoIP/CallKit (task #152): the true native ring — PushKit VoIP push +
+// full-screen CallKit sheet while locked, ringtone that keeps ringing,
+// answer/decline without unlocking — is wired in lib/nativeCallUi.ts via
+// expo-callkit-telecom (New-Architecture-compatible Expo module; it
+// replaced the react-native-callkeep + react-native-voip-push-notification
+// pair whose open New Arch / SDK 54 issues blocked this at task #150 time).
+// Android gets the equivalent Core-Telecom full-screen-intent ring from the
+// same module via FCM data messages. Both require a dev/production build;
+// in Expo Go and any build without the native module this file's Expo
+// alert push (rings/vibrates, user taps to answer) remains the wake path —
+// remote push is unsupported in Expo Go entirely (SDK 53+), so
+// registration silently no-ops there.
 export const CALLING_PUSH_ENABLED = true;
 
 export type CallPushPlatform = "ios" | "android";
+
+/**
+ * Transport a registered token rides on (task #152):
+ * - "expo"      — Expo push token (ExponentPushToken[...]), alert push.
+ * - "apns-voip" — raw APNs PushKit VoIP token (iOS dev/production builds
+ *                 with expo-callkit-telecom): native full-screen CallKit ring.
+ * - "fcm"       — raw FCM registration token (Android dev/production builds):
+ *                 Core-Telecom full-screen-intent ring via an FCM data message.
+ */
+export type CallPushTokenType = "expo" | "apns-voip" | "fcm";
 
 /**
  * Call push payload contract (Phase 2/3).
@@ -65,7 +79,8 @@ function isExpoGo(): boolean {
  *
  *   POST {apiBase}/calls/register-voip-token
  *   headers: Authorization: Bearer <device-token>
- *   body: { token: string; platform: "ios" | "android"; alias: string }
+ *   body: { token: string; platform: "ios" | "android"; alias: string;
+ *           tokenType?: "expo" | "apns-voip" | "fcm" }
  *   response: 204 No Content on success
  *
  * `token` is the Expo push token (ExponentPushToken[...]) — opaque to the
@@ -149,6 +164,7 @@ export async function registerVoipToken(
   platform: CallPushPlatform,
   alias: string,
   deviceToken: string,
+  tokenType: CallPushTokenType = "expo",
 ): Promise<void> {
   if (!CALLING_PUSH_ENABLED || !apiBase) return;
   try {
@@ -158,16 +174,15 @@ export async function registerVoipToken(
         "Content-Type": "application/json",
         Authorization: `Bearer ${deviceToken}`,
       },
-      body: JSON.stringify({ token, platform, alias }),
+      body: JSON.stringify({ token, platform, alias, tokenType }),
     });
   } catch {
     // Best-effort — see doc comment above.
   }
 }
 
-// ── Still deliberately not wired (blocked on the library decision) ─────────
-// - PKPushRegistry VoIP registration + CallKit displayIncomingCall/answer/end
-//   (react-native-callkeep / react-native-voip-push-notification — both have
-//   open New Architecture / Expo SDK 54 problems; revisit when fixed)
-// - Android ConnectionService / Core-Telecom full-screen ring
-// The Expo alert push above is the interim wake path on both platforms.
+// ── Native full-screen ring (task #152) ────────────────────────────────────
+// PushKit VoIP registration + CallKit report/answer/end (iOS) and the
+// Core-Telecom full-screen-intent ring (Android) now live in
+// lib/nativeCallUi.ts, built on expo-callkit-telecom. The Expo alert push
+// above remains the fallback wake path for Expo Go / module-less builds.

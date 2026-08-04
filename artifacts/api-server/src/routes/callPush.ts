@@ -15,7 +15,8 @@ function hashToken(token: string): string {
  * POST /api/calls/register-voip-token — Phase 3 server side of the calling
  * push contract defined in artifacts/ghostface/lib/callPush.ts.
  *
- * body: { token: string; platform: "ios" | "android"; alias: string }
+ * body: { token: string; platform: "ios" | "android"; alias: string;
+ *         tokenType?: "expo" | "apns-voip" | "fcm" }  // default "expo"
  * auth: Authorization: Bearer <device-token> for `alias` — only the device
  *       that registered the alias may point call pushes at itself. Without
  *       this gate anyone could route (identity-free, but still noisy)
@@ -27,16 +28,33 @@ function hashToken(token: string): string {
  */
 router.post("/calls/register-voip-token", async (req: Request, res: Response) => {
   try {
-    const { token, platform, alias } = req.body as {
+    const { token, platform, alias, tokenType } = req.body as {
       token?: unknown;
       platform?: unknown;
       alias?: unknown;
+      tokenType?: unknown;
     };
     if (typeof token !== "string" || token.length === 0 || token.length > 512) {
       return res.status(400).json({ error: "token is required" });
     }
     if (platform !== "ios" && platform !== "android") {
       return res.status(400).json({ error: "platform must be 'ios' or 'android'" });
+    }
+    const resolvedTokenType = tokenType === undefined ? "expo" : tokenType;
+    if (
+      resolvedTokenType !== "expo" &&
+      resolvedTokenType !== "apns-voip" &&
+      resolvedTokenType !== "fcm"
+    ) {
+      return res.status(400).json({ error: "tokenType must be 'expo', 'apns-voip' or 'fcm'" });
+    }
+    // Transport/platform sanity: PushKit VoIP tokens only exist on iOS, and
+    // this app's FCM data-message ring path is Android-only.
+    if (resolvedTokenType === "apns-voip" && platform !== "ios") {
+      return res.status(400).json({ error: "apns-voip tokens are iOS-only" });
+    }
+    if (resolvedTokenType === "fcm" && platform !== "android") {
+      return res.status(400).json({ error: "fcm tokens are android-only" });
     }
     if (typeof alias !== "string" || alias.trim().length === 0) {
       return res.status(400).json({ error: "alias is required" });
@@ -64,13 +82,16 @@ router.post("/calls/register-voip-token", async (req: Request, res: Response) =>
 
     await db
       .insert(callPushTokensTable)
-      .values({ userId, token, platform })
+      .values({ userId, token, platform, tokenType: resolvedTokenType })
       .onConflictDoUpdate({
         target: callPushTokensTable.token,
-        set: { userId, platform, updatedAt: new Date() },
+        set: { userId, platform, tokenType: resolvedTokenType, updatedAt: new Date() },
       });
 
-    logger.info({ alias: userId, platform }, "[callPush] VoIP push token registered");
+    logger.info(
+      { alias: userId, platform, tokenType: resolvedTokenType },
+      "[callPush] VoIP push token registered",
+    );
     return res.status(204).end();
   } catch (err) {
     logger.error({ err }, "[callPush] register-voip-token failed");

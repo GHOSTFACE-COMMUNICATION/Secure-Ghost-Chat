@@ -17,16 +17,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { endNativeCall } from "@/lib/nativeCallUi";
 
-// ── Native WebRTC (react-native-webrtc) — loaded only on native platforms ───
-// On web we use the browser's built-in WebRTC APIs instead.
+// ── Native WebRTC (@livekit/react-native-webrtc) — native platforms only ────
+// On web we use the browser's built-in WebRTC APIs instead. The @livekit fork
+// replaced react-native-webrtc (task #152): expo-callkit-telecom coordinates
+// CallKit's audio session with this fork's RTCAudioSession, which is what
+// keeps call audio working when a call is answered from the lock screen.
 let NativeRTCPeerConnection: any = null;
 let NativeRTCSessionDescription: any = null;
 let NativeRTCIceCandidate: any = null;
 let nativeMediaDevices: any = null;
 if (Platform.OS !== "web") {
   try {
-    const webrtc = require("react-native-webrtc");
+    const webrtc = require("@livekit/react-native-webrtc");
     NativeRTCPeerConnection    = webrtc.RTCPeerConnection;
     NativeRTCSessionDescription = webrtc.RTCSessionDescription;
     NativeRTCIceCandidate      = webrtc.RTCIceCandidate;
@@ -234,9 +238,12 @@ export default function CallScreen() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (pcRef.current) { try { pcRef.current.close(); } catch { /* ignore close errors */ } pcRef.current = null; }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop()); localStreamRef.current = null; }
+    // Task #152: clear the native CallKit / Core-Telecom call UI if this call
+    // was answered from the lock screen. No-op when there is no native session.
+    endNativeCall(effectiveCallId);
     setCallState("ended");
     setTimeout(() => { if (mountedRef.current) router.back(); }, 1200);
-  }, []);
+  }, [effectiveCallId]);
 
   // ── Caller: send ring on mount ────────────────────────────────────────────
   useEffect(() => {

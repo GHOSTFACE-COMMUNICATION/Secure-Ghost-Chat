@@ -66,11 +66,13 @@
   "dependencies": {
     "@expo-google-fonts/share-tech-mono": "^0.4.1",
     "@expo/app-integrity": "^57.0.1",
+    "@livekit/react-native-webrtc": "^144.1.2",
     "@noble/ciphers": "^2.1.1",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@noble/post-quantum": "^0.6.1",
     "expo-av": "~16.0.8",
+    "expo-callkit-telecom": "^0.4.0",
     "expo-camera": "^55.0.15",
     "expo-clipboard": "^8.0.8",
     "expo-crypto": "~15.0.9",
@@ -84,7 +86,6 @@
     "fflate": "^0.8.2",
     "jsqr": "^1.4.0",
     "react-native-get-random-values": "^1.11.0",
-    "react-native-qrcode-svg": "^6.3.21",
-    "react-native-webrtc": "^124.0.7"
+    "react-native-qrcode-svg": "^6.3.21"
   }
 }
