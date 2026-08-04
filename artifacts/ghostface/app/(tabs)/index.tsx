@@ -255,10 +255,17 @@ export default function HomeScreen() {
     }).start();
   }, [menuOpen, reveal]);
 
+  // Self-destruct bar fill: tracks the 3s hold in real time — fills while
+  // armed, snaps full while wiping, drains quickly on release.
   useEffect(() => {
+    if (isWiping) {
+      wipeAnim.setValue(1);
+      return;
+    }
     Animated.timing(wipeAnim, {
-      toValue: wipeArmed || isWiping ? 1 : 0,
-      duration: 700,
+      toValue: wipeArmed ? 1 : 0,
+      duration: wipeArmed ? 3000 : 250,
+      easing: Easing.linear,
       useNativeDriver: false,
     }).start();
   }, [wipeArmed, isWiping, wipeAnim]);
@@ -298,6 +305,15 @@ export default function HomeScreen() {
     if (wipeTimer.current) clearTimeout(wipeTimer.current);
     if (!isWiping) setWipeArmed(false);
   };
+
+  // Opening the orbit menu hides the destruct bar — cancel any in-flight hold
+  // so a wipe can never complete invisibly.
+  useEffect(() => {
+    if (menuOpen) {
+      if (wipeTimer.current) clearTimeout(wipeTimer.current);
+      setWipeArmed(false);
+    }
+  }, [menuOpen]);
 
   const go = (path: () => void) => () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -397,45 +413,6 @@ export default function HomeScreen() {
   return (
     <TabScreenWrapper>
       <View style={styles.container}>
-        {/* Panic-wipe seal — top-right, tiny, silent */}
-        <View
-          pointerEvents="box-none"
-          style={[styles.wipeContainer, { top: insets.top + 16 }]}
-        >
-          <Pressable
-            onPressIn={handleWipePressIn}
-            onPressOut={handleWipePressOut}
-            hitSlop={16}
-            style={styles.wipeHit}
-          >
-            <Animated.View
-              style={[
-                styles.wipeSeal,
-                {
-                  backgroundColor: wipeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ["rgba(127,29,29,0.4)", RED],
-                  }),
-                  transform: [
-                    {
-                      scale: wipeAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [1, 1.25],
-                      }),
-                    },
-                  ],
-                  boxShadow: boxShadow(RED, wipeArmed || isWiping ? 0.95 : 0.5, 10),
-                },
-              ]}
-            >
-              <Ionicons name="flame" size={13} color="#fff" />
-            </Animated.View>
-            <Text style={styles.wipeLabel}>
-              {isWiping ? "WIPED" : wipeArmed ? "HOLD 3s" : "WIPE"}
-            </Text>
-          </Pressable>
-        </View>
-
         {/* Alias header */}
         <View pointerEvents="none" style={[styles.header, { top: insets.top + 18 }]}>
           <Text style={styles.aliasText}>{aliasText}</Text>
@@ -551,6 +528,59 @@ export default function HomeScreen() {
                 >
                   TAP TO REVEAL
                 </Animated.Text>
+
+                {/* Self-destruct bar — hold 3s to wipe; silent by contract.
+                    Hidden while the orbit menu is open so it never overlaps
+                    the bottom nav node's hit area. */}
+                <Animated.View
+                  style={{ opacity: hintOpacity }}
+                  pointerEvents={menuOpen ? "none" : "auto"}
+                >
+                <Pressable
+                  onPressIn={handleWipePressIn}
+                  onPressOut={handleWipePressOut}
+                  hitSlop={12}
+                  style={styles.destructBar}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hold for three seconds to self-destruct"
+                >
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.destructFill,
+                      {
+                        width: wipeAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ["0%", "100%"],
+                        }),
+                        opacity: wipeAnim.interpolate({
+                          inputRange: [0, 0.08, 1],
+                          outputRange: [0, 0.85, 1],
+                        }),
+                      },
+                    ]}
+                  />
+                  <View pointerEvents="none" style={styles.destructLabelRow}>
+                    <Ionicons
+                      name="flame"
+                      size={12}
+                      color={wipeArmed || isWiping ? "#fff" : "rgba(220,38,38,0.9)"}
+                    />
+                    <Text
+                      style={[
+                        styles.destructLabel,
+                        (wipeArmed || isWiping) && styles.destructLabelActive,
+                      ]}
+                    >
+                      {isWiping
+                        ? "WIPED"
+                        : wipeArmed
+                          ? "HOLD TO SELF-DESTRUCT"
+                          : "SELF-DESTRUCT"}
+                    </Text>
+                  </View>
+                </Pressable>
+                </Animated.View>
               </View>
             </View>
 
@@ -613,30 +643,39 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
 
-  // Wipe seal (top-right)
-  wipeContainer: {
-    position: "absolute",
-    right: 24,
-    alignItems: "center",
-    zIndex: 50,
-  },
-  wipeHit: { alignItems: "center", justifyContent: "center", padding: 8 },
-  wipeSeal: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  // Self-destruct bar (under the coin)
+  destructBar: {
+    marginTop: 22,
+    width: 210,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(220,38,38,0.55)",
+    backgroundColor: "rgba(127,29,29,0.14)",
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(220,38,38,0.7)",
   },
-  wipeLabel: {
+  destructFill: {
     position: "absolute",
-    top: 32,
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: RED,
+  },
+  destructLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  destructLabel: {
     fontFamily: FONT_MONO,
-    fontSize: 8,
-    letterSpacing: 2,
+    fontSize: 9,
+    letterSpacing: 3,
     color: "rgba(220,38,38,0.9)",
+  },
+  destructLabelActive: {
+    color: "#fff",
   },
 
   // Alias header
