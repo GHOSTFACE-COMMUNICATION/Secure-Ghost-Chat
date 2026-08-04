@@ -144,6 +144,10 @@ args = "ghostface-lint"
 task = "workflow.run"
 args = "check-disappearing"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "pending-ring-replay"
+
 [[workflows.workflow]]
 name = "ghostface-lint"
 author = "agent"
@@ -165,6 +169,17 @@ args = "cd artifacts/ghostface && node scripts/check-disappearing-messages.mjs"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "pending-ring-replay"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/api-server && node scripts/check-pending-ring.mjs"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"

@@ -111,7 +111,13 @@ async function aliasForDeliveryId(deliveryId: string): Promise<string | null> {
 // the push payload (see artifacts/ghostface/lib/callPush.ts contract). Pure
 // in-memory routing state; entries expire with the caller's 30 s ring
 // timeout (plus slack for connect latency) and are dropped on hangup.
-const PENDING_RING_TTL_MS = 35_000;
+// The TTL is overridable via env ONLY so the WS-level check script
+// (scripts/check-pending-ring.mjs) can exercise real expiry in seconds
+// instead of 35 s. Production deployments never set this variable.
+const PENDING_RING_TTL_MS = (() => {
+  const raw = Number(process.env["PENDING_RING_TTL_MS"]);
+  return Number.isFinite(raw) && raw > 0 ? raw : 35_000;
+})();
 interface PendingRing {
   fromAlias: string;
   callId: string;
