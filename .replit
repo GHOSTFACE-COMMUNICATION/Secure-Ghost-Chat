@@ -197,6 +197,9 @@ channel = "stable-25_05"
 
 [userenv.shared]
 
+[userenv.development]
+APNS_USE_SANDBOX = "1"
+
 [[ports]]
 localPort = 8080
 externalPort = 6800
