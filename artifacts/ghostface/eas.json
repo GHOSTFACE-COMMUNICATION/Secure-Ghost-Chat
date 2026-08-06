@@ -58,10 +58,7 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6781518828",
-        "ascApiKeyPath": "/Users/ghostface/Downloads/AuthKey_X27ZGN9585.p8",
-        "ascApiKeyId": "X27ZGN9585",
-        "ascApiKeyIssuerId": "abba23f8-558e-49d5-bdc6-f80952590f8e"
+        "ascAppId": "6781518828"
       },
       "android": {
         "track": "production",
