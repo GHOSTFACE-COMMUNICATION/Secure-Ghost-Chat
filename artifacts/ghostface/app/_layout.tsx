@@ -178,11 +178,16 @@ function RootNavigator() {
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pathname = usePathname();
 
-  // Registers for push once the user is actually past onboarding and
-  // unlocked — no point prompting for permission on the lock/onboarding
-  // screens. The tokens themselves aren't sent anywhere by the hook; the
-  // effect below POSTs them to the server whenever they change.
-  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded && !isLocked);
+  // Registers for push once the user is actually past onboarding — no point
+  // prompting for permission on the onboarding screens themselves. Must NOT
+  // also gate on `!isLocked`: the WS connection is deliberately closed while
+  // locked (see AppContext's connect effect), which makes push the only wake
+  // channel for incoming calls/messages while locked — tearing down
+  // CallKeep/VoIP listeners on every lock would silently break incoming-call
+  // wake for exactly the state the app spends most of its time in. The
+  // tokens themselves aren't sent anywhere by the hook; the effect below
+  // POSTs them to the server whenever they change.
+  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded);
 
   useEffect(() => {
     if (!alias || !deviceToken) return;

@@ -2,6 +2,18 @@ import { createSign } from "crypto";
 import http2 from "http2";
 import { logger } from "./logger";
 
+export interface ExpoPushResult {
+  ok: boolean;
+  /**
+   * True when Expo reported this exact token as permanently dead
+   * (DeviceNotRegistered — app uninstalled, token revoked, etc.). The
+   * caller should clear the stored token so we stop pushing to it forever;
+   * every other failure (rate limit, transient network error, malformed
+   * request) leaves the token alone since it may still be good.
+   */
+  invalidToken?: boolean;
+}
+
 /**
  * Regular push, via Expo's relay (which itself rides APNs on iOS and FCM on
  * Android). Used for "you have a new message" wake and, on Android only, for
@@ -17,7 +29,7 @@ export async function sendExpoPush(
   body: string,
   data?: Record<string, unknown>,
   opts?: { channelId?: string },
-): Promise<void> {
+): Promise<ExpoPushResult> {
   try {
     const res = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
@@ -36,15 +48,20 @@ export async function sendExpoPush(
     });
     if (!res.ok) {
       logger.warn({ status: res.status }, "Expo push send failed");
-      return;
+      return { ok: false };
     }
-    const json = (await res.json().catch(() => null)) as { data?: Array<{ status: string; message?: string }> } | null;
+    const json = (await res.json().catch(() => null)) as {
+      data?: Array<{ status: string; message?: string; details?: { error?: string } }>;
+    } | null;
     const result = json?.data?.[0];
     if (result?.status === "error") {
       logger.warn({ message: result.message }, "Expo push rejected");
+      return { ok: false, invalidToken: result.details?.error === "DeviceNotRegistered" };
     }
+    return { ok: true };
   } catch (err) {
     logger.warn({ err }, "Expo push send threw");
+    return { ok: false };
   }
 }
 
