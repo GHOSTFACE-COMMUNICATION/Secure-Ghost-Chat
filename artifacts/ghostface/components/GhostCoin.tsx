@@ -100,22 +100,12 @@ export function GhostCoin({
   const circleClip = Skia.RRectXY(Skia.XYWHRect(0, 0, size, size), r, r);
   const faceInset = size * 0.16;
 
-  // The coin's own circle (radius r) is inscribed exactly touching all 4
-  // edges of a size×size canvas — so anything drawn even slightly larger
-  // (the burst ring) gets clipped by the canvas's own bounds before it's
-  // ever visible, not just by the coin's circle clip. Padding the canvas
-  // and shifting everything inward by that same amount keeps all the
-  // existing coin-local coordinates (r, faceInset, etc.) valid as-is.
-  const ringPadding = size * 0.14;
-  const canvasSize = size + ringPadding * 2;
-
   if (!image) {
-    return <View style={{ width: canvasSize, height: canvasSize }} />;
+    return <View style={{ width: size, height: size }} />;
   }
 
   return (
-    <Canvas style={{ width: canvasSize, height: canvasSize }}>
-      <Group transform={[{ translateX: ringPadding, translateY: ringPadding }]}>
+    <Canvas style={{ width: size, height: size }}>
       {/* Soft contact shadow underneath — separate from the clipped group so
           it isn't cut off by the coin's own circle clip. */}
       <Circle cx={r} cy={r + size * 0.05} r={r * 0.86} color="rgba(0,0,0,0.35)">
@@ -253,25 +243,25 @@ export function GhostCoin({
             positions={[0, 0.4, 0.6, 1]}
           />
         </RoundedRect>
-      </Group>
 
-      {/* Burst ring: flashes and expands just outside the coin's own edge on
-          a tap — outside the clip so it isn't cropped by the coin's circle.
-          This is what makes a tap read as an actual event, not just a speed
-          change you have to notice on your own. */}
-      <Group transform={burstRingTransform} origin={origin}>
-        <Circle
-          cx={r}
-          cy={r}
-          r={r * 1.04}
-          style="stroke"
-          strokeWidth={size * 0.018}
-          opacity={burstRingOpacity}
-          color="#ffe9b8"
-        >
-          <BlurMask blur={size * 0.01} style="normal" />
-        </Circle>
-      </Group>
+        {/* Burst ring: flashes just inside the coin's own edge on a tap.
+            Deliberately inset (not protruding past the coin) so it can
+            never get clipped by the canvas's own bounds — this is what
+            makes a tap read as an actual event, not just a speed change
+            you have to notice on your own. */}
+        <Group transform={burstRingTransform} origin={origin}>
+          <Circle
+            cx={r}
+            cy={r}
+            r={r * 0.88}
+            style="stroke"
+            strokeWidth={size * 0.025}
+            opacity={burstRingOpacity}
+            color="#ffe9b8"
+          >
+            <BlurMask blur={size * 0.012} style="normal" />
+          </Circle>
+        </Group>
       </Group>
     </Canvas>
   );
