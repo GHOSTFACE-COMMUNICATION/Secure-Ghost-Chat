@@ -100,12 +100,22 @@ export function GhostCoin({
   const circleClip = Skia.RRectXY(Skia.XYWHRect(0, 0, size, size), r, r);
   const faceInset = size * 0.16;
 
+  // The coin's own circle (radius r) is inscribed exactly touching all 4
+  // edges of a size×size canvas — so anything drawn even slightly larger
+  // (the burst ring) gets clipped by the canvas's own bounds before it's
+  // ever visible, not just by the coin's circle clip. Padding the canvas
+  // and shifting everything inward by that same amount keeps all the
+  // existing coin-local coordinates (r, faceInset, etc.) valid as-is.
+  const ringPadding = size * 0.14;
+  const canvasSize = size + ringPadding * 2;
+
   if (!image) {
-    return <View style={{ width: size, height: size }} />;
+    return <View style={{ width: canvasSize, height: canvasSize }} />;
   }
 
   return (
-    <Canvas style={{ width: size, height: size }}>
+    <Canvas style={{ width: canvasSize, height: canvasSize }}>
+      <Group transform={[{ translateX: ringPadding, translateY: ringPadding }]}>
       {/* Soft contact shadow underneath — separate from the clipped group so
           it isn't cut off by the coin's own circle clip. */}
       <Circle cx={r} cy={r + size * 0.05} r={r * 0.86} color="rgba(0,0,0,0.35)">
@@ -261,6 +271,7 @@ export function GhostCoin({
         >
           <BlurMask blur={size * 0.01} style="normal" />
         </Circle>
+      </Group>
       </Group>
     </Canvas>
   );
