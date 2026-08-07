@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { GhostCoin } from "@/components/GhostCoin";
+import { GhostCoin, type GhostCoinHandle } from "@/components/GhostCoin";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -49,15 +49,16 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { alias, vpnConnected, panicWipe } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Gates the 3D canvas's render loop (frameloop="never" when off-screen) —
+  // no spin-rate/boost state needed anymore, the coin's own physics engine
+  // owns that entirely now.
   const [coinActive, setCoinActive] = useState(true);
   const [coinHeld, setCoinHeld] = useState(false);
-  const [coinSpinDurationMs, setCoinSpinDurationMs] = useState(9000);
-  const [coinBoosting, setCoinBoosting] = useState(false);
-  // Distinguishes a quick tap (speed burst) from a hold that reveals the
-  // menu (onPressIn fires for both — this flags which one actually happened
-  // by the time onPressOut runs).
+  const coinRef = useRef<GhostCoinHandle>(null);
+  // Distinguishes a quick tap (flick) from a hold that reveals the menu
+  // (onPressIn fires for both — this flags which one actually happened by
+  // the time onPressOut runs).
   const longPressFiredRef = useRef(false);
-  const boostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const spin = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
@@ -158,27 +159,15 @@ export default function HomeScreen() {
     setCoinHeld(true);
   };
 
-  // Release: only treat it as a "tap" (speed burst) if the hold never
-  // crossed the long-press threshold — otherwise this release is just the
-  // end of an already-handled menu-reveal hold.
+  // Release: only treat it as a "tap" (flick) if the hold never crossed the
+  // long-press threshold — otherwise this release is just the end of an
+  // already-handled menu-reveal hold.
   const handleCoinPressOut = () => {
     setCoinHeld(false);
     if (longPressFiredRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
-    setCoinSpinDurationMs(2200);
-    setCoinBoosting(true);
-    boostTimerRef.current = setTimeout(() => {
-      setCoinSpinDurationMs(9000);
-      setCoinBoosting(false);
-    }, 2500);
+    coinRef.current?.flick();
   };
-
-  useEffect(() => {
-    return () => {
-      if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
-    };
-  }, []);
 
   const aliasText = (alias ?? "GHOST_00").toUpperCase();
 
@@ -309,12 +298,7 @@ export default function HomeScreen() {
                     ]}
                   />
                   <View style={styles.centerEmblem}>
-                    <GhostCoin
-                      size={184}
-                      active={coinActive && !coinHeld}
-                      spinDurationMs={coinSpinDurationMs}
-                      boosting={coinBoosting}
-                    />
+                    <GhostCoin ref={coinRef} size={184} active={coinActive} held={coinHeld} />
                   </View>
                 </Pressable>
                 <Animated.Text
