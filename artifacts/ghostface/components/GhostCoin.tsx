@@ -1,14 +1,15 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect } from "react";
+import { View } from "react-native";
 import {
   BlurMask,
   Canvas,
   Circle,
   Group,
-  Oval,
-  Path,
+  Image as SkiaImage,
   RadialGradient,
   RoundedRect,
   Skia,
+  useImage,
   vec,
 } from "@shopify/react-native-skia";
 import {
@@ -21,17 +22,17 @@ import {
 } from "react-native-reanimated";
 import { GOLD_METALLIC } from "@/components/GoldGradient";
 
+// The real designed mark (hooded ghost, faceted geodesic face, NFC glyph) —
+// same asset the lock screen's GhostRevealMark uses. Everything before this
+// was trying to hand-draw an approximation of this artwork from primitive
+// shapes (gradients, wireframe paths, ovals) instead of just using it, which
+// is why every earlier version read as vague/washed-out no matter how much
+// detail got layered on: no amount of procedural shading beats real art.
+const GHOST_MARK = require("@/assets/images/ghostface-mark-gold.webp");
+
 // Never collapse to a literal zero-width line — reads as "disappeared", not "edge-on".
 const MIN_SCALE = 0.06;
 
-/**
- * Faceted/geodesic-sphere gold orb with horizontal energy-band rings that
- * emerge as it spins edge-on — replaces an earlier flat ghost-logo coin
- * that read as "the same coin, slightly different colour" no matter how
- * much visual detail got layered onto it. Deliberately no rainbow/holo
- * tint anywhere: the reference this is built from is consistently warm
- * gold, not iridescent.
- */
 export function GhostCoin({
   size = 184,
   spinDurationMs = 9000,
@@ -41,10 +42,11 @@ export function GhostCoin({
   size?: number;
   spinDurationMs?: number;
   active?: boolean;
-  /** True during a tap-triggered speed burst — brightens the core and
-   * flashes a ring so the burst reads as an actual event. */
+  /** True during a tap-triggered speed burst — flashes a ring so the burst
+   * reads as an actual event, not just a subtle rate change. */
   boosting?: boolean;
 }) {
+  const image = useImage(GHOST_MARK);
   const progress = useSharedValue(0);
   const boost = useSharedValue(0);
 
@@ -69,59 +71,29 @@ export function GhostCoin({
   const scaleMagnitude = useDerivedValue(() =>
     Math.max(Math.abs(Math.cos(angle.value)), MIN_SCALE),
   );
-  const edgeOnAmount = useDerivedValue(() => 1 - scaleMagnitude.value);
+  // Past 90° the mark gives way to the plain gold back (not a mirrored mark).
+  const frontOpacity = useDerivedValue(() => (Math.cos(angle.value) >= 0 ? 1 : 0));
+  const backOpacity = useDerivedValue(() => 1 - frontOpacity.value);
   const bodyTransform = useDerivedValue(() => [{ scaleX: scaleMagnitude.value }]);
 
   const burstRingOpacity = useDerivedValue(() => boost.value * 0.7);
   const burstRingScale = useDerivedValue(() => 1 + boost.value * 0.1);
   const burstRingTransform = useDerivedValue(() => [{ scale: burstRingScale.value }]);
-  const coreBoostOpacity = useDerivedValue(() => boost.value * 0.5);
 
   const r = size / 2;
   const origin = { x: r, y: r };
   const circleClip = Skia.RRectXY(Skia.XYWHRect(0, 0, size, size), r, r);
+  const markInset = size * 0.12;
 
-  // Static wireframe (concentric rings + radial spokes) evoking a faceted
-  // geodesic sphere — built once, then spins along with the coin via the
-  // same transform as everything else, no per-frame recomputation needed.
-  const wireframePath = useMemo(() => {
-    const path = Skia.Path.Make();
-    [0.3, 0.56, 0.8].forEach((f) => path.addCircle(r, r, r * f));
-    const spokes = 8;
-    for (let i = 0; i < spokes; i++) {
-      const theta = (i / spokes) * Math.PI * 2;
-      path.moveTo(r, r);
-      path.lineTo(r + Math.cos(theta) * r, r + Math.sin(theta) * r);
-    }
-    return path;
-  }, [r]);
-
-  // Horizontal energy-band rings — narrow near the "poles", widest at the
-  // "equator", brightest when the coin is edge-on (mid-spin), matching the
-  // torpedo/gyroscope look the reference shows during rotation.
-  const bands = useMemo(
-    () =>
-      [
-        { dy: -0.42, rx: 0.55, ry: 0.09 },
-        { dy: -0.18, rx: 0.82, ry: 0.13 },
-        { dy: 0, rx: 0.94, ry: 0.15 },
-        { dy: 0.18, rx: 0.82, ry: 0.13 },
-        { dy: 0.42, rx: 0.55, ry: 0.09 },
-      ].map((b) => ({
-        x: r - b.rx * r,
-        y: r + b.dy * r - b.ry * r,
-        width: b.rx * r * 2,
-        height: b.ry * r * 2,
-      })),
-    [r],
-  );
-  const bandOpacity = useDerivedValue(() => 0.15 + edgeOnAmount.value * 0.75);
+  if (!image) {
+    return <View style={{ width: size, height: size }} />;
+  }
 
   return (
     <Canvas style={{ width: size, height: size }}>
       {/* Soft outer halo — separate from the clipped group so it isn't cut
           off by the coin's own circle clip. */}
-      <Circle cx={r} cy={r} r={r * 1.08} color="rgba(244,226,161,0.12)">
+      <Circle cx={r} cy={r} r={r * 1.08} color="rgba(244,226,161,0.14)">
         <BlurMask blur={size * 0.08} style="normal" />
       </Circle>
       {/* Contact shadow underneath, for grounding/depth. */}
@@ -131,46 +103,55 @@ export function GhostCoin({
 
       <Group clip={circleClip}>
         <Group transform={bodyTransform} origin={origin}>
-          {/* Glowing core: bright warm center fading to deep bronze at the
-              rim — this is what reads as "an energy core", not a flat coin. */}
+          {/* Coin body — a moderate gold gradient, deliberately not blown
+              out bright, so the real mark artwork on top stays legible
+              instead of getting washed out by an overpowering glow. */}
           <Circle cx={r} cy={r} r={r}>
             <RadialGradient
               c={vec(r, r)}
               r={r}
-              colors={["#fff6dc", "#f4e2a1", GOLD_METALLIC[2], "#4a3a10"]}
-              positions={[0, 0.35, 0.75, 1]}
+              colors={["#e8c874", GOLD_METALLIC[2], "#5c4713"]}
+              positions={[0, 0.6, 1]}
             />
           </Circle>
 
-          {/* Faceted wireframe overlay — the geodesic/faceted-sphere detail. */}
-          <Path path={wireframePath} style="stroke" strokeWidth={1} color="rgba(40,28,4,0.4)" />
+          {/* The real mark — full opacity, no blur. Trust the artwork. */}
+          <Group opacity={frontOpacity}>
+            <SkiaImage
+              image={image}
+              x={markInset}
+              y={markInset}
+              width={size - markInset * 2}
+              height={size - markInset * 2}
+              fit="contain"
+            />
+          </Group>
 
-          {/* Extra brightness pulse on tap-boost. */}
-          <Circle cx={r} cy={r} r={r * 0.55} color="#fff8e6" opacity={coreBoostOpacity}>
-            <BlurMask blur={size * 0.08} style="normal" />
-          </Circle>
+          {/* Back of coin: plain gold, embossed with concentric rings. */}
+          <Group opacity={backOpacity}>
+            <Circle
+              cx={r}
+              cy={r}
+              r={r * 0.74}
+              style="stroke"
+              strokeWidth={2}
+              color="rgba(0,0,0,0.3)"
+            />
+            <Circle
+              cx={r}
+              cy={r}
+              r={r * 0.5}
+              style="stroke"
+              strokeWidth={1.5}
+              color="rgba(0,0,0,0.22)"
+            />
+          </Group>
         </Group>
 
-        {/* Horizontal energy bands — unsquished; their own dy/rx/ry already
-            encode the "torpedo" silhouette, so they don't also need the
-            body's scaleX applied on top. */}
-        {bands.map((b, i) => (
-          <Oval
-            key={i}
-            x={b.x}
-            y={b.y}
-            width={b.width}
-            height={b.height}
-            style="stroke"
-            strokeWidth={size * 0.012}
-            color="#f4e2a1"
-            opacity={bandOpacity}
-          />
-        ))}
-
         {/* Single specular highlight — one clean sheen, not stacked additive
-            layers (which is what was clipping to a blown-out white blob). */}
-        <Circle cx={r * 0.62} cy={r * 0.55} r={r * 0.28} color="rgba(255,252,235,0.5)">
+            layers (which is what caused earlier versions to blow out to a
+            white blob in photos). */}
+        <Circle cx={r * 0.62} cy={r * 0.55} r={r * 0.28} color="rgba(255,252,235,0.35)">
           <BlurMask blur={size * 0.09} style="normal" />
         </Circle>
       </Group>
@@ -193,7 +174,15 @@ export function GhostCoin({
       </Group>
 
       {/* Edge rim: thin metal bezel, unsquished. */}
-      <RoundedRect x={0} y={size * 0.02} width={size} height={size * 0.96} r={r} style="stroke" strokeWidth={size * 0.02}>
+      <RoundedRect
+        x={0}
+        y={size * 0.02}
+        width={size}
+        height={size * 0.96}
+        r={r}
+        style="stroke"
+        strokeWidth={size * 0.02}
+      >
         <RadialGradient c={vec(r, r)} r={r} colors={["#9a7a24", "#f4e2a1", "#9a7a24"]} />
       </RoundedRect>
     </Canvas>
