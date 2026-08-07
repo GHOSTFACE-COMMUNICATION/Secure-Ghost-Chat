@@ -80,10 +80,18 @@ export function GhostCoin({
 
   return (
     <Canvas style={{ width: size, height: size }}>
+      {/* Soft contact shadow underneath — separate from the clipped group so
+          it isn't cut off by the coin's own circle clip. */}
+      <Circle cx={r} cy={r + size * 0.05} r={r * 0.86} color="rgba(0,0,0,0.35)">
+        <BlurMask blur={size * 0.06} style="normal" />
+      </Circle>
+
       <Group clip={circleClip}>
         {/* Body and face squish together so the whole coin thins, not just the face. */}
         <Group transform={bodyTransform} origin={origin}>
-          <Circle cx={r} cy={r} r={r}>
+          {/* Glass body: translucent gold-tinted fill (not solid metal) so the
+              coin reads as glass with a gold cast, rather than opaque metal. */}
+          <Circle cx={r} cy={r} r={r} opacity={0.28}>
             <LinearGradient
               start={vec(0, 0)}
               end={vec(size, size)}
@@ -91,8 +99,14 @@ export function GhostCoin({
               positions={[...GOLD_METALLIC_LOCATIONS]}
             />
           </Circle>
+          {/* Frosted diffusion layer underneath the face — this is what gives
+              the "seen through glass" softness rather than a crisp decal. */}
+          <Circle cx={r} cy={r} r={r} color="rgba(255,255,255,0.05)">
+            <BlurMask blur={size * 0.05} style="normal" />
+          </Circle>
 
-          {/* Smoky front face: blur + reduced opacity + gold tint. */}
+          {/* Ghost mark: dimmer + softer-blurred than a printed logo would be,
+              since it's reading through translucent glass, not sitting on top. */}
           <Group opacity={frontOpacity} layer>
             <SkiaImage
               image={image}
@@ -101,11 +115,11 @@ export function GhostCoin({
               width={size - faceInset * 2}
               height={size - faceInset * 2}
               fit="contain"
-              opacity={0.5}
+              opacity={0.38}
             >
-              <BlurMask blur={2.5} style="normal" />
+              <BlurMask blur={3.5} style="normal" />
             </SkiaImage>
-            <Circle cx={r} cy={r} r={r} blendMode="colorDodge" opacity={0.16}>
+            <Circle cx={r} cy={r} r={r} blendMode="colorDodge" opacity={0.14}>
               <LinearGradient
                 start={vec(0, 0)}
                 end={vec(size, size)}
@@ -114,15 +128,23 @@ export function GhostCoin({
             </Circle>
           </Group>
 
-          {/* Back of coin: plain gold, embossed with concentric rings. */}
+          {/* Back of coin: dimmer gold glass, embossed with concentric rings. */}
           <Group opacity={backOpacity}>
+            <Circle cx={r} cy={r} r={r} opacity={0.22}>
+              <LinearGradient
+                start={vec(0, 0)}
+                end={vec(size, size)}
+                colors={[...GOLD_METALLIC]}
+                positions={[...GOLD_METALLIC_LOCATIONS]}
+              />
+            </Circle>
             <Circle
               cx={r}
               cy={r}
               r={r * 0.74}
               style="stroke"
               strokeWidth={2}
-              color="rgba(0,0,0,0.35)"
+              color="rgba(0,0,0,0.3)"
             />
             <Circle
               cx={r}
@@ -130,22 +152,46 @@ export function GhostCoin({
               r={r * 0.5}
               style="stroke"
               strokeWidth={1.5}
-              color="rgba(0,0,0,0.25)"
+              color="rgba(0,0,0,0.22)"
             />
           </Group>
         </Group>
 
-        {/* Fixed diagonal highlight — outside the squish so it's never lost edge-on. */}
-        <Rect x={0} y={0} width={size} height={size} blendMode="plus" opacity={0.4}>
+        {/* Fresnel-style edge brightening — glass reads brightest right at its
+            rim, where light grazes the surface at a steep angle. A plain flat
+            fill has none of this, which is what read as "metal" not "glass". */}
+        <Circle cx={r} cy={r} r={r} style="stroke" strokeWidth={size * 0.05} opacity={0.5}>
           <LinearGradient
             start={vec(0, 0)}
             end={vec(size, size)}
-            colors={["rgba(255,255,255,0)", "rgba(255,246,214,0.55)", "rgba(255,255,255,0)"]}
-            positions={[0.15, 0.42, 0.68]}
+            colors={["rgba(255,255,255,0.05)", "rgba(255,250,230,0.65)", "rgba(255,255,255,0.05)"]}
+          />
+        </Circle>
+
+        {/* Two crossed specular streaks instead of one flat diagonal band —
+            a single sheen reads as brushed metal, two crossing ones read as
+            curved-glass reflections of two separate light sources. */}
+        <Rect x={0} y={0} width={size} height={size} blendMode="plus" opacity={0.5}>
+          <LinearGradient
+            start={vec(0, 0)}
+            end={vec(size, size)}
+            colors={["rgba(255,255,255,0)", "rgba(255,246,214,0.7)", "rgba(255,255,255,0)"]}
+            positions={[0.12, 0.38, 0.62]}
+          />
+        </Rect>
+        <Rect x={0} y={0} width={size} height={size} blendMode="plus" opacity={0.22}>
+          <LinearGradient
+            start={vec(size, 0)}
+            end={vec(0, size)}
+            colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.5)", "rgba(255,255,255,0)"]}
+            positions={[0.55, 0.72, 0.86]}
           />
         </Rect>
 
-        {/* Edge rim: unsquished, widens as the body's scaleX shrinks. */}
+        {/* Edge rim: unsquished, widens as the body's scaleX shrinks. Kept as
+            solid gold metal (not glass) — a glass coin with a metal bezel is
+            more physically believable than glass all the way to the edge,
+            and keeps the gold trademark color anchored somewhere solid. */}
         <RoundedRect
           x={rimX}
           y={size * 0.02}

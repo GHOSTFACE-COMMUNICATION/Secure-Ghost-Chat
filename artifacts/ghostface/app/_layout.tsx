@@ -309,8 +309,6 @@ function RootNavigator() {
   // Content varies by app state, but the privacy overlay below must sit
   // above whichever branch is active — including the lock screen itself,
   // since backgrounding while already locked should still blur it.
-  let content: React.ReactNode;
-
   let mainContent: React.ReactNode;
 
   if (!loaded) {
