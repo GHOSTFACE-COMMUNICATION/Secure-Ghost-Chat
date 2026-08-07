@@ -41,7 +41,7 @@ const SIGNAL_COMPARISON: { feature: string; signal: boolean; ghost: boolean; not
   { feature: "VPN Dashboard", signal: false, ghost: true },
   { feature: "Open Source Protocol", signal: true, ghost: false, note: "Proprietary — future roadmap" },
   { feature: "Sealed Sender", signal: true, ghost: true, note: "Sender identity encrypted inside ciphertext" },
-  { feature: "Full Double Ratchet", signal: true, ghost: false, note: "Planned in v2" },
+  { feature: "Full Double Ratchet", signal: true, ghost: true, note: "X3DH handshake + per-message ratchet" },
 ];
 
 export default function SecurityAuditScreen() {

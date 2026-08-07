@@ -10,6 +10,7 @@ import invitesRouter from "./invites";
 import iceConfigRouter from "./iceConfig";
 import blobsRouter from "./blobs";
 import integrityRouter from "./integrity";
+import pushRouter from "./push";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(invitesRouter);
 router.use(iceConfigRouter);
 router.use(blobsRouter);
 router.use(integrityRouter);
+router.use(pushRouter);
 
 export default router;

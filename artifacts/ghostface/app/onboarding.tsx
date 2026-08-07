@@ -145,7 +145,9 @@ export default function OnboardingScreen() {
     },
     header: {
       alignItems: "center",
-      marginTop: 32,
+      // Shifted up 10mm (~38px @ 96dpi) — CONFIRM ALIAS was sitting low
+      // enough to need an awkward reach/tilt to tap.
+      marginTop: 32 - 38,
       marginBottom: 32,
     },
     tagline: {

@@ -125,6 +125,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="ghostpad"
+        options={{
+          title: "GHOSTPAD",
+          tabBarIcon: ({ color, focused }) => (
+            <PulseIcon focused={focused}>
+              <Ionicons name="document-text-outline" size={20} color={color} />
+            </PulseIcon>
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="ghostnumber"
         options={{
           title: "NUMBER",

@@ -21,6 +21,7 @@ import { GhostRevealMark } from "@/components/GhostRevealMark";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { emitFailedUnlock } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -231,9 +232,11 @@ export default function LockScreen() {
         exitDecoyMode();
         setLocked(false);
       } else {
+        emitFailedUnlock("biometric");
         setBiometricError("Biometric failed — use PIN");
       }
     } catch {
+      emitFailedUnlock("biometric");
       setBiometricError("Biometric unavailable — use PIN");
     }
   };
@@ -322,6 +325,7 @@ export default function LockScreen() {
         }
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        emitFailedUnlock("pin");
         setError(true);
         shake();
         const newCount = await recordFailure();
@@ -340,6 +344,7 @@ export default function LockScreen() {
       // Intentionally count errors as failed attempts: treating a
       // checkPinWithDuress() exception as "unknown outcome" could be exploited
       // to bypass the wipe threshold by repeatedly triggering errors.
+      emitFailedUnlock("pin");
       setError(true);
       shake();
       const newCount = await recordFailure();
@@ -559,7 +564,9 @@ export default function LockScreen() {
     // ── Ghost-reveal entry gate ────────────────────────────────────────────
     compassWrap: {
       position: "absolute",
-      top: 8,
+      // Shifted up 15mm (~57px @ 96dpi) so the scratch mark doesn't cover
+      // the GHOSTFACE wordmark below it.
+      top: 8 - 57,
       left: 0,
       right: 0,
       alignItems: "center",
@@ -861,7 +868,7 @@ export default function LockScreen() {
       ) : (
         <View style={styles.gate}>
           <View style={styles.compassWrap}>
-            <GhostRevealMark size={600} />
+            <GhostRevealMark size={540} />
           </View>
 
           <Text style={styles.appName}>GHOSTFACE</Text>

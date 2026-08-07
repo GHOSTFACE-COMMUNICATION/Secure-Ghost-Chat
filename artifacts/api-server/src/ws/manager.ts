@@ -12,7 +12,14 @@ import { createHash } from "crypto";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
-import { ensureDeliveryId } from "../utils/delivery";
+import {
+  ensureDeliveryId,
+  pushTokensForAlias,
+  pushTokensForDeliveryId,
+  clearExpoPushTokenForAlias,
+  clearExpoPushTokenForDeliveryId,
+} from "../utils/delivery";
+import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
 // Compressed frames are an untrusted, attacker-controllable input even
@@ -49,7 +56,11 @@ export interface WireMessage {
     | "ghostpad-wipe"
     | "ghostpad-leave"
     | "ghostpad-ended"
-    | "ghostpad-error";
+    | "ghostpad-error"
+    | "presence-subscribe"
+    | "presence-unsubscribe"
+    | "presence"
+    | "disappear-timer";
   token?: string;
   alias?: string;
   to?: string;
@@ -61,12 +72,16 @@ export interface WireMessage {
   callId?: string;
   callMode?: string;
   text?: string;
+  online?: boolean;
   // Task #113: client-generated id echoed back as `departed_ack.requestId`
   // so the panic-wipe flow can race the ack against a timeout.
   requestId?: string;
   // Ghostpad pairing code — never persisted, only ever lives in the
   // in-memory maps below for the few minutes it takes to be redeemed.
   code?: string;
+  // Disappearing-message timeout in seconds; null means "off". Applies
+  // going forward only — never retroactively to messages already sent.
+  seconds?: number | null;
 }
 
 // Extend WebSocket with an aliveness flag used by the protocol-level heartbeat.
@@ -108,6 +123,24 @@ const CALL_SIGNAL_TYPES = new Set([
   "call-ice",
 ]);
 
+// How long to hold an offline call-ring open while a push wake gives the
+// callee's device a chance to reconnect, before falling back to the
+// existing "callee offline" bounce. Polling (not a single timeout) so a
+// reconnect is picked up as soon as it happens rather than waiting out the
+// full window every time.
+const CALL_WAKE_GRACE_MS = 8_000;
+const CALL_WAKE_POLL_MS = 500;
+
+async function waitForReconnect(alias: string, timeoutMs: number): Promise<AuthedSocket | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const client = connectedClients.get(alias);
+    if (client && client.ws.readyState === WebSocket.OPEN) return client;
+    await new Promise((resolve) => setTimeout(resolve, CALL_WAKE_POLL_MS));
+  }
+  return connectedClients.get(alias) ?? null;
+}
+
 // ── Ghostpad: live shared scratchpad, never persisted ───────────────────────
 // A pairing code is redeemed once to link two sockets; from then on, text and
 // wipe events relay directly between them (same shape as CALL_SIGNAL_TYPES
@@ -116,6 +149,25 @@ const CALL_SIGNAL_TYPES = new Set([
 const GHOSTPAD_CODE_TTL_MS = 5 * 60_000;
 const ghostpadCodes = new Map<string, { alias: string; expiresAt: number }>();
 const ghostpadPartners = new Map<string, string>(); // alias -> paired alias
+
+// ── Presence: online/offline for an explicitly-opened conversation ─────────
+// Same "less metadata-blind" tier as call signalling above (which already
+// puts to/from aliases on the wire) — this is not a new category of leak,
+// just extending that tier to cover presence. Subscriptions are purely
+// in-memory and scoped to "which alias is watching which alias", never
+// persisted, and torn down on unsubscribe or disconnect.
+const presenceSubscribers = new Map<string, Set<string>>(); // target alias -> watcher aliases
+
+function notifyPresence(alias: string, online: boolean): void {
+  const watchers = presenceSubscribers.get(alias);
+  if (!watchers || watchers.size === 0) return;
+  for (const watcherAlias of watchers) {
+    const watcher = connectedClients.get(watcherAlias);
+    if (watcher && watcher.ws.readyState === WebSocket.OPEN) {
+      watcher.ws.send(JSON.stringify({ type: "presence", from: alias, online }));
+    }
+  }
+}
 
 function generateGhostpadCode(): string {
   let code: string;
@@ -266,12 +318,17 @@ export function createWsServer(wss: WebSocketServer): void {
 
     let authedAlias: string | null = null;
     let authedDeliveryId: string | null = null;
+    const myPresenceSubscriptions = new Set<string>(); // targets this socket is watching
 
     const cleanup = () => {
       if (authedAlias) {
         connectedClients.delete(authedAlias);
         revokeGhostpadCode(authedAlias);
         endGhostpadSession(authedAlias);
+        for (const target of myPresenceSubscriptions) {
+          presenceSubscribers.get(target)?.delete(authedAlias);
+        }
+        notifyPresence(authedAlias, false);
       }
     };
 
@@ -315,6 +372,7 @@ export function createWsServer(wss: WebSocketServer): void {
         if (authedDeliveryId) deliveryIdToAlias.set(authedDeliveryId, authedAlias);
         ws.send(JSON.stringify({ type: "ack", alias: authedAlias }));
         logger.info({ alias: authedAlias }, "WS client authenticated");
+        notifyPresence(authedAlias, true);
 
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
@@ -385,12 +443,50 @@ export function createWsServer(wss: WebSocketServer): void {
       if (CALL_SIGNAL_TYPES.has(msg.type)) {
         if (!msg.to) return;
         const toAlias = normalizeAlias(msg.to);
-        const recipient = connectedClients.get(toAlias);
+        let recipient: AuthedSocket | null | undefined = connectedClients.get(toAlias);
+
+        // Callee isn't connected — before giving up, try to wake their device
+        // (VoIP push on iOS via CallKit, high-priority data push on Android)
+        // and give it a short window to reconnect. If neither push token is
+        // registered this resolves immediately and falls straight through to
+        // the existing offline bounce, unchanged.
+        if ((!recipient || recipient.ws.readyState !== WebSocket.OPEN) && msg.type === "call-ring") {
+          // Best-effort: if the push_token columns aren't migrated yet on this
+          // deployment (or the push send throws for any other reason), fall
+          // straight through to the existing offline bounce below rather than
+          // dropping the call attempt entirely.
+          try {
+            const tokens = await pushTokensForAlias(toAlias);
+            if (tokens?.voipPushToken) {
+              await sendVoipPushIOS(tokens.voipPushToken, {
+                callId: msg.callId,
+                from: authedAlias,
+                callMode: msg.callMode,
+              });
+            } else if (tokens?.expoPushToken) {
+              const result = await sendExpoPush(
+                tokens.expoPushToken,
+                "Incoming call",
+                { type: "incoming-call", callId: msg.callId, from: authedAlias, callMode: msg.callMode },
+                { channelId: "incoming-calls" },
+              );
+              if (result.invalidToken) await clearExpoPushTokenForAlias(toAlias);
+            }
+            if (tokens?.voipPushToken || tokens?.expoPushToken) {
+              recipient = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
+            }
+          } catch (err) {
+            logger.warn({ err, from: authedAlias, to: toAlias }, "Call-wake push attempt failed");
+          }
+        }
+
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           recipient.ws.send(JSON.stringify({ ...msg, from: authedAlias }));
           logger.debug({ type: msg.type, from: authedAlias, to: toAlias }, "Call signal relayed");
         } else if (msg.type === "call-ring") {
-          // Callee is offline — bounce hangup back to caller immediately
+          // Callee is offline (and either has no push token, or didn't
+          // reconnect within the wake grace period) — bounce hangup back to
+          // the caller.
           ws.send(
             JSON.stringify({
               type: "call-hangup",
@@ -457,6 +553,42 @@ export function createWsServer(wss: WebSocketServer): void {
         return;
       }
 
+      // ── Disappearing-message timer — ephemeral relay, never persisted ──────
+      // Same "less metadata-blind" tier as call signalling/presence above.
+      // Syncs the setting live between two connected peers; if the other
+      // side isn't connected right now it simply doesn't sync this time —
+      // no queueing, same as presence and Ghostpad.
+      if (msg.type === "disappear-timer") {
+        if (!msg.to) return;
+        const toAlias = normalizeAlias(msg.to);
+        const recipient = connectedClients.get(toAlias);
+        if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
+          recipient.ws.send(
+            JSON.stringify({ type: "disappear-timer", from: authedAlias, seconds: msg.seconds ?? null }),
+          );
+        }
+        return;
+      }
+
+      // ── Presence: subscribe/unsubscribe to another alias's online status ───
+      if (msg.type === "presence-subscribe") {
+        if (!msg.to) return;
+        const targetAlias = normalizeAlias(msg.to);
+        if (!presenceSubscribers.has(targetAlias)) presenceSubscribers.set(targetAlias, new Set());
+        presenceSubscribers.get(targetAlias)!.add(authedAlias);
+        myPresenceSubscriptions.add(targetAlias);
+        ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: connectedClients.has(targetAlias) }));
+        return;
+      }
+
+      if (msg.type === "presence-unsubscribe") {
+        if (!msg.to) return;
+        const targetAlias = normalizeAlias(msg.to);
+        presenceSubscribers.get(targetAlias)?.delete(authedAlias);
+        myPresenceSubscriptions.delete(targetAlias);
+        return;
+      }
+
       // ── Text messages ─────────────────────────────────────────────────────
       // Metadata-blind: `msg.to` is the recipient's opaque delivery token (NOT
       // an alias), and the sender is never recorded — neither in the stored row
@@ -497,6 +629,22 @@ export function createWsServer(wss: WebSocketServer): void {
           logger.debug({ msgId: stored.id }, "Message delivered live");
         } else {
           logger.debug({ msgId: stored.id }, "Message queued for offline delivery");
+          // Best-effort, same as the call-wake path above: if the push_token
+          // columns aren't migrated yet on this deployment, or the send
+          // throws for any other reason, the message stays queued for normal
+          // poll/reconnect delivery — it must not affect the ack below.
+          try {
+            // Generic alert text only — never the sender or message content.
+            // This server doesn't know the sender either (see comment above),
+            // and a push body is visible to Apple/Google/Expo in transit.
+            const tokens = await pushTokensForDeliveryId(toDeliveryId);
+            if (tokens?.expoPushToken) {
+              const result = await sendExpoPush(tokens.expoPushToken, "You have a new message", { type: "message" });
+              if (result.invalidToken) await clearExpoPushTokenForDeliveryId(toDeliveryId);
+            }
+          } catch (err) {
+            logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");
+          }
         }
 
         ws.send(JSON.stringify({ type: "ack", msgId: stored.id }));

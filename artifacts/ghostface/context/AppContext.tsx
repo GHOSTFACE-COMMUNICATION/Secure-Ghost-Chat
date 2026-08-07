@@ -26,6 +26,7 @@ import {
   sanitizeFallbackMessage,
 } from "@/lib/smsFallback";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Alert, AppState as RNAppState, Platform } from "react-native";
 import React, {
@@ -560,8 +561,6 @@ interface AppState {
   appTokens: AppToken[];
   walletAddress: string;
   transactions: Transaction[];
-  dataUsed: number;
-  dataLimit: number;
   connectedWalletAddress: string | null;
   solBalance: number;
   autoLockTimeout: number | null;
@@ -621,6 +620,7 @@ interface AppContextType extends AppState {
   deleteMessage: (conversationId: string, messageId: string) => void;
   clearConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
+  markConversationRead: (conversationId: string) => void;
   setDisappearTimer: (conversationId: string, seconds: number | undefined) => void;
   setConversationBgColor: (conversationId: string, color: string | undefined) => void;
   markMessagesViewed: (conversationId: string, messageIds: string[]) => void;
@@ -644,6 +644,10 @@ interface AppContextType extends AppState {
   setGhostpadMode: (mode: GhostpadSession["mode"]) => void;
   resetGhostpad: () => void;
   dismissIncomingCall: () => void;
+  /** alias -> currently connected to the server. Absent key means unknown (not subscribed yet). */
+  presence: Record<string, boolean>;
+  subscribePresence: (alias: string) => void;
+  unsubscribePresence: (alias: string) => void;
   wsConnected: boolean;
   loaded: boolean;
   vpnAutoReconnecting: boolean;
@@ -1194,8 +1198,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     incomingCall: null,
     ghostpad: { mode: "idle", code: null },
     transactions: DEFAULT_TRANSACTIONS,
-    dataUsed: 2.4,
-    dataLimit: 10,
     connectedWalletAddress: null,
     solBalance: 0,
     autoLockTimeout: 5 * 60 * 1000,
@@ -1958,7 +1960,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [persistConversations]);
 
+  const markConversationRead = useCallback((conversationId: string) => {
+    setState((prev) => {
+      const existing = prev.conversations.find((c) => c.id === conversationId);
+      if (!existing || existing.unread === 0) return prev;
+      const updated = prev.conversations.map((c) =>
+        c.id === conversationId ? { ...c, unread: 0 } : c
+      );
+      persistConversations(updated);
+      return { ...prev, conversations: updated };
+    });
+  }, [persistConversations]);
+
+  // Keep the OS app-icon badge in sync with total unread across conversations.
+  // shouldSetBadge:true (see usePushNotifications) bumps this on every push,
+  // but nothing ever cleared it back down — it would just accumulate forever.
+  useEffect(() => {
+    const total = state.conversations.reduce((sum, c) => sum + c.unread, 0);
+    Notifications.setBadgeCountAsync(total).catch(() => {});
+  }, [state.conversations]);
+
+  // Applies going forward only — never rewrites expiresAt on messages
+  // already in the conversation, only the setting used for new sends and
+  // for messages received from here on.
   const setDisappearTimer = useCallback((conversationId: string, seconds: number | undefined) => {
+    const conv = latestStateRef.current.conversations.find((c) => c.id === conversationId);
     setState((prev) => {
       const updated = prev.conversations.map((c) =>
         c.id === conversationId ? { ...c, disappearAfterSec: seconds } : c
@@ -1966,6 +1992,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       persistConversations(updated);
       return { ...prev, conversations: updated };
     });
+    // Sync the setting to the peer so it isn't just a local, one-sided
+    // toggle. Ephemeral, same as presence: if the peer isn't connected
+    // right now it just doesn't sync this time.
+    if (conv?.isRealContact && conv.alias) {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "disappear-timer", to: conv.alias, seconds: seconds ?? null }));
+      }
+    }
   }, [persistConversations]);
 
   const setConversationBgColor = useCallback((conversationId: string, color: string | undefined) => {
@@ -2730,8 +2765,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       appTokens: [],
       walletAddress: "GhFc3...x9mKr4",
       transactions: DEFAULT_TRANSACTIONS,
-      dataUsed: 2.4,
-      dataLimit: 10,
       connectedWalletAddress: null,
       solBalance: 0,
       autoLockTimeout: 5 * 60 * 1000,
@@ -2770,6 +2803,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const registerGhostpadListener = useCallback((fn: ((s: GhostpadSignal) => void) | null) => {
     ghostpadListenerRef.current = fn;
+  }, []);
+
+  const [presence, setPresence] = useState<Record<string, boolean>>({});
+
+  const subscribePresence = useCallback((alias: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: "presence-subscribe", to: alias }));
+    }
+  }, []);
+
+  const unsubscribePresence = useCallback((alias: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: "presence-unsubscribe", to: alias }));
+    }
+    setPresence((prev) => {
+      if (!(alias in prev)) return prev;
+      const next = { ...prev };
+      delete next[alias];
+      return next;
+    });
   }, []);
 
   const setGhostpadMode = useCallback((mode: GhostpadSession["mode"]) => {
@@ -3100,7 +3155,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [persistConversations, persistOutbox, drainOutbox]);
 
   const handleIncomingWsMessage = useCallback(async (raw: string) => {
-    let wsMsg: { type?: string; msgId?: number; from?: string; payload?: string; x3dhHeader?: string; alias?: string; callId?: string; callMode?: string; code?: string; text?: string };
+    let wsMsg: { type?: string; msgId?: number; from?: string; payload?: string; x3dhHeader?: string; alias?: string; callId?: string; callMode?: string; code?: string; text?: string; online?: boolean; seconds?: number | null };
     try {
       wsMsg = JSON.parse(raw);
     } catch {
@@ -3153,6 +3208,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistConversations(updated);
         return { ...prev, conversations: updated };
       });
+      return;
+    }
+
+    // ── Peer changed the disappearing-message timer for this conversation ───
+    // Applies going forward only — updates the setting used for new sends
+    // and newly-received messages, never rewrites expiresAt on messages
+    // already in the conversation.
+    if (wsMsg.type === "disappear-timer" && wsMsg.from) {
+      const peerAlias = wsMsg.from.toUpperCase();
+      const seconds = typeof wsMsg.seconds === "number" ? wsMsg.seconds : undefined;
+      setState((prev) => {
+        const existing = prev.conversations.find((c) => c.alias === peerAlias);
+        if (!existing) return prev;
+        const updated = prev.conversations.map((c) =>
+          c.id === existing.id ? { ...c, disappearAfterSec: seconds } : c
+        );
+        persistConversations(updated);
+        return { ...prev, conversations: updated };
+      });
+      return;
+    }
+
+    // ── Presence — another alias's online status changed ────────────────────
+    if (wsMsg.type === "presence" && wsMsg.from) {
+      const presenceAlias = wsMsg.from.toUpperCase();
+      setPresence((prev) => ({ ...prev, [presenceAlias]: !!wsMsg.online }));
       return;
     }
 
@@ -3762,6 +3843,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         deleteMessage,
         clearConversation,
         deleteConversation,
+        markConversationRead,
         setDisappearTimer,
         setConversationBgColor,
         markMessagesViewed,
@@ -3770,6 +3852,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         registerCallListener,
         sendGhostpadSignal,
         registerGhostpadListener,
+        presence,
+        subscribePresence,
+        unsubscribePresence,
         setGhostpadMode,
         resetGhostpad,
         dismissIncomingCall,

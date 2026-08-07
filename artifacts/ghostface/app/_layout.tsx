@@ -21,8 +21,10 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { AppProvider, useApp } from "@/context/AppContext";
+import { AppProvider, getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { emitLockTimestamp } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
 import LockScreen from "@/app/lock";
 import OnboardingScreen from "@/app/onboarding";
@@ -168,11 +170,36 @@ function PrivacySnapshotCover() {
 
 // ── Root navigator ────────────────────────────────────────────────────────────
 function RootNavigator() {
-  const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall, decoyMode } = useApp();
+  const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall, decoyMode, alias, deviceToken } =
+    useApp();
   const appState = useRef(AppState.currentState);
+  const backgroundedAtRef = useRef<number | null>(null);
   const [privacyCoverVisible, setPrivacyCoverVisible] = useState(false);
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pathname = usePathname();
+
+  // Registers for push once the user is actually past onboarding — no point
+  // prompting for permission on the onboarding screens themselves. Must NOT
+  // also gate on `!isLocked`: the WS connection is deliberately closed while
+  // locked (see AppContext's connect effect), which makes push the only wake
+  // channel for incoming calls/messages while locked — tearing down
+  // CallKeep/VoIP listeners on every lock would silently break incoming-call
+  // wake for exactly the state the app spends most of its time in. The
+  // tokens themselves aren't sent anywhere by the hook; the effect below
+  // POSTs them to the server whenever they change.
+  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded);
+
+  useEffect(() => {
+    if (!alias || !deviceToken) return;
+    if (!expoPushToken && !voipPushToken) return;
+    const apiBase = getApiBase();
+    if (!apiBase) return;
+    fetch(`${apiBase}/push/${encodeURIComponent(alias)}/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${deviceToken}` },
+      body: JSON.stringify({ expoPushToken, voipPushToken }),
+    }).catch((err) => console.warn("[Push] Failed to register push tokens:", err));
+  }, [alias, deviceToken, expoPushToken, voipPushToken]);
 
   const clearInactivityTimer = useCallback(() => {
     if (inactivityTimer.current) {
@@ -186,6 +213,7 @@ function RootNavigator() {
     if (typeof autoLockTimeout !== "number" || isLocked) return;
     inactivityTimer.current = setTimeout(() => {
       setLocked(true);
+      emitLockTimestamp();
     }, autoLockTimeout);
   }, [autoLockTimeout, isLocked, clearInactivityTimer, setLocked]);
 
@@ -220,9 +248,12 @@ function RootNavigator() {
     }
   }, [pathname]);
 
+  // Privacy blur mounts the instant the app leaves "active" (covers both
+  // the app-switcher snapshot and the brief gap before a real lock
+  // decision below), and only unmounts again once that lock decision has
+  // been applied — so a still-eligible-to-lock session never shows real
+  // content for a frame on the way back to active.
   useEffect(() => {
-    if (!loaded || !isOnboarded) return;
-
     const subscription = AppState.addEventListener(
       "change",
       (nextAppState: AppStateStatus) => {
@@ -243,22 +274,42 @@ function RootNavigator() {
           setPrivacyCoverVisible(false);
         }
 
-        // Lock on a real backgrounding only. `"inactive"` also fires for
-        // transient loss of focus that never actually leaves the app — the
-        // native share sheet, an image/file picker, a Face ID prompt, an
-        // incoming call banner — and treating those as background used to
-        // slam the whole navigator into <LockScreen/>, unmounting whatever
-        // screen was open and destroying its local state mid-interaction.
+        // Lock on a real backgrounding only, and only once the user's
+        // configured auto-lock timeout has actually elapsed. `"inactive"`
+        // also fires for transient loss of focus that never actually leaves
+        // the app — the native share sheet, an image/file picker, a Face ID
+        // prompt, an incoming call banner — and treating those as background
+        // used to slam the whole navigator into <LockScreen/>, unmounting
+        // whatever screen was open and destroying its local state
+        // mid-interaction. The lock decision is deferred until we're back to
+        // "active" so a backgrounding shorter than the configured timeout
+        // (including "NEVER") never locks at all.
         const enteredBackground = nextAppState === "background";
         if (wasActive && enteredBackground) {
-          setLocked(true);
+          backgroundedAtRef.current = Date.now();
+        } else if (!wasActive && nextAppState === "active") {
+          if (loaded && isOnboarded && !isLocked) {
+            const elapsed =
+              backgroundedAtRef.current === null ? 0 : Date.now() - backgroundedAtRef.current;
+            if (typeof autoLockTimeout === "number" && elapsed >= autoLockTimeout) {
+              setLocked(true);
+              emitLockTimestamp();
+            }
+          }
+          backgroundedAtRef.current = null;
         }
+
         appState.current = nextAppState;
       }
     );
 
     return () => subscription.remove();
-  }, [loaded, isOnboarded, setLocked]);
+  }, [loaded, isOnboarded, isLocked, autoLockTimeout, setLocked]);
+
+  // Content varies by app state, but the privacy overlay below must sit
+  // above whichever branch is active — including the lock screen itself,
+  // since backgrounding while already locked should still blur it.
+  let content: React.ReactNode;
 
   let mainContent: React.ReactNode;
 

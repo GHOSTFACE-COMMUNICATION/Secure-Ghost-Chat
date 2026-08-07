@@ -26,9 +26,9 @@ const SYNC_DEBOUNCE_MS = 250;
  * A live, two-party shared scratchpad. Text and wipe events relay directly
  * between the two paired sockets server-side and are never written to a
  * database — see artifacts/api-server/src/ws/manager.ts. Rendered both as a
- * real feature (pushed from Settings) and, in its default idle state, as the
- * decoy-PIN screen (see app/decoy-home.tsx) — an idle Ghostpad already looks
- * exactly like an empty notes app.
+ * real feature (the GHOSTPAD tab, see app/(tabs)/ghostpad.tsx) and, in its
+ * default idle state, as the decoy-PIN screen (see app/decoy-home.tsx) — an
+ * idle Ghostpad already looks exactly like an empty notes app.
  */
 export default function GhostpadScreen({
   embedded = false,

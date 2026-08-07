@@ -127,7 +127,7 @@ export default function SettingsScreen() {
   const { scrollRef, onScroll } = useScrollPersist<ScrollView>();
 
   const AUTO_LOCK_OPTIONS: { label: string; value: number | null }[] = [
-    { label: "30 SECONDS", value: 30 * 1000 },
+    { label: "IMMEDIATELY", value: 0 },
     { label: "1 MINUTE", value: 60 * 1000 },
     { label: "5 MINUTES", value: 5 * 60 * 1000 },
     { label: "15 MINUTES", value: 15 * 60 * 1000 },
@@ -1023,29 +1023,6 @@ export default function SettingsScreen() {
               {idx < arr.length - 1 && <View style={styles.settingDivider} />}
             </View>
           ))}
-        </View>
-
-        <Text style={styles.sectionLabel}>TOOLS (BETA)</Text>
-        <View>
-          <Pressable
-            style={styles.settingRow}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/ghostpad");
-            }}
-            testID="ghostpad-row"
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingLabel}>GHOSTPAD</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
-                LIVE SHARED NOTEPAD — NEVER SAVED
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-          </Pressable>
         </View>
 
         <View style={styles.panicSection}>

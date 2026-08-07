@@ -35,7 +35,7 @@ async function performHandshake(): Promise<void> {
 export default function VPNScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { vpnConnected, vpnServer, connectVPN, disconnectVPN, dataUsed, dataLimit, vpnAutoReconnecting } =
+  const { vpnConnected, vpnServer, connectVPN, disconnectVPN, vpnAutoReconnecting } =
     useApp();
   const [connecting, setConnecting] = useState(false);
   const [currentIp, setCurrentIp] = useState<string | null>(null);
@@ -121,8 +121,6 @@ export default function VPNScreen() {
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
-
-  const dataPercent = (dataUsed / dataLimit) * 100;
 
   const styles = StyleSheet.create({
     container: {
@@ -380,41 +378,6 @@ export default function VPNScreen() {
             </View>
 
             <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>DATA USED</Text>
-                <Text style={styles.statValue}>
-                  {dataUsed} <Text style={styles.statUnit}>GB</Text>
-                </Text>
-                <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: `${dataPercent}%`,
-                        backgroundColor:
-                          dataPercent > 80 ? colors.destructive : colors.primary,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>DATA LIMIT</Text>
-                <Text style={styles.statValue}>
-                  {dataLimit} <Text style={styles.statUnit}>GB</Text>
-                </Text>
-                <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: "100%",
-                        backgroundColor: colors.muted,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
               <View style={styles.statCard}>
                 <Text style={styles.statLabel}>PING</Text>
                 <Text style={styles.statValue}>

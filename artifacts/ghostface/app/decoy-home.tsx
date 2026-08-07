@@ -3,7 +3,7 @@ import React from "react";
 import { Pressable } from "react-native";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
-import GhostpadScreen from "@/app/ghostpad";
+import GhostpadScreen from "@/components/GhostpadPanel";
 
 /**
  * Rendered in place of the real tab navigator when the decoy PIN was used

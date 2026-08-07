@@ -221,7 +221,26 @@ export default function ChatScreen() {
   // iPhone SE/mini-class widths (375pt) can't fit the timer's text label
   // alongside three action buttons without crowding — icon-only there.
   const timerCompact = winWidth < 380;
-  const { conversations, alias, sendMessage, sendReaction, retryMessage, deleteMessage, clearConversation, setDisappearTimer, setConversationBgColor, markMessagesViewed, verifyConversation, deleteConversation, lowBandwidthActive, wsConnected } = useApp();
+  const {
+    conversations,
+    alias,
+    sendMessage,
+    sendReaction,
+    retryMessage,
+    deleteMessage,
+    clearConversation,
+    setDisappearTimer,
+    setConversationBgColor,
+    markMessagesViewed,
+    verifyConversation,
+    deleteConversation,
+    markConversationRead,
+    lowBandwidthActive,
+    wsConnected,
+    presence,
+    subscribePresence,
+    unsubscribePresence,
+  } = useApp();
   const [text, setText] = useState("");
   const [showInfo, setShowInfo] = useState(false);
   const [showDisappear, setShowDisappear] = useState(false);
@@ -259,6 +278,24 @@ export default function ChatScreen() {
   };
 
   const conv = conversations.find((c) => c.id === id);
+
+  // Clear the unread badge for whichever conversation is actually open —
+  // both for existing unread on entry and for a message that arrives while
+  // already viewing this screen (unread still ticks up server-side regardless
+  // of focus, so re-zero it every time it changes rather than only on mount).
+  useEffect(() => {
+    if (conv?.id && conv.unread > 0) markConversationRead(conv.id);
+  }, [conv?.id, conv?.unread, markConversationRead]);
+
+  // Subscribe to the other side's real online status for as long as this
+  // chat is open — unsubscribe on the way out so the server drops us from
+  // its watcher list instead of leaking a stale subscription.
+  useEffect(() => {
+    if (!conv?.alias) return;
+    const alias = conv.alias;
+    subscribePresence(alias);
+    return () => unsubscribePresence(alias);
+  }, [conv?.alias, subscribePresence, unsubscribePresence]);
 
   // Tick every second whenever a disappear timer could be live in this
   // conversation — either our own outgoing default (disappearAfterSec) or
@@ -1036,8 +1073,9 @@ export default function ChatScreen() {
         <View style={styles.headerInfo}>
           <Text style={styles.headerAlias}>{conv.alias}</Text>
           <View style={styles.headerSub}>
-            <StatusDot active size={5} pulse={false} />
+            <StatusDot active={!!presence[conv.alias]} size={5} pulse={presence[conv.alias] === true} />
             <Text style={styles.headerSubText} numberOfLines={1}>
+              {presence[conv.alias] === undefined ? "" : presence[conv.alias] ? "ONLINE · " : "OFFLINE · "}
               {conv.drSession
                 ? conv.drSession.alice.pq
                   ? "POST-QUANTUM · DOUBLE RATCHET · CHACHA20"
@@ -1509,6 +1547,17 @@ export default function ChatScreen() {
             accessibilityLabel="Attach to message"
           >
             <Ionicons name="add" size={20} color={colors.mutedForeground} />
+          </Pressable>
+          <Pressable
+            style={styles.attachBtn}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/ghostpad");
+            }}
+            testID="ghostpad-btn"
+            accessibilityLabel="Open Ghostpad"
+          >
+            <Ionicons name="document-text-outline" size={18} color={colors.mutedForeground} />
           </Pressable>
           <TextInput
             style={styles.input}

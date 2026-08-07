@@ -31,6 +31,15 @@ export const identityKeysTable = pgTable("identity_keys", {
   // backward compatibility with pre-PQ registrations → classical-only fallback.
   pqkemPublicKey:  text("pqkem_public_key"),
   pqkemSignature:  text("pqkem_signature"),
+  // Push wake tokens (task: push notifications). Both nullable — a device may
+  // have neither (push never enabled/permission denied), one, or both.
+  //   expoPushToken — wakes the app for a new message on any platform, and for
+  //     an incoming call on Android (Expo's relay rides FCM there).
+  //   voipPushToken — iOS PushKit token, used only for CallKit incoming-call
+  //     wake. Never sent through Expo's relay: VoIP pushes must go straight to
+  //     APNs with apns-push-type: voip, which is a different delivery path.
+  expoPushToken:   text("expo_push_token"),
+  voipPushToken:   text("voip_push_token"),
   createdAt:       timestamp("created_at").defaultNow().notNull(),
   updatedAt:       timestamp("updated_at").defaultNow().notNull(),
 });

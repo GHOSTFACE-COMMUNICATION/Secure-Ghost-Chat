@@ -2,7 +2,7 @@
   "expo": {
     "name": "GHOSTFACE",
     "slug": "mayybachh",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "ghostface",
@@ -16,12 +16,13 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ghostface.app",
-      "buildNumber": "1",
+      "buildNumber": "72",
       "infoPlist": {
         "NSFaceIDUsageDescription": "GHOSTFACE uses Face ID to protect your private messages and identity with biometric authentication.",
         "NSCameraUsageDescription": "GHOSTFACE uses the camera for QR code scanning and secure video calls.",
         "NSMicrophoneUsageDescription": "GHOSTFACE needs microphone access for encrypted voice and video calls.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["voip", "audio"]
       },
       "privacyManifests": {
         "NSPrivacyAccessedAPITypes": [
@@ -69,6 +70,7 @@
         }
       ],
       "expo-web-browser",
+      "expo-notifications",
       [
         "expo-camera",
         {
@@ -94,7 +96,9 @@
           }
         }
       ],
-      "./plugins/withAdiRegistration"
+      "@config-plugins/react-native-webrtc",
+      "./plugins/withAdiRegistration",
+      "./plugins/withVoipPushKit"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -103,6 +107,7 @@
     "extra": {
       "privacyPolicyUrl": "https://ghostface.app/privacy",
       "marketingUrl": "https://ghostface.app",
+      "supportUrl": "mailto:support@ghostface.app",
       "router": {},
       "eas": {
         "projectId": "1955ab0c-ad35-40bd-9428-543e6dd8d293"
