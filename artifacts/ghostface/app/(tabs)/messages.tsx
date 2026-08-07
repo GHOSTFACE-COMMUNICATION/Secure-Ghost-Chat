@@ -26,6 +26,7 @@ import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
 import { CODE_REGEX, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
+import { getProfileColor } from "@/lib/chatColors";
 
 function formatTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -281,14 +282,20 @@ export default function MessagesScreen() {
       width: 46,
       height: 46,
       borderRadius: 23,
-      backgroundColor: colors.card,
+      // backgroundColor set per-item to the derived profile colour (see
+      // renderItem) — no static fill here.
       borderWidth: 1,
       borderColor: colors.border,
       alignItems: "center",
       justifyContent: "center",
     },
     avatarTxt: {
-      color: colors.primary,
+      // Fixed neutral text colour rather than the app's gold accent — the
+      // fill now varies per-contact (getProfileColor), and near-white reads
+      // reliably against any of the palette's dark swatches, whereas a
+      // fixed accent colour isn't guaranteed to contrast well against all
+      // of them equally.
+      color: colors.foreground,
       fontSize: 15,
       fontWeight: "800",
       letterSpacing: 1,
@@ -558,7 +565,7 @@ export default function MessagesScreen() {
                 testID={`conversation-${item.id}`}
               >
                 <View style={styles.avatarWrap}>
-                  <View style={styles.avatar}>
+                  <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
                     <Text style={styles.avatarTxt}>{item.alias.slice(0, 2)}</Text>
                   </View>
                   {item.unread > 0 && (

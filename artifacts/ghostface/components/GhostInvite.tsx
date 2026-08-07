@@ -16,7 +16,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { QRScanner, encodeContactQR, encodeInviteQR } from "@/components/QRScanner";
 import { GoldGradient } from "@/components/GoldGradient";
-import { CODE_REGEX, type RedeemFailReason, type RedeemResult, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
+import { CODE_REGEX, type RedeemFailReason, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
 
 const TIMER_OPTIONS = [
   { label: "10 MIN", ms: 10 * 60 * 1000 },
