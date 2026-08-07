@@ -10,6 +10,7 @@ import {
   Rect,
   RoundedRect,
   Skia,
+  SweepGradient,
   useImage,
   vec,
 } from "@shopify/react-native-skia";
@@ -30,17 +31,27 @@ const GHOST_MARK = require("@/assets/images/ghostlogo.png");
 // Never collapse to a literal zero-width line — reads as "disappeared", not "edge-on".
 const MIN_SCALE = 0.06;
 
+// Holographic sweep palette — gold anchors it to the brand, the rest gives
+// the iridescent/CD-sheen "mind blowing" quality a flat gold coin can't have.
+const HOLO_COLORS = ["#f4e2a1", "#ff9ecb", "#9ad8ff", "#c9a8ff", "#f4e2a1"] as const;
+
 export function GhostCoin({
   size = 184,
   spinDurationMs = 9000,
   active = true,
+  boosting = false,
 }: {
   size?: number;
   spinDurationMs?: number;
   active?: boolean;
+  /** True during a tap-triggered speed burst — intensifies the holographic
+   * sheen and flashes an outer ring so the burst actually reads as an event,
+   * not just "spinning a bit faster". */
+  boosting?: boolean;
 }) {
   const image = useImage(GHOST_MARK);
   const progress = useSharedValue(0);
+  const boost = useSharedValue(0);
 
   useEffect(() => {
     if (active) {
@@ -55,6 +66,10 @@ export function GhostCoin({
     return () => cancelAnimation(progress);
   }, [active, spinDurationMs, progress]);
 
+  useEffect(() => {
+    boost.value = withTiming(boosting ? 1 : 0, { duration: 280, easing: Easing.out(Easing.quad) });
+  }, [boosting, boost]);
+
   const angle = useDerivedValue(() => progress.value * Math.PI * 2);
   const scaleMagnitude = useDerivedValue(() =>
     Math.max(Math.abs(Math.cos(angle.value)), MIN_SCALE),
@@ -68,6 +83,17 @@ export function GhostCoin({
   const bodyTransform = useDerivedValue(() => [{ scaleX: scaleMagnitude.value }]);
   const rimX = useDerivedValue(() => size / 2 - rimWidth.value / 2);
   const rimR = useDerivedValue(() => rimWidth.value / 2);
+
+  // Holographic film spins faster than the coin itself (and faster still
+  // while boosting) so its colors visibly cycle rather than just riding
+  // along with the coin's own rotation.
+  const holoTransform = useDerivedValue(() => [
+    { rotate: angle.value * (2.2 + boost.value * 1.8) },
+  ]);
+  const holoOpacity = useDerivedValue(() => interpolate(boost.value, [0, 1], [0.3, 0.72]));
+  const burstRingOpacity = useDerivedValue(() => boost.value * 0.65);
+  const burstRingScale = useDerivedValue(() => 1 + boost.value * 0.1);
+  const burstRingTransform = useDerivedValue(() => [{ scale: burstRingScale.value }]);
 
   const r = size / 2;
   const origin = { x: r, y: r };
@@ -157,6 +183,17 @@ export function GhostCoin({
           </Group>
         </Group>
 
+        {/* Holographic film: a rainbow-tinted sweep gradient that spins
+            independently of the coin (faster still while boosting), so the
+            colors visibly cycle across the surface rather than just riding
+            along with the coin's own rotation. This is the "mind blowing"
+            layer — flat gold alone can't do this. */}
+        <Group transform={holoTransform} origin={origin}>
+          <Circle cx={r} cy={r} r={r} blendMode="plus" opacity={holoOpacity}>
+            <SweepGradient c={vec(r, r)} colors={[...HOLO_COLORS]} />
+          </Circle>
+        </Group>
+
         {/* Fresnel-style edge brightening — glass reads brightest right at its
             rim, where light grazes the surface at a steep angle. A plain flat
             fill has none of this, which is what read as "metal" not "glass". */}
@@ -206,6 +243,24 @@ export function GhostCoin({
             positions={[0, 0.4, 0.6, 1]}
           />
         </RoundedRect>
+      </Group>
+
+      {/* Burst ring: flashes and expands just outside the coin's own edge on
+          a tap — outside the clip so it isn't cropped by the coin's circle.
+          This is what makes a tap read as an actual event, not just a speed
+          change you have to notice on your own. */}
+      <Group transform={burstRingTransform} origin={origin}>
+        <Circle
+          cx={r}
+          cy={r}
+          r={r * 1.04}
+          style="stroke"
+          strokeWidth={size * 0.018}
+          opacity={burstRingOpacity}
+          color="#ffe9b8"
+        >
+          <BlurMask blur={size * 0.01} style="normal" />
+        </Circle>
       </Group>
     </Canvas>
   );

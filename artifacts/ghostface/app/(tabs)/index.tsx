@@ -52,6 +52,7 @@ export default function HomeScreen() {
   const [coinActive, setCoinActive] = useState(true);
   const [coinHeld, setCoinHeld] = useState(false);
   const [coinSpinDurationMs, setCoinSpinDurationMs] = useState(9000);
+  const [coinBoosting, setCoinBoosting] = useState(false);
   // Distinguishes a quick tap (speed burst) from a hold that reveals the
   // menu (onPressIn fires for both — this flags which one actually happened
   // by the time onPressOut runs).
@@ -166,7 +167,11 @@ export default function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
     setCoinSpinDurationMs(2200);
-    boostTimerRef.current = setTimeout(() => setCoinSpinDurationMs(9000), 2500);
+    setCoinBoosting(true);
+    boostTimerRef.current = setTimeout(() => {
+      setCoinSpinDurationMs(9000);
+      setCoinBoosting(false);
+    }, 2500);
   };
 
   useEffect(() => {
@@ -308,6 +313,7 @@ export default function HomeScreen() {
                       size={184}
                       active={coinActive && !coinHeld}
                       spinDurationMs={coinSpinDurationMs}
+                      boosting={coinBoosting}
                     />
                   </View>
                 </Pressable>
