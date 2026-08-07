@@ -1,13 +1,19 @@
-import React, { Suspense, forwardRef, useImperativeHandle, useMemo, useRef } from "react";
+import React, {
+  Suspense,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { View } from "react-native";
 import { Canvas, useFrame, useLoader } from "@react-three/fiber/native";
 import * as THREE from "three";
 import { Asset } from "expo-asset";
 
 // Same real designed artwork the lock screen's GhostRevealMark uses.
-const GHOST_MARK_URI = Asset.fromModule(
-  require("@/assets/images/ghostface-mark-gold.webp"),
-).uri;
+const GHOST_MARK_ASSET = Asset.fromModule(require("@/assets/images/ghostface-mark-gold.webp"));
 
 const IMPULSE = 0.16;
 const FRICTION = 0.96;
@@ -21,7 +27,10 @@ export interface GhostCoinHandle {
   flick: () => void;
 }
 
-function CoinMesh({ held }: { held: boolean }, ref: React.Ref<GhostCoinHandle>) {
+function CoinMesh(
+  { held, textureUri }: { held: boolean; textureUri: string },
+  ref: React.Ref<GhostCoinHandle>,
+) {
   const meshRef = useRef<THREE.Mesh>(null);
   const velocity = useRef(0);
   const heldRef = useRef(held);
@@ -33,7 +42,7 @@ function CoinMesh({ held }: { held: boolean }, ref: React.Ref<GhostCoinHandle>) 
     },
   }));
 
-  const texture = useLoader(THREE.TextureLoader, GHOST_MARK_URI);
+  const texture = useLoader(THREE.TextureLoader, textureUri);
   texture.colorSpace = THREE.SRGBColorSpace;
   // Expo's GL texture upload is flipped relative to standard web <img>
   // sources — without this the mark renders mirrored vertically.
@@ -88,17 +97,19 @@ function CoinMesh({ held }: { held: boolean }, ref: React.Ref<GhostCoinHandle>) 
   return React.createElement(
     "mesh",
     { ref: meshRef, geometry },
-    // Rim — liquid-glass hyper-gloss.
+    // Rim — glossy gold. `transmission` (true glass refraction) removed
+    // here: it's one of Three.js's most demanding features — it re-renders
+    // the scene to a texture for refraction — and is a strong suspect for
+    // a crash on expo-gl's more constrained WebGL implementation. clearcoat
+    // alone still reads as "glossy/wet" without that render-pass cost.
     React.createElement("meshPhysicalMaterial", {
       key: "rim",
       attach: "material-0",
-      transmission: 1,
-      thickness: 0.4,
-      roughness: 0.06,
+      roughness: 0.1,
+      metalness: 0.6,
       clearcoat: 1,
       clearcoatRoughness: 0,
       reflectivity: 1,
-      ior: 1.5,
       color: "#f4e2a1",
     }),
     // Front face — the real mark, textured.
@@ -128,6 +139,29 @@ const CoinMeshWithRef = forwardRef(CoinMesh);
 
 export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boolean; active?: boolean }>(
   function GhostCoin({ size = 184, held = false, active = true }, ref) {
+    // Explicitly wait on downloadAsync() rather than trusting
+    // Asset.fromModule(...).uri to be immediately valid — the previous
+    // version read .uri synchronously with no readiness guard, which is a
+    // plausible crash source if Three.js's TextureLoader tried to fetch it
+    // before the asset was actually resolved.
+    const [textureUri, setTextureUri] = useState<string | null>(
+      GHOST_MARK_ASSET.localUri ?? null,
+    );
+
+    useEffect(() => {
+      let cancelled = false;
+      GHOST_MARK_ASSET.downloadAsync().then(() => {
+        if (!cancelled) setTextureUri(GHOST_MARK_ASSET.localUri ?? GHOST_MARK_ASSET.uri);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    if (!textureUri) {
+      return <View style={{ width: size, height: size }} />;
+    }
+
     return (
       <View style={{ width: size, height: size }}>
         <Canvas
@@ -145,7 +179,7 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
             color: "#f4e2a1",
           })}
           <Suspense fallback={null}>
-            <CoinMeshWithRef ref={ref} held={held} />
+            <CoinMeshWithRef ref={ref} held={held} textureUri={textureUri} />
           </Suspense>
         </Canvas>
       </View>
