@@ -101,7 +101,8 @@
       ],
       "@config-plugins/react-native-webrtc",
       "./plugins/withAdiRegistration",
-      "./plugins/withVoipPushKit"
+      "./plugins/withVoipPushKit",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
