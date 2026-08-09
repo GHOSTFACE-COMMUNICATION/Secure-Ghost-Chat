@@ -12,7 +12,13 @@ import { createHash } from "crypto";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
-import { ensureDeliveryId, pushTokensForAlias, pushTokensForDeliveryId } from "../utils/delivery";
+import {
+  ensureDeliveryId,
+  pushTokensForAlias,
+  pushTokensForDeliveryId,
+  clearExpoPushTokenForAlias,
+  clearExpoPushTokenForDeliveryId,
+} from "../utils/delivery";
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
@@ -458,12 +464,13 @@ export function createWsServer(wss: WebSocketServer): void {
                 callMode: msg.callMode,
               });
             } else if (tokens?.expoPushToken) {
-              await sendExpoPush(
+              const result = await sendExpoPush(
                 tokens.expoPushToken,
                 "Incoming call",
                 { type: "incoming-call", callId: msg.callId, from: authedAlias, callMode: msg.callMode },
                 { channelId: "incoming-calls" },
               );
+              if (result.invalidToken) await clearExpoPushTokenForAlias(toAlias);
             }
             if (tokens?.voipPushToken || tokens?.expoPushToken) {
               recipient = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
@@ -632,7 +639,8 @@ export function createWsServer(wss: WebSocketServer): void {
             // and a push body is visible to Apple/Google/Expo in transit.
             const tokens = await pushTokensForDeliveryId(toDeliveryId);
             if (tokens?.expoPushToken) {
-              await sendExpoPush(tokens.expoPushToken, "You have a new message", { type: "message" });
+              const result = await sendExpoPush(tokens.expoPushToken, "You have a new message", { type: "message" });
+              if (result.invalidToken) await clearExpoPushTokenForDeliveryId(toDeliveryId);
             }
           } catch (err) {
             logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");

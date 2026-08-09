@@ -68,3 +68,19 @@ export async function pushTokensForDeliveryId(deliveryId: string): Promise<PushT
     .where(eq(identityKeysTable.deliveryId, deliveryId));
   return row ?? null;
 }
+
+/**
+ * Clears a dead expo push token (Expo reported DeviceNotRegistered) so we
+ * stop pushing to it — addressed by alias, for the call-wake path.
+ */
+export async function clearExpoPushTokenForAlias(userId: string): Promise<void> {
+  await db.update(identityKeysTable).set({ expoPushToken: null }).where(eq(identityKeysTable.userId, userId));
+}
+
+/** Same, addressed by delivery id, for the message-wake path. */
+export async function clearExpoPushTokenForDeliveryId(deliveryId: string): Promise<void> {
+  await db
+    .update(identityKeysTable)
+    .set({ expoPushToken: null })
+    .where(eq(identityKeysTable.deliveryId, deliveryId));
+}

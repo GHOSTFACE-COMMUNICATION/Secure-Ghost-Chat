@@ -21,7 +21,6 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { GhostLogo } from "@/components/GhostLogo";
 import { AppProvider, getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
@@ -41,28 +40,6 @@ function ScreenCaptureBlocker() {
   return null;
 }
 const blockScreenCapture = Platform.OS !== "web" && !__DEV__;
-
-// ── Privacy overlay ───────────────────────────────────────────────────────────
-// Opaque (not translucent) so it hides content in the iOS app-switcher
-// snapshot regardless of platform blur support — mounted/unmounted
-// synchronously from the same AppState handler that drives the auto-lock
-// decision below, so content never appears unblurred for a frame.
-function PrivacyOverlay() {
-  return (
-    <View
-      pointerEvents="none"
-      style={{
-        ...StyleSheet.absoluteFillObject,
-        zIndex: 99999,
-        backgroundColor: "#000000",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <GhostLogo size={96} />
-    </View>
-  );
-}
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 function IncomingCallOverlay() {
@@ -174,21 +151,43 @@ function IncomingCallOverlay() {
   );
 }
 
+// ── App-switcher snapshot cover ───────────────────────────────────────────────
+// Solid, not blurred: a BlurView has to capture/render whatever is behind it
+// first, which risks a frame of real content before the blur "catches up".
+// A plain opaque view has nothing to wait on — it's just there or it isn't.
+function PrivacySnapshotCover() {
+  const colors = useColors();
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFillObject,
+        { backgroundColor: colors.background, zIndex: 999999 },
+      ]}
+    />
+  );
+}
+
 // ── Root navigator ────────────────────────────────────────────────────────────
 function RootNavigator() {
   const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall, decoyMode, alias, deviceToken } =
     useApp();
   const appState = useRef(AppState.currentState);
   const backgroundedAtRef = useRef<number | null>(null);
-  const [privacyBlur, setPrivacyBlur] = useState(false);
+  const [privacyCoverVisible, setPrivacyCoverVisible] = useState(false);
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pathname = usePathname();
 
-  // Registers for push once the user is actually past onboarding and
-  // unlocked — no point prompting for permission on the lock/onboarding
-  // screens. The tokens themselves aren't sent anywhere by the hook; the
-  // effect below POSTs them to the server whenever they change.
-  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded && !isLocked);
+  // Registers for push once the user is actually past onboarding — no point
+  // prompting for permission on the onboarding screens themselves. Must NOT
+  // also gate on `!isLocked`: the WS connection is deliberately closed while
+  // locked (see AppContext's connect effect), which makes push the only wake
+  // channel for incoming calls/messages while locked — tearing down
+  // CallKeep/VoIP listeners on every lock would silently break incoming-call
+  // wake for exactly the state the app spends most of its time in. The
+  // tokens themselves aren't sent anywhere by the hook; the effect below
+  // POSTs them to the server whenever they change.
+  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded);
 
   useEffect(() => {
     if (!alias || !deviceToken) return;
@@ -259,12 +258,35 @@ function RootNavigator() {
       "change",
       (nextAppState: AppStateStatus) => {
         const wasActive = appState.current === "active";
-        const isBackground =
-          nextAppState === "background" || nextAppState === "inactive";
 
-        if (wasActive && isBackground) {
+        // Privacy cover: goes up the instant we leave "active" for ANY
+        // reason — share sheet, Face ID prompt, picker, an incoming-call
+        // banner, or a genuine backgrounding all pass through "inactive"
+        // first, and iOS takes the app-switcher snapshot around that same
+        // transition. This is a pure visual overlay (see PrivacySnapshotCover
+        // below/its render site) — it never touches isLocked and never
+        // unmounts whatever screen is under it, so it doesn't regress the
+        // "don't tear down the screen on inactive" fix below.
+        if (wasActive && nextAppState === "inactive") {
+          setPrivacyCoverVisible(true);
+        }
+        if (nextAppState === "active") {
+          setPrivacyCoverVisible(false);
+        }
+
+        // Lock on a real backgrounding only, and only once the user's
+        // configured auto-lock timeout has actually elapsed. `"inactive"`
+        // also fires for transient loss of focus that never actually leaves
+        // the app — the native share sheet, an image/file picker, a Face ID
+        // prompt, an incoming call banner — and treating those as background
+        // used to slam the whole navigator into <LockScreen/>, unmounting
+        // whatever screen was open and destroying its local state
+        // mid-interaction. The lock decision is deferred until we're back to
+        // "active" so a backgrounding shorter than the configured timeout
+        // (including "NEVER") never locks at all.
+        const enteredBackground = nextAppState === "background";
+        if (wasActive && enteredBackground) {
           backgroundedAtRef.current = Date.now();
-          setPrivacyBlur(true);
         } else if (!wasActive && nextAppState === "active") {
           if (loaded && isOnboarded && !isLocked) {
             const elapsed =
@@ -275,7 +297,6 @@ function RootNavigator() {
             }
           }
           backgroundedAtRef.current = null;
-          setPrivacyBlur(false);
         }
 
         appState.current = nextAppState;
@@ -288,22 +309,22 @@ function RootNavigator() {
   // Content varies by app state, but the privacy overlay below must sit
   // above whichever branch is active — including the lock screen itself,
   // since backgrounding while already locked should still blur it.
-  let content: React.ReactNode;
+  let mainContent: React.ReactNode;
 
   if (!loaded) {
-    content = <View style={{ flex: 1, backgroundColor: "#000000" }} />;
+    mainContent = <View style={{ flex: 1, backgroundColor: "#000000" }} />;
   } else if (isLocked) {
-    content = <LockScreen />;
+    mainContent = <LockScreen />;
   } else if (decoyMode) {
     // Decoy PIN was entered — render a self-contained, fresh-install-looking
     // screen instead of the real tab navigator. This never mounts (tabs),
     // messages, wallet, or vpn screens, so real conversation/wallet state
     // can never be reached from here, even by accident.
-    content = <DecoyHomeScreen />;
+    mainContent = <DecoyHomeScreen />;
   } else if (!isOnboarded) {
-    content = <OnboardingScreen />;
+    mainContent = <OnboardingScreen />;
   } else {
-    content = (
+    mainContent = (
       <View style={{ flex: 1 }} {...panResponder.panHandlers}>
         <Stack screenOptions={{ headerShown: false, animation: "none" }}>
           <Stack.Screen name="(tabs)" />
@@ -330,10 +351,13 @@ function RootNavigator() {
   }
 
   return (
-    <>
-      {content}
-      {privacyBlur && <PrivacyOverlay />}
-    </>
+    <View style={{ flex: 1 }}>
+      {mainContent}
+      {/* Layered on top of mainContent, never replacing it — mainContent's
+          mount state (and everything's local state inside it) is completely
+          untouched by this toggling on and off. */}
+      {privacyCoverVisible && <PrivacySnapshotCover />}
+    </View>
   );
 }
 

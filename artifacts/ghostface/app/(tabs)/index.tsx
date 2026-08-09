@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
-  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GhostCoin, type GhostCoinHandle } from "@/components/GhostCoin";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -49,30 +49,30 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { alias, vpnConnected, panicWipe } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Gates the 3D canvas's render loop (frameloop="never" when off-screen) —
+  // no spin-rate/boost state needed anymore, the coin's own physics engine
+  // owns that entirely now.
+  const [coinActive, setCoinActive] = useState(true);
+  const [coinHeld, setCoinHeld] = useState(false);
+  const coinRef = useRef<GhostCoinHandle>(null);
+  // Distinguishes a quick tap (flick) from a hold that reveals the menu
+  // (onPressIn fires for both — this flags which one actually happened by
+  // the time onPressOut runs).
+  const longPressFiredRef = useRef(false);
 
   const spin = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
-  const globeSpin = useRef(new Animated.Value(0)).current;
   const glowPulse = useRef(new Animated.Value(0)).current;
   const hintPulse = useRef(new Animated.Value(1)).current;
 
-  // Slow decorative tick-ring spin, the continuous globe rotation, and its
-  // glow pulse. All gated by screen focus so nothing churns battery while
-  // this tab is off-screen.
+  // Gated by screen focus so nothing churns battery while this tab is off-screen.
   useFocusEffect(
     useCallback(() => {
+      setCoinActive(true);
       const spinLoop = Animated.loop(
         Animated.timing(spin, {
           toValue: 1,
           duration: 26000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      );
-      const globeLoop = Animated.loop(
-        Animated.timing(globeSpin, {
-          toValue: 1,
-          duration: 9000,
           easing: Easing.linear,
           useNativeDriver: true,
         }),
@@ -114,16 +114,15 @@ export default function HomeScreen() {
         ]),
       );
       spinLoop.start();
-      globeLoop.start();
       glowLoop.start();
       hintLoop.start();
       return () => {
         spinLoop.stop();
-        globeLoop.stop();
         glowLoop.stop();
         hintLoop.stop();
+        setCoinActive(false);
       };
-    }, [spin, globeSpin, glowPulse, hintPulse]),
+    }, [spin, glowPulse, hintPulse]),
   );
 
   // Reveal/hide the orbiting menu when the central circle is long-pressed.
@@ -147,8 +146,27 @@ export default function HomeScreen() {
   };
 
   const toggleMenu = () => {
+    longPressFiredRef.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setMenuOpen((open) => !open);
+  };
+
+  // Touch down: pause the spin immediately — covers both "hold to stop" and
+  // the lead-up to a long-press menu reveal, since onLongPress can't fire
+  // without onPressIn firing first anyway.
+  const handleCoinPressIn = () => {
+    longPressFiredRef.current = false;
+    setCoinHeld(true);
+  };
+
+  // Release: only treat it as a "tap" (flick) if the hold never crossed the
+  // long-press threshold — otherwise this release is just the end of an
+  // already-handled menu-reveal hold.
+  const handleCoinPressOut = () => {
+    setCoinHeld(false);
+    if (longPressFiredRef.current) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    coinRef.current?.flick();
   };
 
   const aliasText = (alias ?? "GHOST_00").toUpperCase();
@@ -195,14 +213,6 @@ export default function HomeScreen() {
   const spinDeg = spin.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
-  });
-  const globeFrontDeg = globeSpin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
-  const globeBackDeg = globeSpin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["180deg", "540deg"],
   });
   const glowOpacity = glowPulse.interpolate({
     inputRange: [0, 1],
@@ -267,22 +277,19 @@ export default function HomeScreen() {
             <View pointerEvents="box-none" style={styles.centerWrap}>
               <View style={styles.centerCol}>
                 <Pressable
+                  onPressIn={handleCoinPressIn}
+                  onPressOut={handleCoinPressOut}
                   onLongPress={toggleMenu}
                   delayLongPress={350}
                   hitSlop={24}
                   style={styles.centerHit}
                   accessibilityRole="button"
                   accessibilityLabel={
-                    menuOpen ? "Hide menu" : "Long press to reveal menu"
+                    menuOpen
+                      ? "Hide menu"
+                      : "Tap to spin faster, hold to stop or reveal menu"
                   }
                 >
-                  {/* Continuously spinning "globe" — two mirrored copies of
-                      the same mark, each rotated on the Y axis and hidden
-                      via backfaceVisibility while edge-on, so the transition
-                      between them never shows a mirrored/incorrect frame.
-                      Sits inside the same long-press-to-reveal-menu hit
-                      target as before; the spin itself has no gesture, so it
-                      doesn't conflict with the long press. */}
                   <Animated.View
                     pointerEvents="none"
                     style={[
@@ -290,25 +297,8 @@ export default function HomeScreen() {
                       { opacity: glowOpacity, transform: [{ scale: glowScale }] },
                     ]}
                   />
-                  <View style={styles.globeTiltWrap}>
-                    <Animated.Image
-                      source={require("../../assets/images/login-compass.png")}
-                      resizeMode="contain"
-                      style={[
-                        styles.centerEmblem,
-                        styles.globeFace,
-                        { transform: [{ rotateY: globeFrontDeg }] },
-                      ]}
-                    />
-                    <Animated.Image
-                      source={require("../../assets/images/login-compass.png")}
-                      resizeMode="contain"
-                      style={[
-                        styles.centerEmblem,
-                        styles.globeFace,
-                        { transform: [{ scaleX: -1 }, { rotateY: globeBackDeg }] },
-                      ]}
-                    />
+                  <View style={styles.centerEmblem}>
+                    <GhostCoin ref={coinRef} size={184} active={coinActive} held={coinHeld} />
                   </View>
                 </Pressable>
                 <Animated.Text
@@ -453,17 +443,6 @@ const styles = StyleSheet.create({
   centerEmblem: {
     width: 184,
     height: 184,
-  },
-  globeTiltWrap: {
-    width: 184,
-    height: 184,
-    transform: [{ perspective: 900 }, { rotateX: "12deg" }],
-  },
-  globeFace: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    backfaceVisibility: "hidden",
   },
   globeGlowInner: {
     position: "absolute",

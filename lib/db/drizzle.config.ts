@@ -11,4 +11,9 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
+  // pg_stat_statements is a Postgres extension Railway enables for its own
+  // query-monitoring dashboard — its views aren't ours to manage, and a
+  // plain `push` will try to drop them (and fail, since the extension
+  // depends on them) without this filter.
+  tablesFilter: ["!pg_stat_statements*"],
 });
