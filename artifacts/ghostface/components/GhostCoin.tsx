@@ -190,10 +190,18 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
           style={{ width: size, height: size }}
           frameloop={active ? "always" : "never"}
           camera={{ position: [0, 0, 3.1], fov: 40 }}
-          // Nothing in the scene uses pointer events, but R3F's default
-          // event manager still claims the touch responder on the GLView,
-          // which blocks the parent Pressable's long-press-to-reveal-menu.
+          // Nothing in the scene uses pointer events. `events={...}` only
+          // configures R3F's internal scene raycasting — it does NOT stop
+          // react-three-fiber/native's CanvasImpl, which unconditionally
+          // creates its own PanResponder (onStartShouldSetPanResponder always
+          // true) and attaches it to an absolute-fill View sibling of the
+          // GLView, keyed off the `pointerEvents` prop below. That View is
+          // what actually claims the touch responder and blocks the parent
+          // Pressable's long-press-to-reveal-menu — pointerEvents="none" is
+          // the real fix; the `events` prop alone (kept for scene clarity)
+          // does nothing for this.
           events={() => ({ enabled: false, priority: 0 })}
+          pointerEvents="none"
         >
           {/* React.createElement here too, same reason as CoinMesh's
               materials — see comment there. */}
