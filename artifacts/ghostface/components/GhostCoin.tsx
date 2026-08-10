@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { Canvas, useFrame } from "@react-three/fiber/native";
 import * as THREE from "three";
 import { Asset } from "expo-asset";
@@ -190,18 +190,10 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
           style={{ width: size, height: size }}
           frameloop={active ? "always" : "never"}
           camera={{ position: [0, 0, 3.1], fov: 40 }}
-          // Nothing in the scene uses pointer events. `events={...}` only
-          // configures R3F's internal scene raycasting — it does NOT stop
-          // react-three-fiber/native's CanvasImpl, which unconditionally
-          // creates its own PanResponder (onStartShouldSetPanResponder always
-          // true) and attaches it to an absolute-fill View sibling of the
-          // GLView, keyed off the `pointerEvents` prop below. That View is
-          // what actually claims the touch responder and blocks the parent
-          // Pressable's long-press-to-reveal-menu — pointerEvents="none" is
-          // the real fix; the `events` prop alone (kept for scene clarity)
-          // does nothing for this.
+          // Nothing in the scene uses pointer events, but R3F's default
+          // event manager still claims the touch responder on the GLView,
+          // which blocks the parent Pressable's long-press-to-reveal-menu.
           events={() => ({ enabled: false, priority: 0 })}
-          pointerEvents="none"
         >
           {/* React.createElement here too, same reason as CoinMesh's
               materials — see comment there. */}
@@ -214,7 +206,21 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
           })}
           <CoinMeshWithRef ref={ref} held={held} />
         </Canvas>
+        {/* GHOSTFACE is a registered mark — ® shown on the coin face itself. */}
+        <Text style={[styles.registeredMark, { fontSize: Math.max(10, size * 0.09) }]} pointerEvents="none">
+          ®
+        </Text>
       </View>
     );
   },
 );
+
+const styles = StyleSheet.create({
+  registeredMark: {
+    position: "absolute",
+    alignSelf: "center",
+    bottom: "18%",
+    color: "#f4e2a1",
+    fontWeight: "700",
+  },
+});
