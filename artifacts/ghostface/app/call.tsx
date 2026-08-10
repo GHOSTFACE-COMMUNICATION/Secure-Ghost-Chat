@@ -24,6 +24,7 @@ import { useApp } from "@/context/AppContext";
 let NativeRTCPeerConnection: any = null;
 let NativeRTCSessionDescription: any = null;
 let NativeRTCIceCandidate: any = null;
+let NativeRTCView: any = null;
 let nativeMediaDevices: any = null;
 if (Platform.OS !== "web") {
   try {
@@ -31,6 +32,7 @@ if (Platform.OS !== "web") {
     NativeRTCPeerConnection    = webrtc.RTCPeerConnection;
     NativeRTCSessionDescription = webrtc.RTCSessionDescription;
     NativeRTCIceCandidate      = webrtc.RTCIceCandidate;
+    NativeRTCView              = webrtc.RTCView;
     nativeMediaDevices         = webrtc.mediaDevices;
   } catch (e) {
     console.warn("[WebRTC] react-native-webrtc not available:", e);
@@ -136,6 +138,10 @@ export default function CallScreen() {
   const [showVoiceChanger, setShowVoiceChanger] = useState(false);
   const [activeVoice, setActiveVoice] = useState("natural");
   const [statusNote, setStatusNote]   = useState("");
+  // Mirrors localStreamRef/remoteStreamRef in state so video views re-render
+  // when a stream becomes available — refs alone don't trigger that.
+  const [localStream, setLocalStream]   = useState<any>(null);
+  const [remoteStream, setRemoteStream] = useState<any>(null);
 
   const pulseAnim      = useRef(new Animated.Value(1)).current;
   const voiceSlideAnim = useRef(new Animated.Value(0)).current;
@@ -167,15 +173,59 @@ export default function CallScreen() {
   }, [callState, pulseAnim]);
 
   // ── Remote audio element (web only) ──────────────────────────────────────
+  // Video calls carry their own audio through the visible remote <video>
+  // element below, so this hidden element is only needed for voice calls —
+  // otherwise the same MediaStream would play through both and double up.
   useEffect(() => {
-    if (Platform.OS !== "web") return;
+    if (Platform.OS !== "web" || isVideo) return;
     const el = document.createElement("audio");
     el.id = "gf-remote-audio";
     el.autoplay = true;
     (el as any).playsInline = true;
     document.body.appendChild(el);
     return () => { try { el.remove(); } catch { /* element already removed */ } };
-  }, []);
+  }, [isVideo]);
+
+  // ── Local/remote <video> elements (web only) ──────────────────────────────
+  const localVideoContainerRef  = useRef<any>(null);
+  const remoteVideoContainerRef = useRef<any>(null);
+  const localVideoElRef  = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoElRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || !isVideo) return;
+    const localEl = document.createElement("video");
+    localEl.autoplay = true;
+    localEl.muted = true; // never play back our own mic through the local preview
+    (localEl as any).playsInline = true;
+    Object.assign(localEl.style, { width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" });
+    localVideoElRef.current = localEl;
+    localVideoContainerRef.current?.appendChild(localEl);
+
+    const remoteEl = document.createElement("video");
+    remoteEl.autoplay = true;
+    (remoteEl as any).playsInline = true;
+    Object.assign(remoteEl.style, { width: "100%", height: "100%", objectFit: "cover" });
+    remoteVideoElRef.current = remoteEl;
+    remoteVideoContainerRef.current?.appendChild(remoteEl);
+
+    return () => {
+      try { localEl.remove(); } catch { /* already removed */ }
+      try { remoteEl.remove(); } catch { /* already removed */ }
+      localVideoElRef.current = null;
+      remoteVideoElRef.current = null;
+    };
+  }, [isVideo]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    if (localVideoElRef.current) localVideoElRef.current.srcObject = localStream ?? null;
+  }, [localStream]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    if (remoteVideoElRef.current) remoteVideoElRef.current.srcObject = remoteStream ?? null;
+  }, [remoteStream]);
 
   // ── WebRTC helpers ────────────────────────────────────────────────────────
   const makePC = useCallback(async () => {
@@ -189,14 +239,20 @@ export default function CallScreen() {
     const pc = new RTC(iceConfig);
 
     pc.ontrack = (ev: any) => {
-      if (Platform.OS === "web") {
-        const el = document.getElementById("gf-remote-audio") as HTMLAudioElement | null;
-        if (el && ev.streams?.[0]) el.srcObject = ev.streams[0];
-      } else {
-        // On native, audio plays automatically through the earpiece/speaker.
-        // Store remote stream for video RTCView if needed.
-        if (ev.streams?.[0]) remoteStreamRef.current = ev.streams[0];
+      const stream = ev.streams?.[0];
+      if (stream) {
+        remoteStreamRef.current = stream;
+        setRemoteStream(stream);
       }
+      if (Platform.OS === "web" && !isVideo) {
+        // Voice calls have no visible <video> element to carry audio, so
+        // route it through the hidden element instead (see effect above).
+        const el = document.getElementById("gf-remote-audio") as HTMLAudioElement | null;
+        if (el && stream) el.srcObject = stream;
+      }
+      // On native, audio plays automatically through the earpiece/speaker
+      // regardless of video — RTCView (driven by remoteStream above) only
+      // needs to handle the picture.
     };
 
     pc.onicecandidate = (ev: any) => {
@@ -214,7 +270,7 @@ export default function CallScreen() {
     };
 
     return pc;
-  }, [alias, effectiveCallId, sendCallSignal]);
+  }, [alias, effectiveCallId, sendCallSignal, isVideo]);
 
   const getMedia = useCallback(async (pc: any) => {
     if (!pc) return;
@@ -239,6 +295,7 @@ export default function CallScreen() {
       if (!devices) { setStatusNote("Microphone unavailable on this device"); return; }
       const stream = await devices.getUserMedia({ audio: true, video: isVideo });
       localStreamRef.current = stream;
+      setLocalStream(stream);
       stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
     } catch (e) {
       console.warn("[WebRTC] getUserMedia:", e);
@@ -433,6 +490,11 @@ export default function CallScreen() {
   const activePreset  = VOICE_PRESETS.find((p) => p.id === activeVoice)!;
   const voiceActive   = activeVoice !== "natural";
 
+  const hasLocalVideoTrack  = !!localStream?.getVideoTracks?.().length;
+  const hasRemoteVideoTrack = !!remoteStream?.getVideoTracks?.().length;
+  const showRemoteVideo  = isVideo && callState === "active" && hasRemoteVideoTrack;
+  const showLocalPreview = isVideo && callState !== "ended" && hasLocalVideoTrack;
+
   const callStatusText = () => {
     if (callState === "ringing")    return "RINGING...";
     if (callState === "connecting") return isCaller ? "CONNECTING..." : "JOINING...";
@@ -452,6 +514,14 @@ export default function CallScreen() {
       flex: 1, backgroundColor: colors.background,
       paddingTop: insets.top + (Platform.OS === "web" ? 67 : 40),
       paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 48),
+    },
+    remoteVideoLayer: { ...StyleSheet.absoluteFillObject },
+    videoScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
+    localPreview: {
+      position: "absolute" as const, right: 16,
+      width: 96, height: 140, borderRadius: colors.radius,
+      overflow: "hidden" as const, borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.card, zIndex: 5,
     },
     topSection: { alignItems: "center", gap: 14, flex: 1, justifyContent: "center" },
     avatarRing: {
@@ -517,12 +587,34 @@ export default function CallScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.topSection}>
-        <Animated.View style={[styles.avatarRing, (callState === "ringing" || callState === "connecting") && { transform: [{ scale: pulseAnim }] }]}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{displayAlias.slice(0, 2)}</Text>
+      {isVideo && (
+        <>
+          <View style={[styles.remoteVideoLayer, { opacity: showRemoteVideo ? 1 : 0 }]} pointerEvents="none">
+            {Platform.OS !== "web" && NativeRTCView && remoteStream ? (
+              <NativeRTCView streamURL={remoteStream.toURL()} style={StyleSheet.absoluteFillObject} objectFit="cover" zOrder={0} />
+            ) : Platform.OS === "web" ? (
+              <View ref={remoteVideoContainerRef} style={StyleSheet.absoluteFillObject} />
+            ) : null}
           </View>
-        </Animated.View>
+          {showRemoteVideo && <View style={styles.videoScrim} pointerEvents="none" />}
+          <View style={[styles.localPreview, { top: insets.top + 16, opacity: showLocalPreview ? 1 : 0 }]}>
+            {Platform.OS !== "web" && NativeRTCView && localStream ? (
+              <NativeRTCView streamURL={localStream.toURL()} style={StyleSheet.absoluteFillObject} objectFit="cover" mirror zOrder={1} />
+            ) : Platform.OS === "web" ? (
+              <View ref={localVideoContainerRef} style={StyleSheet.absoluteFillObject} />
+            ) : null}
+          </View>
+        </>
+      )}
+
+      <View style={styles.topSection}>
+        {!showRemoteVideo && (
+          <Animated.View style={[styles.avatarRing, (callState === "ringing" || callState === "connecting") && { transform: [{ scale: pulseAnim }] }]}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{displayAlias.slice(0, 2)}</Text>
+            </View>
+          </Animated.View>
+        )}
 
         <Text style={styles.aliasText}>{displayAlias}</Text>
 
