@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { Canvas, useFrame } from "@react-three/fiber/native";
 import * as THREE from "three";
 import { Asset } from "expo-asset";
@@ -186,6 +186,16 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
   function GhostCoin({ size = 184, held = false, active = true }, ref) {
     return (
       <View style={{ width: size, height: size }}>
+        {/* Static fallback, same artwork as the 3D coin's texture — visible
+            underneath until (or unless) the WebGL texture/mesh finishes
+            loading, so a texture-load failure leaves something on screen
+            instead of a blank Canvas (see CoinMesh's `if (!texture) return
+            null`, and its own comment on this scene's WebGL fragility). */}
+        <Image
+          source={require("@/assets/images/ghostface-mark-gold.webp")}
+          style={StyleSheet.absoluteFill}
+          resizeMode="contain"
+        />
         <Canvas
           style={{ width: size, height: size }}
           frameloop={active ? "always" : "never"}
