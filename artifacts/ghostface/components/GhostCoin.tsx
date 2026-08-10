@@ -1,166 +1,212 @@
-import React, { useEffect } from "react";
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { View } from "react-native";
-import {
-  BlurMask,
-  Canvas,
-  Circle,
-  Group,
-  Image as SkiaImage,
-  LinearGradient,
-  Rect,
-  RoundedRect,
-  Skia,
-  useImage,
-  vec,
-} from "@shopify/react-native-skia";
-import {
-  cancelAnimation,
-  Easing,
-  Extrapolation,
-  interpolate,
-  useDerivedValue,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from "react-native-reanimated";
-import { GOLD_METALLIC, GOLD_METALLIC_LOCATIONS } from "@/components/GoldGradient";
+import { Canvas, useFrame } from "@react-three/fiber/native";
+import * as THREE from "three";
+import { Asset } from "expo-asset";
 
-const GHOST_MARK = require("@/assets/images/ghostlogo.png");
+// Same real designed artwork the lock screen's GhostRevealMark uses.
+const GHOST_MARK_ASSET = Asset.fromModule(require("@/assets/images/ghostface-mark-gold.webp"));
 
-// Never collapse to a literal zero-width line — reads as "disappeared", not "edge-on".
-const MIN_SCALE = 0.06;
+const IMPULSE = 0.16;
+const FRICTION = 0.96;
+const REST_THRESHOLD = 0.0008;
+// Hold-to-stop damps much harder than natural friction, so it reads as an
+// intentional "grab and stop" rather than just a faster coast-down.
+const HOLD_DAMPING = 0.72;
 
-export function GhostCoin({
-  size = 184,
-  spinDurationMs = 9000,
-  active = true,
-}: {
-  size?: number;
-  spinDurationMs?: number;
-  active?: boolean;
-}) {
-  const image = useImage(GHOST_MARK);
-  const progress = useSharedValue(0);
+export interface GhostCoinHandle {
+  /** Impart a spin impulse — call on tap. */
+  flick: () => void;
+}
 
+function CoinMesh(
+  { held }: { held: boolean },
+  ref: React.Ref<GhostCoinHandle>,
+) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
+  const velocity = useRef(0);
+  const heldRef = useRef(held);
+  heldRef.current = held;
+
+  useImperativeHandle(ref, () => ({
+    flick: () => {
+      velocity.current += IMPULSE;
+    },
+  }));
+
+  // Manual texture loading instead of Suspense/useLoader — this app's
+  // second WebGL crash attempt still crashed even with useLoader gated on
+  // a confirmed-downloaded asset, so removing Suspense as a variable too
+  // rather than assuming it was innocent. onError at least turns a texture
+  // failure into a visible fallback instead of an unhandled state.
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
   useEffect(() => {
-    if (active) {
-      progress.value = withRepeat(
-        withTiming(1, { duration: spinDurationMs, easing: Easing.linear }),
-        -1,
-        false,
-      );
-    } else {
-      cancelAnimation(progress);
+    let cancelled = false;
+    GHOST_MARK_ASSET.downloadAsync()
+      .then(() => {
+        if (cancelled) return;
+        const uri = GHOST_MARK_ASSET.localUri ?? GHOST_MARK_ASSET.uri;
+        new THREE.TextureLoader().load(
+          uri,
+          (tex) => {
+            if (cancelled) return;
+            tex.colorSpace = THREE.SRGBColorSpace;
+            // Expo's GL texture upload is flipped relative to standard web
+            // <img> sources — without this the mark renders mirrored.
+            tex.flipY = false;
+            setTexture(tex);
+          },
+          undefined,
+          (err) => console.warn("[GhostCoin] texture load failed:", err),
+        );
+      })
+      .catch((err) => console.warn("[GhostCoin] asset download failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Cylinder's default axis is Y (caps face up/down) — baked 90° so the
+  // caps face the camera (+Z/-Z) instead of showing the coin edge-on,
+  // which is what the raw geometry would do at the default camera
+  // position. Baking it into the geometry (once) rather than the mesh's
+  // own rotation keeps the spin math below simple: after this bake, the
+  // coin's face-normal is Z, so an in-plane "wheel" spin is rotation.z,
+  // not rotation.y.
+  const geometry = useMemo(() => {
+    const geo = new THREE.CylinderGeometry(1, 1, 0.22, 64);
+    geo.rotateX(Math.PI / 2);
+    return geo;
+  }, []);
+
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    if (heldRef.current) {
+      velocity.current *= HOLD_DAMPING;
     }
-    return () => cancelAnimation(progress);
-  }, [active, spinDurationMs, progress]);
 
-  const angle = useDerivedValue(() => progress.value * Math.PI * 2);
-  const scaleMagnitude = useDerivedValue(() =>
-    Math.max(Math.abs(Math.cos(angle.value)), MIN_SCALE),
-  );
-  // Past 90° the ghost gives way to the plain gold back (not a mirrored ghost).
-  const frontOpacity = useDerivedValue(() => (Math.cos(angle.value) >= 0 ? 1 : 0));
-  const backOpacity = useDerivedValue(() => 1 - frontOpacity.value);
-  const rimWidth = useDerivedValue(() =>
-    interpolate(scaleMagnitude.value, [MIN_SCALE, 1], [size * 0.1, 0], Extrapolation.CLAMP),
-  );
-  const bodyTransform = useDerivedValue(() => [{ scaleX: scaleMagnitude.value }]);
-  const rimX = useDerivedValue(() => size / 2 - rimWidth.value / 2);
-  const rimR = useDerivedValue(() => rimWidth.value / 2);
+    const moving = Math.abs(velocity.current) > REST_THRESHOLD;
+    if (moving) {
+      mesh.rotation.z += velocity.current;
+      // Multi-axis wobble on the two non-spin axes — a bit of parallax
+      // depth rather than a perfectly flat, mechanical spin.
+      mesh.rotation.x = Math.sin(velocity.current * 20) * 0.12;
+      mesh.rotation.y = Math.cos(velocity.current * 15) * 0.08;
+      velocity.current *= FRICTION;
+    } else {
+      // Magnetic lock: settle upright and dead still rather than drifting
+      // to an arbitrary rest angle.
+      velocity.current = 0;
+      mesh.rotation.z = Math.round(mesh.rotation.z / (Math.PI * 2)) * (Math.PI * 2);
+      mesh.rotation.x = 0;
+      mesh.rotation.y = 0;
+    }
 
-  const r = size / 2;
-  const origin = { x: r, y: r };
-  const circleClip = Skia.RRectXY(Skia.XYWHRect(0, 0, size, size), r, r);
-  const faceInset = size * 0.16;
+    // Glow intensity scales with spin speed.
+    if (glowRef.current) {
+      const glowMat = glowRef.current.material as THREE.MeshBasicMaterial;
+      glowMat.opacity = Math.min(Math.abs(velocity.current) * 3, 0.5);
+    }
+  });
 
-  if (!image) {
-    return <View style={{ width: size, height: size }} />;
-  }
+  if (!texture) return null;
 
-  return (
-    <Canvas style={{ width: size, height: size }}>
-      <Group clip={circleClip}>
-        {/* Body and face squish together so the whole coin thins, not just the face. */}
-        <Group transform={bodyTransform} origin={origin}>
-          <Circle cx={r} cy={r} r={r}>
-            <LinearGradient
-              start={vec(0, 0)}
-              end={vec(size, size)}
-              colors={[...GOLD_METALLIC]}
-              positions={[...GOLD_METALLIC_LOCATIONS]}
-            />
-          </Circle>
-
-          {/* Smoky front face: blur + reduced opacity + gold tint. */}
-          <Group opacity={frontOpacity} layer>
-            <SkiaImage
-              image={image}
-              x={faceInset}
-              y={faceInset}
-              width={size - faceInset * 2}
-              height={size - faceInset * 2}
-              fit="contain"
-              opacity={0.5}
-            >
-              <BlurMask blur={2.5} style="normal" />
-            </SkiaImage>
-            <Circle cx={r} cy={r} r={r} blendMode="colorDodge" opacity={0.16}>
-              <LinearGradient
-                start={vec(0, 0)}
-                end={vec(size, size)}
-                colors={["#f4e2a1", "#9a7a24"]}
-              />
-            </Circle>
-          </Group>
-
-          {/* Back of coin: plain gold, embossed with concentric rings. */}
-          <Group opacity={backOpacity}>
-            <Circle
-              cx={r}
-              cy={r}
-              r={r * 0.74}
-              style="stroke"
-              strokeWidth={2}
-              color="rgba(0,0,0,0.35)"
-            />
-            <Circle
-              cx={r}
-              cy={r}
-              r={r * 0.5}
-              style="stroke"
-              strokeWidth={1.5}
-              color="rgba(0,0,0,0.25)"
-            />
-          </Group>
-        </Group>
-
-        {/* Fixed diagonal highlight — outside the squish so it's never lost edge-on. */}
-        <Rect x={0} y={0} width={size} height={size} blendMode="plus" opacity={0.4}>
-          <LinearGradient
-            start={vec(0, 0)}
-            end={vec(size, size)}
-            colors={["rgba(255,255,255,0)", "rgba(255,246,214,0.55)", "rgba(255,255,255,0)"]}
-            positions={[0.15, 0.42, 0.68]}
-          />
-        </Rect>
-
-        {/* Edge rim: unsquished, widens as the body's scaleX shrinks. */}
-        <RoundedRect
-          x={rimX}
-          y={size * 0.02}
-          width={rimWidth}
-          height={size * 0.96}
-          r={rimR}
-        >
-          <LinearGradient
-            start={vec(0, 0)}
-            end={vec(size, 0)}
-            colors={["#9a7a24", "#f4e2a1", "#d9b84a", "#9a7a24"]}
-            positions={[0, 0.4, 0.6, 1]}
-          />
-        </RoundedRect>
-      </Group>
-    </Canvas>
+  // React.createElement instead of JSX for the raw Three.js host elements
+  // below: this project's tsconfig uses the classic "jsx": "react-native"
+  // transform, and @react-three/fiber's JSX.IntrinsicElements augmentation
+  // (targeting the newer automatic-runtime namespace) doesn't merge into
+  // it, so TypeScript sees mesh/meshStandardMaterial/etc. as unknown tags.
+  // createElement needs no such typing — it's a plain function call — so
+  // this sidesteps the mismatch entirely without a fragile custom .d.ts.
+  // Purely a compile-time workaround; identical at runtime to JSX.
+  return React.createElement(
+    "group",
+    null,
+    React.createElement(
+      "mesh",
+      { ref: meshRef, geometry },
+      // Rim — glossy gold. meshStandardMaterial (not Physical): no
+      // clearcoat/transmission, the two most GPU-demanding material
+      // features and the ones this scene hasn't tested crash-free yet.
+      React.createElement("meshStandardMaterial", {
+        key: "rim",
+        attach: "material-0",
+        roughness: 0.15,
+        metalness: 0.75,
+        color: "#f4e2a1",
+      }),
+      // Front face — the real mark, textured.
+      React.createElement("meshStandardMaterial", {
+        key: "front",
+        attach: "material-1",
+        map: texture,
+        transparent: true,
+        roughness: 0.25,
+        metalness: 0.4,
+        color: "#ffffff",
+      }),
+      // Back face — plain gold.
+      React.createElement("meshStandardMaterial", {
+        key: "back",
+        attach: "material-2",
+        color: "#5c4713",
+        metalness: 0.7,
+        roughness: 0.35,
+      }),
+    ),
+    // Glow shell — a slightly larger, additive, transparent sphere behind
+    // the coin whose opacity is driven by spin speed each frame above.
+    React.createElement(
+      "mesh",
+      { ref: glowRef, scale: 1.35 },
+      React.createElement("sphereGeometry", { args: [1, 24, 24] }),
+      React.createElement("meshBasicMaterial", {
+        color: "#f4e2a1",
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }),
+    ),
   );
 }
+
+const CoinMeshWithRef = forwardRef(CoinMesh);
+
+export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boolean; active?: boolean }>(
+  function GhostCoin({ size = 184, held = false, active = true }, ref) {
+    return (
+      <View style={{ width: size, height: size }}>
+        <Canvas
+          style={{ width: size, height: size }}
+          frameloop={active ? "always" : "never"}
+          camera={{ position: [0, 0, 3.1], fov: 40 }}
+          // Nothing in the scene uses pointer events, but R3F's default
+          // event manager still claims the touch responder on the GLView,
+          // which blocks the parent Pressable's long-press-to-reveal-menu.
+          events={() => ({ enabled: false, priority: 0 })}
+        >
+          {/* React.createElement here too, same reason as CoinMesh's
+              materials — see comment there. */}
+          {React.createElement("ambientLight", { intensity: 0.6 })}
+          {React.createElement("directionalLight", { intensity: 1.1, position: [3, 4, 5] })}
+          {React.createElement("directionalLight", {
+            intensity: 0.4,
+            position: [-3, -2, 2],
+            color: "#f4e2a1",
+          })}
+          <CoinMeshWithRef ref={ref} held={held} />
+        </Canvas>
+      </View>
+    );
+  },
+);

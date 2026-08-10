@@ -31,9 +31,24 @@ export async function sendExpoPush(
   opts?: { channelId?: string },
 ): Promise<ExpoPushResult> {
   try {
+    // This Expo project has "enhanced security for push notifications"
+    // enabled (expo.dev → project → push notifications settings), which
+    // rejects every send with 403 UNAUTHORIZED unless it carries an Expo
+    // access token — generated at expo.dev/accounts/[account]/settings/
+    // access-tokens, not the same as an EAS CLI login session. Without
+    // this, every push silently fails (logged, but never delivered) —
+    // exactly the "no notifications while backgrounded" symptom this was
+    // added to fix.
+    const accessToken = process.env.EXPO_ACCESS_TOKEN?.trim();
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/json",
+    };
+    if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+
     const res = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers,
       body: JSON.stringify([
         {
           to: token,
