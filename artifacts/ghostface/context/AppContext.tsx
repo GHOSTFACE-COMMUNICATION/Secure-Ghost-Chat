@@ -1,5 +1,7 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
+import { getApiBase } from "@/lib/apiBase";
+export { getApiBase } from "@/lib/apiBase";
 import {
   classifyLinkQuality,
   isLowBandwidthActive,
@@ -747,12 +749,6 @@ const APP_STORAGE_KEYS = [
   LAST_VPN_SERVER_KEY,
   LOW_BW_MODE_KEY,
 ] as const;
-
-export function getApiBase(): string {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (!domain) return "";
-  return `https://${domain}/api`;
-}
 
 function isValidSolanaAddress(addr: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr.trim());
