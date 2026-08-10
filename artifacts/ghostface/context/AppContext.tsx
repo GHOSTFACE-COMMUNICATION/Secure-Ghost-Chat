@@ -3805,6 +3805,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state.alias, state.isLocked, state.isOnboarded, handleIncomingWsMessage]);
 
+  // Close the WS explicitly the moment the app backgrounds. Without this,
+  // backgrounding/closing the app never sends a clean close frame — the
+  // server has to wait out its own ~30-60s heartbeat timeout to notice the
+  // connection is dead, and any message that arrives in that window gets
+  // silently marked "delivered" over a socket that can no longer actually
+  // receive it, skipping the push-notification fallback entirely. Calling
+  // .close() here fires the onclose handler above exactly as a network
+  // drop would, so the existing reconnect-on-close logic already covers
+  // resuming — nothing else needed for when the app comes back.
+  useEffect(() => {
+    const sub = RNAppState.addEventListener("change", (next) => {
+      if ((next === "background" || next === "inactive") && wsRef.current) {
+        wsRef.current.close();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
     <AppContext.Provider
       value={{

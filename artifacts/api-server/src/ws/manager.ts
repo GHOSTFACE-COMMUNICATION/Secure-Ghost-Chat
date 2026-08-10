@@ -612,27 +612,12 @@ export function createWsServer(wss: WebSocketServer): void {
           })
           .returning();
 
-        const recipientAlias = await aliasForDeliveryId(toDeliveryId);
-        const recipient = recipientAlias ? connectedClients.get(recipientAlias) : undefined;
-        if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
-          const wire: WireMessage = {
-            type: "msg",
-            msgId: stored.id,
-            payload: msg.payload,
-            x3dhHeader: msg.x3dhHeader ?? undefined,
-          };
-          recipient.ws.send(JSON.stringify(wire));
-          await db
-            .update(messagesTable)
-            .set({ delivered: true })
-            .where(eq(messagesTable.id, stored.id));
-          logger.debug({ msgId: stored.id }, "Message delivered live");
-        } else {
+        // Best-effort, same as the call-wake path above: if the push_token
+        // columns aren't migrated yet on this deployment, or the send
+        // throws for any other reason, the message stays queued for normal
+        // poll/reconnect delivery — it must not affect the ack below.
+        const pushFallback = async () => {
           logger.debug({ msgId: stored.id }, "Message queued for offline delivery");
-          // Best-effort, same as the call-wake path above: if the push_token
-          // columns aren't migrated yet on this deployment, or the send
-          // throws for any other reason, the message stays queued for normal
-          // poll/reconnect delivery — it must not affect the ack below.
           try {
             // Generic alert text only — never the sender or message content.
             // This server doesn't know the sender either (see comment above),
@@ -645,6 +630,39 @@ export function createWsServer(wss: WebSocketServer): void {
           } catch (err) {
             logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");
           }
+        };
+
+        const recipientAlias = await aliasForDeliveryId(toDeliveryId);
+        const recipient = recipientAlias ? connectedClients.get(recipientAlias) : undefined;
+        if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
+          const wire: WireMessage = {
+            type: "msg",
+            msgId: stored.id,
+            payload: msg.payload,
+            x3dhHeader: msg.x3dhHeader ?? undefined,
+          };
+          // readyState can still read OPEN for tens of seconds after a
+          // backgrounded/closed client's socket has actually gone dead (the
+          // heartbeat only detects this every ~30-60s — see the interval
+          // above) — so a send failure here is expected, not exceptional.
+          // Confirm the write actually succeeded via ws.send's callback
+          // before treating this as delivered; on failure, fall back to
+          // push exactly as if the socket had never been open at all.
+          const sendError = await new Promise<Error | undefined>((resolve) => {
+            recipient.ws.send(JSON.stringify(wire), (err) => resolve(err));
+          });
+          if (!sendError) {
+            await db
+              .update(messagesTable)
+              .set({ delivered: true })
+              .where(eq(messagesTable.id, stored.id));
+            logger.debug({ msgId: stored.id }, "Message delivered live");
+          } else {
+            logger.debug({ msgId: stored.id, err: sendError }, "Live send failed on a stale socket — falling back to push");
+            await pushFallback();
+          }
+        } else {
+          await pushFallback();
         }
 
         ws.send(JSON.stringify({ type: "ack", msgId: stored.id }));
