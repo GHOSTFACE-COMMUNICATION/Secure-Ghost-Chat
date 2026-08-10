@@ -190,6 +190,10 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
           style={{ width: size, height: size }}
           frameloop={active ? "always" : "never"}
           camera={{ position: [0, 0, 3.1], fov: 40 }}
+          // Nothing in the scene uses pointer events, but R3F's default
+          // event manager still claims the touch responder on the GLView,
+          // which blocks the parent Pressable's long-press-to-reveal-menu.
+          events={() => ({ enabled: false, priority: 0 })}
         >
           {/* React.createElement here too, same reason as CoinMesh's
               materials — see comment there. */}
