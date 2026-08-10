@@ -2,7 +2,7 @@
   "expo": {
     "name": "GHOSTFACE",
     "slug": "mayybachh",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "ghostface",
@@ -100,7 +100,6 @@
       "@config-plugins/react-native-webrtc",
       "./plugins/withAdiRegistration",
       "./plugins/withVoipPushKit",
-      "./plugins/withBumpBuildNumber",
       "expo-asset"
     ],
     "experiments": {
