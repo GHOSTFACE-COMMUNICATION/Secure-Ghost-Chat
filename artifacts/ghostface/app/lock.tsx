@@ -766,7 +766,7 @@ export default function LockScreen() {
           <View style={styles.logo}>
             <GhostLogo size={120} color={colors.primary} />
           </View>
-          <Text style={styles.compactName}>GHOSTFACE</Text>
+          <Text style={styles.compactName}>GHOSTFACE®</Text>
           <Animated.View
             style={{
               width: "100%",
@@ -871,7 +871,7 @@ export default function LockScreen() {
             <GhostRevealMark size={540} />
           </View>
 
-          <Text style={styles.appName}>GHOSTFACE</Text>
+          <Text style={styles.appName}>GHOSTFACE®</Text>
           <Text style={styles.identityReady}>
             {hasPin ? "IDENTITY KEY READY" : "NO PIN CONFIGURED"}
           </Text>
