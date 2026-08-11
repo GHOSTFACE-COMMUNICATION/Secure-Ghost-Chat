@@ -196,26 +196,33 @@ export const GhostCoin = forwardRef<GhostCoinHandle, { size?: number; held?: boo
           style={StyleSheet.absoluteFill}
           resizeMode="contain"
         />
-        <Canvas
-          style={{ width: size, height: size }}
-          frameloop={active ? "always" : "never"}
-          camera={{ position: [0, 0, 3.1], fov: 40 }}
-          // Nothing in the scene uses pointer events, but R3F's default
-          // event manager still claims the touch responder on the GLView,
-          // which blocks the parent Pressable's long-press-to-reveal-menu.
-          events={() => ({ enabled: false, priority: 0 })}
-        >
-          {/* React.createElement here too, same reason as CoinMesh's
-              materials — see comment there. */}
-          {React.createElement("ambientLight", { intensity: 0.6 })}
-          {React.createElement("directionalLight", { intensity: 1.1, position: [3, 4, 5] })}
-          {React.createElement("directionalLight", {
-            intensity: 0.4,
-            position: [-3, -2, 2],
-            color: "#f4e2a1",
-          })}
-          <CoinMeshWithRef ref={ref} held={held} />
-        </Canvas>
+        {/* Wrapping with a plain native View (rather than passing
+            pointerEvents to Canvas as a prop) excludes the WHOLE subtree —
+            GLView included — from hit-testing, regardless of whether R3F's
+            CanvasImpl internally forwards pointerEvents to every native
+            view it renders. Passing it as a Canvas prop only reached one
+            internal sibling view, not GLView itself, and produced a worse
+            regression (see git history) — this is the same pattern already
+            used for the glow overlay below, applied one level higher. */}
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Canvas
+            style={{ width: size, height: size }}
+            frameloop={active ? "always" : "never"}
+            camera={{ position: [0, 0, 3.1], fov: 40 }}
+            events={() => ({ enabled: false, priority: 0 })}
+          >
+            {/* React.createElement here too, same reason as CoinMesh's
+                materials — see comment there. */}
+            {React.createElement("ambientLight", { intensity: 0.6 })}
+            {React.createElement("directionalLight", { intensity: 1.1, position: [3, 4, 5] })}
+            {React.createElement("directionalLight", {
+              intensity: 0.4,
+              position: [-3, -2, 2],
+              color: "#f4e2a1",
+            })}
+            <CoinMeshWithRef ref={ref} held={held} />
+          </Canvas>
+        </View>
         {/* GHOSTFACE is a registered mark — ® shown on the coin face itself. */}
         <Text style={[styles.registeredMark, { fontSize: Math.max(10, size * 0.09) }]} pointerEvents="none">
           ®
