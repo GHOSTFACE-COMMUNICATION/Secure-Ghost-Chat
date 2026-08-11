@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GoldGradient } from "@/components/GoldGradient";
 import { SecureBadge } from "@/components/SecureBadge";
 import { StatusDot } from "@/components/StatusDot";
-import type { Attachment } from "@/context/AppContext";
+import type { Attachment, Message } from "@/context/AppContext";
 import { MAX_ATTACHMENT_B64_CHARS, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { CHAT_COLOR_PALETTE, getProfileColor } from "@/lib/chatColors";
@@ -256,7 +256,12 @@ export default function ChatScreen() {
   const playingSoundRef = useRef<Audio.Sound | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [, setTick] = useState(0);
-  const [actionSheetMsgId, setActionSheetMsgId] = useState<string | null>(null);
+  // Captured at long-press time rather than looked up by id at render time —
+  // a disappearing message can be swept out of conv.messages by the 5s
+  // expiry purge (AppContext's markMessagesViewed starts its countdown on
+  // focus) in the gap between long-press and the modal painting, which
+  // made an id-based lookup here intermittently come up empty.
+  const [actionSheetTarget, setActionSheetTarget] = useState<Message | null>(null);
   const listRef = useRef<FlatList>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
 
@@ -655,13 +660,16 @@ export default function ChatScreen() {
   };
 
   // Long-press opens one overlay: the reaction emoji row on top, Copy/Delete
-  // below it — replaces the old bare Alert/prompt-based menu. Looks the
-  // target message up fresh by id at render time (below, near the FlatList)
-  // rather than snapshotting fromMe/text at press time.
-
-  const handleLongPress = (msgId: string) => {
+  // below it — replaces the old bare Alert/prompt-based menu. Captures the
+  // message object itself (not just its id) at press time — an earlier
+  // version looked the target up fresh by id at render time instead, which
+  // intermittently came up empty for disappearing messages: the 5s expiry
+  // purge in AppContext could sweep the message out of conv.messages in the
+  // gap between long-press and the modal painting. text/fromMe never change
+  // post-send, so a snapshot is always correct, unlike a live re-lookup.
+  const handleLongPress = (msg: Message) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setActionSheetMsgId(msgId);
+    setActionSheetTarget(msg);
   };
 
   const handleDeleteMessage = (msgId: string, fromMe: boolean) => {
@@ -1217,7 +1225,7 @@ export default function ChatScreen() {
           ) : (
           <Pressable
             style={[styles.msgRow, item.fromMe ? { alignSelf: "flex-end" } : { alignSelf: "flex-start" }]}
-            onLongPress={() => handleLongPress(item.id)}
+            onLongPress={() => handleLongPress(item)}
             delayLongPress={400}
           >
             <View style={[
@@ -2003,65 +2011,61 @@ export default function ChatScreen() {
       </Modal>
       {/* Message action sheet — long-press: reaction row above Copy/Delete */}
       <Modal
-        visible={!!actionSheetMsgId}
+        visible={!!actionSheetTarget}
         transparent
         animationType="fade"
-        onRequestClose={() => setActionSheetMsgId(null)}
+        onRequestClose={() => setActionSheetTarget(null)}
       >
         <View style={styles.overlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setActionSheetMsgId(null)} />
-          {(() => {
-            const target = messages.find((m) => m.id === actionSheetMsgId);
-            if (!target) return null;
-            return (
-              <View style={styles.sheet}>
-                <View style={styles.handle} />
-                <View style={styles.emojiRow}>
-                  {REACTION_EMOJIS.map((emoji) => (
-                    <Pressable
-                      key={emoji}
-                      style={styles.emojiBtn}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        sendReaction(conv.id, target.id, emoji);
-                        setActionSheetMsgId(null);
-                      }}
-                      testID={`emoji-pick-${emoji}`}
-                    >
-                      <Text style={styles.emojiBtnTxt}>{emoji}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={styles.sheetBody}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setActionSheetTarget(null)} />
+          {actionSheetTarget && (
+            <View style={styles.sheet}>
+              <View style={styles.handle} />
+              <View style={styles.emojiRow}>
+                {REACTION_EMOJIS.map((emoji) => (
                   <Pressable
-                    style={styles.actionRow}
-                    onPress={async () => {
-                      await Clipboard.setStringAsync(target.text);
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      setActionSheetMsgId(null);
-                    }}
-                  >
-                    <Ionicons name="copy-outline" size={16} color={colors.foreground} />
-                    <Text style={styles.actionRowTxt}>COPY</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.actionRow}
+                    key={emoji}
+                    style={styles.emojiBtn}
                     onPress={() => {
-                      const msgId = target.id;
-                      const fromMe = target.fromMe;
-                      setActionSheetMsgId(null);
-                      handleDeleteMessage(msgId, fromMe);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      sendReaction(conv.id, actionSheetTarget.id, emoji);
+                      setActionSheetTarget(null);
                     }}
+                    testID={`emoji-pick-${emoji}`}
                   >
-                    <Ionicons name="trash-outline" size={16} color={colors.destructive} />
-                    <Text style={[styles.actionRowTxt, { color: colors.destructive }]}>
-                      {target.fromMe ? "DELETE MESSAGE" : "DELETE FOR ME"}
-                    </Text>
+                    <Text style={styles.emojiBtnTxt}>{emoji}</Text>
                   </Pressable>
-                </View>
+                ))}
               </View>
-            );
-          })()}
+              <View style={styles.sheetBody}>
+                <Pressable
+                  style={styles.actionRow}
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(actionSheetTarget.text);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    setActionSheetTarget(null);
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={16} color={colors.foreground} />
+                  <Text style={styles.actionRowTxt}>COPY</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.actionRow}
+                  onPress={() => {
+                    const msgId = actionSheetTarget.id;
+                    const fromMe = actionSheetTarget.fromMe;
+                    setActionSheetTarget(null);
+                    handleDeleteMessage(msgId, fromMe);
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={16} color={colors.destructive} />
+                  <Text style={[styles.actionRowTxt, { color: colors.destructive }]}>
+                    {actionSheetTarget.fromMe ? "DELETE MESSAGE" : "DELETE FOR ME"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
       </Modal>
       {/* Queued message toast — shown briefly when a message is held for delivery */}
