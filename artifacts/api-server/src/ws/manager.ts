@@ -612,6 +612,10 @@ export function createWsServer(wss: WebSocketServer): void {
           })
           .returning();
 
+        // Computed here (rather than inside pushFallback below) so it's
+        // available for the two log lines there without a second lookup.
+        const recipientAlias = await aliasForDeliveryId(toDeliveryId);
+
         // Best-effort, same as the call-wake path above: if the push_token
         // columns aren't migrated yet on this deployment, or the send
         // throws for any other reason, the message stays queued for normal
@@ -625,14 +629,15 @@ export function createWsServer(wss: WebSocketServer): void {
             const tokens = await pushTokensForDeliveryId(toDeliveryId);
             if (tokens?.expoPushToken) {
               const result = await sendExpoPush(tokens.expoPushToken, "You have a new message", { type: "message" });
+              if (result.ok) logger.info({ alias: recipientAlias, msgId: stored.id }, "Message-wake push sent");
               if (result.invalidToken) await clearExpoPushTokenForDeliveryId(toDeliveryId);
+            } else {
+              logger.warn({ alias: recipientAlias, msgId: stored.id }, "Message-wake push skipped — no Expo push token on file");
             }
           } catch (err) {
             logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");
           }
         };
-
-        const recipientAlias = await aliasForDeliveryId(toDeliveryId);
         const recipient = recipientAlias ? connectedClients.get(recipientAlias) : undefined;
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           const wire: WireMessage = {
