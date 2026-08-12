@@ -458,11 +458,16 @@ export function createWsServer(wss: WebSocketServer): void {
           try {
             const tokens = await pushTokensForAlias(toAlias);
             if (tokens?.voipPushToken) {
-              await sendVoipPushIOS(tokens.voipPushToken, {
+              const sent = await sendVoipPushIOS(tokens.voipPushToken, {
                 callId: msg.callId,
                 from: authedAlias,
                 callMode: msg.callMode,
               });
+              if (sent) {
+                logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push sent");
+              } else {
+                logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push failed to send");
+              }
             } else if (tokens?.expoPushToken) {
               const result = await sendExpoPush(
                 tokens.expoPushToken,
@@ -470,7 +475,10 @@ export function createWsServer(wss: WebSocketServer): void {
                 { type: "incoming-call", callId: msg.callId, from: authedAlias, callMode: msg.callMode },
                 { channelId: "incoming-calls" },
               );
+              if (result.ok) logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake Expo push sent");
               if (result.invalidToken) await clearExpoPushTokenForAlias(toAlias);
+            } else {
+              logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake push skipped — no push token on file");
             }
             if (tokens?.voipPushToken || tokens?.expoPushToken) {
               recipient = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
