@@ -63,7 +63,9 @@ const HAPTIC_START_DEG_S = 700;
 const HAPTIC_SLOW_INTERVAL_MS = 220;
 const HAPTIC_FAST_INTERVAL_MS = 60;
 
-function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
 
 type NavNode = {
   icon: IconName;
@@ -74,7 +76,7 @@ type NavNode = {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { alias, vpnConnected, panicWipe, spinHapticsEnabled } = useApp();
+  const { alias, vpnConnected, panicWipe } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Decorative ring spin
@@ -95,10 +97,6 @@ export default function HomeScreen() {
   const lastFrameMs = useRef(0);
   // Timestamp of the last spin-haptic tick (performance.now() ms)
   const lastHapticMs = useRef(0);
-  // Mirror the "Spin haptics" setting into a ref so the rAF loop (mounted
-  // once, empty dep array) always reads the current value without re-running.
-  const spinHapticsRef = useRef(spinHapticsEnabled);
-  spinHapticsRef.current = spinHapticsEnabled;
 
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
@@ -141,76 +139,81 @@ export default function HomeScreen() {
     }, [spin, fade]),
   );
 
-  // Coin physics loop — runs on JS thread, drives Animated.Values via setValue
-  useEffect(() => {
-    function frame(now: number) {
-      const dt = lastFrameMs.current
-        ? Math.min((now - lastFrameMs.current) / 1000, 0.05)
-        : 0;
-      lastFrameMs.current = now;
-      const v = spinVel.current;
-      if (holdingCoin.current) {
-        // Braking: hard exponential decay toward a full stop
-        spinVel.current = v < 2 ? 0 : v * Math.pow(0.015, dt);
-      } else if (v > BASE_SPIN_DEG_S) {
-        // Tap boost decays back down to the idle rate
-        spinVel.current =
-          BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.18, dt);
-      } else {
-        // Released after a hold: ease back up to the idle rate
-        spinVel.current =
-          BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.08, dt);
-      }
-      spinAngle.current = (spinAngle.current + spinVel.current * dt) % 360;
-      const totalRotY = spinAngle.current;
-      coinRotY.setValue(totalRotY);
-      // Edge band peaks when the face is edge-on
-      const edgeOn = Math.pow(Math.abs(Math.sin((totalRotY * Math.PI) / 180)), 3);
-      coinEdge.setValue(edgeOn);
-      // Motion blur: ramp with spin velocity, smoothstep-shaped so it eases
-      // in near top speed and fades out smoothly as the boost decays.
-      const blurT = Math.max(
-        0,
-        Math.min(
-          1,
-          (spinVel.current - BLUR_START_DEG_S) /
-            (BLUR_FULL_DEG_S - BLUR_START_DEG_S),
-        ),
-      );
-      coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
-      // Haptic buzz: tick rate ramps with spin velocity. Only fires while a
-      // tap boost is active (never during the idle spin rate) and no-ops on
-      // web where expo-haptics has no implementation. Skipped entirely when
-      // the user disables "Spin haptics" in Settings.
-      if (
-        spinHapticsRef.current &&
-        Platform.OS !== "web" &&
-        spinVel.current > HAPTIC_START_DEG_S
-      ) {
-        const speedT = Math.min(
-          (spinVel.current - HAPTIC_START_DEG_S) /
-            (MAX_BOOST_DEG_S - HAPTIC_START_DEG_S),
-          1,
-        );
-        const interval = lerp(
-          HAPTIC_SLOW_INTERVAL_MS,
-          HAPTIC_FAST_INTERVAL_MS,
-          speedT,
-        );
-        if (now - lastHapticMs.current >= interval) {
-          lastHapticMs.current = now;
-          Haptics.impactAsync(
-            speedT > 0.6
-              ? Haptics.ImpactFeedbackStyle.Medium
-              : Haptics.ImpactFeedbackStyle.Light,
-          ).catch(() => {});
+  // Coin physics loop — runs on JS thread, drives Animated.Values via setValue.
+  // Gated on screen focus, same as the ring/fade loop above, so it doesn't
+  // keep ticking at 60fps (and firing haptics) while another tab is open.
+  useFocusEffect(
+    useCallback(() => {
+      function frame(now: number) {
+        const dt = lastFrameMs.current
+          ? Math.min((now - lastFrameMs.current) / 1000, 0.05)
+          : 0;
+        lastFrameMs.current = now;
+        const v = spinVel.current;
+        if (holdingCoin.current) {
+          // Braking: hard exponential decay toward a full stop
+          spinVel.current = v < 2 ? 0 : v * Math.pow(0.015, dt);
+        } else if (v > BASE_SPIN_DEG_S) {
+          // Tap boost decays back down to the idle rate
+          spinVel.current =
+            BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.18, dt);
+        } else {
+          // Released after a hold: ease back up to the idle rate
+          spinVel.current =
+            BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.08, dt);
         }
+        spinAngle.current = (spinAngle.current + spinVel.current * dt) % 360;
+        const totalRotY = spinAngle.current;
+        coinRotY.setValue(totalRotY);
+        // Edge band peaks when the face is edge-on
+        const edgeOn = Math.pow(
+          Math.abs(Math.sin((totalRotY * Math.PI) / 180)),
+          3,
+        );
+        coinEdge.setValue(edgeOn);
+        // Motion blur: ramp with spin velocity, smoothstep-shaped so it eases
+        // in near top speed and fades out smoothly as the boost decays.
+        const blurT = Math.max(
+          0,
+          Math.min(
+            1,
+            (spinVel.current - BLUR_START_DEG_S) /
+              (BLUR_FULL_DEG_S - BLUR_START_DEG_S),
+          ),
+        );
+        coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
+        // Haptic buzz: tick rate ramps with spin velocity. Only fires while a
+        // tap boost is active (never during the idle spin rate) and no-ops on
+        // web where expo-haptics has no implementation.
+        if (Platform.OS !== "web" && spinVel.current > HAPTIC_START_DEG_S) {
+          const speedT = Math.min(
+            (spinVel.current - HAPTIC_START_DEG_S) /
+              (MAX_BOOST_DEG_S - HAPTIC_START_DEG_S),
+            1,
+          );
+          const interval = lerp(
+            HAPTIC_SLOW_INTERVAL_MS,
+            HAPTIC_FAST_INTERVAL_MS,
+            speedT,
+          );
+          if (now - lastHapticMs.current >= interval) {
+            lastHapticMs.current = now;
+            Haptics.impactAsync(
+              speedT > 0.6
+                ? Haptics.ImpactFeedbackStyle.Medium
+                : Haptics.ImpactFeedbackStyle.Light,
+            ).catch(() => {});
+          }
+        }
+        rafRef.current = requestAnimationFrame(frame);
       }
       rafRef.current = requestAnimationFrame(frame);
-    }
-    rafRef.current = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, []);
+      return () => {
+        cancelAnimationFrame(rafRef.current);
+        lastFrameMs.current = 0;
+      };
+    }, []),
+  );
 
   // Reveal/hide the orbiting menu when the central circle is long-pressed.
   useEffect(() => {
@@ -236,7 +239,10 @@ export default function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     // Tap-spin kick: stacks across rapid taps, capped so mashing can't
     // spin the coin absurdly fast or break edge-band/glow visuals.
-    spinVel.current = Math.min(spinVel.current + TAP_KICK_DEG_S, MAX_BOOST_DEG_S);
+    spinVel.current = Math.min(
+      spinVel.current + TAP_KICK_DEG_S,
+      MAX_BOOST_DEG_S,
+    );
     setMenuOpen((open) => !open);
   };
 
@@ -319,7 +325,10 @@ export default function HomeScreen() {
     <TabScreenWrapper>
       <View style={styles.container}>
         {/* Alias header */}
-        <View pointerEvents="none" style={[styles.header, { top: insets.top + 18 }]}>
+        <View
+          pointerEvents="none"
+          style={[styles.header, { top: insets.top + 18 }]}
+        >
           <Text style={styles.aliasText}>{aliasText}</Text>
           <View style={styles.aliasDivider} />
           <Text style={styles.aliasTagline}>SECURE IDENTITY</Text>
@@ -377,7 +386,9 @@ export default function HomeScreen() {
                   hitSlop={24}
                   style={styles.centerHit}
                   accessibilityRole="button"
-                  accessibilityLabel={menuOpen ? "Hide menu" : "Tap to reveal menu"}
+                  accessibilityLabel={
+                    menuOpen ? "Hide menu" : "Tap to reveal menu"
+                  }
                 >
                   {/* Outer ambient glow */}
                   <View pointerEvents="none" style={styles.globeGlow} />
@@ -446,8 +457,10 @@ export default function HomeScreen() {
             {/* Orbiting nav nodes — hidden until revealed */}
             {nodes.map((node, i) => {
               const angle = (-90 + i * (360 / nodes.length)) * (Math.PI / 180);
-              const x = ORBIT_CENTER + ORBIT_RADIUS * Math.cos(angle) - NODE / 2;
-              const y = ORBIT_CENTER + ORBIT_RADIUS * Math.sin(angle) - NODE / 2;
+              const x =
+                ORBIT_CENTER + ORBIT_RADIUS * Math.cos(angle) - NODE / 2;
+              const y =
+                ORBIT_CENTER + ORBIT_RADIUS * Math.sin(angle) - NODE / 2;
               const active = node.activeKey === "vpn" && !!vpnConnected;
               return (
                 <Animated.View
@@ -484,7 +497,10 @@ export default function HomeScreen() {
                       />
                     </View>
                     <Text
-                      style={[styles.nodeLabel, active && styles.nodeLabelActive]}
+                      style={[
+                        styles.nodeLabel,
+                        active && styles.nodeLabelActive,
+                      ]}
                     >
                       {node.label}
                     </Text>
