@@ -214,7 +214,7 @@ export function usePushNotifications(enabled: boolean): PushTokens {
           setTokens((prev) => ({ ...prev, voipPushToken: token }));
         });
 
-        VoipPushNotification.addEventListener("notification", (payload: IncomingCallPayload) => {
+        const handleIncomingVoipPayload = (payload: IncomingCallPayload) => {
           const callId = payload.callId ?? String(Date.now());
           pendingCalls.set(callId, payload);
           if (CallKeep) {
@@ -226,7 +226,26 @@ export function usePushNotifications(enabled: boolean): PushTokens {
               payload.callMode === "video",
             );
           }
-        });
+        };
+
+        VoipPushNotification.addEventListener("notification", handleIncomingVoipPayload);
+
+        // On a killed-app cold launch, PushKit wakes the process before any JS
+        // listener can attach, so the native module queues the payload instead
+        // of firing "notification" — then replays the whole queue exactly once,
+        // as a single "didLoadWithEvents" event, once a listener exists. Without
+        // this, a killed-app incoming call is delivered to APNs (200 OK) but
+        // never reaches CallKit — this is that replay path.
+        VoipPushNotification.addEventListener(
+          "didLoadWithEvents",
+          (events: Array<{ name: string; data: IncomingCallPayload }>) => {
+            for (const event of events ?? []) {
+              if (event.name === VoipPushNotification.RNVoipPushRemoteNotificationReceivedEvent) {
+                handleIncomingVoipPayload(event.data);
+              }
+            }
+          },
+        );
       } catch (e) {
         console.warn("[Push] VoIP push registration failed:", e);
       }
@@ -254,6 +273,7 @@ export function usePushNotifications(enabled: boolean): PushTokens {
         try {
           VoipPushNotification.removeEventListener("register");
           VoipPushNotification.removeEventListener("notification");
+          VoipPushNotification.removeEventListener("didLoadWithEvents");
         } catch {
           // best-effort cleanup only
         }
