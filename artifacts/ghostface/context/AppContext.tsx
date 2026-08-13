@@ -578,12 +578,6 @@ interface AppState {
   lowBandwidthMode: LowBandwidthMode;
   lowBandwidthActive: boolean;
   /**
-   * Whether the home-screen coin's tap-spin haptic tick loop is enabled.
-   * Defaults to true; when false the coin rAF loop skips the haptic block
-   * entirely. Other haptics are unaffected.
-   */
-  spinHapticsEnabled: boolean;
-  /**
    * Trusted E.164 phone numbers that receive a one-line distress SMS when
    * panicWipe/duress fires AND the WS broadcast can't be confirmed (Task
    * #113). Capped at MAX_SMS_FALLBACK_NUMBERS. Never sent over the wire;
@@ -641,7 +635,6 @@ interface AppContextType extends AppState {
   setDuressGracePeriod: (seconds: number) => Promise<void>;
   setLanguage: (code: string) => Promise<void>;
   setLowBandwidthMode: (mode: LowBandwidthMode) => Promise<void>;
-  setSpinHapticsEnabled: (enabled: boolean) => Promise<void>;
   setSmsFallbackNumbers: (numbers: string[]) => Promise<void>;
   setSmsFallbackMessage: (message: string) => Promise<void>;
   /** Re-fetch the on-chain-verified plan entitlement from the server. */
@@ -731,9 +724,6 @@ const DURESS_GRACE_KEY = "ghostface_duress_grace_period";
 const LANGUAGE_KEY = "ghostface_language";
 const LAST_VPN_SERVER_KEY = "ghostface_last_vpn_server_id";
 const LOW_BW_MODE_KEY = "ghostface_low_bandwidth_mode";
-// Home-screen coin tap-spin haptic ticks. "false" disables the spin buzz
-// loop; all other haptics (menu tap, nav) are unaffected.
-const SPIN_HAPTICS_KEY = "ghostface_spin_haptics_enabled";
 const SMS_FALLBACK_NUMBERS_KEY = "ghostface_sms_fallback_numbers";
 const SMS_FALLBACK_MESSAGE_KEY = "ghostface_sms_fallback_message";
 const MY_IK_PRIV_KEY = "ghostface_my_ik_priv";
@@ -758,7 +748,6 @@ const APP_STORAGE_KEYS = [
   LANGUAGE_KEY,
   LAST_VPN_SERVER_KEY,
   LOW_BW_MODE_KEY,
-  SPIN_HAPTICS_KEY,
 ] as const;
 
 function isValidSolanaAddress(addr: string): boolean {
@@ -1217,7 +1206,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // automatically"). Hardcoding `false` here would mean cold start and
     // panic-wipe reset both show INACTIVE until the classifier fires.
     lowBandwidthActive: isLowBandwidthActive("unknown", "auto"),
-    spinHapticsEnabled: true,
     smsFallbackNumbers: [],
     smsFallbackMessage: DEFAULT_SMS_FALLBACK_MESSAGE,
   });
@@ -1225,7 +1213,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, biometric, onboarded, convData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, spinHapticsRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, biometric, onboarded, convData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
@@ -1241,7 +1229,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.getItem(LANGUAGE_KEY),
           AsyncStorage.getItem(OUTBOX_KEY),
           AsyncStorage.getItem(LOW_BW_MODE_KEY),
-          AsyncStorage.getItem(SPIN_HAPTICS_KEY),
           secureGet(SMS_FALLBACK_NUMBERS_KEY),
           secureGet(SMS_FALLBACK_MESSAGE_KEY),
         ]);
@@ -1381,7 +1368,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           vpnConnected: false,
           lowBandwidthMode,
           lowBandwidthActive,
-          spinHapticsEnabled: spinHapticsRaw !== "false",
           smsFallbackNumbers,
           smsFallbackMessage,
         }));
@@ -1819,16 +1805,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (err) {
       console.error("[AppContext] Failed to save low-bandwidth mode:", err);
-      throw err;
-    }
-  }, []);
-
-  const setSpinHapticsEnabled = useCallback(async (enabled: boolean) => {
-    try {
-      await AsyncStorage.setItem(SPIN_HAPTICS_KEY, String(enabled));
-      setState((prev) => ({ ...prev, spinHapticsEnabled: enabled }));
-    } catch (err) {
-      console.error("[AppContext] Failed to save spin haptics setting:", err);
       throw err;
     }
   }, []);
@@ -2798,7 +2774,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // active per task spec so the user doesn't briefly burn satellite
       // bytes between panicWipe reset and the first classifier tick.
       lowBandwidthActive: isLowBandwidthActive("unknown", "auto"),
-      spinHapticsEnabled: true,
       smsFallbackNumbers: [],
       smsFallbackMessage: DEFAULT_SMS_FALLBACK_MESSAGE,
     });
@@ -3905,7 +3880,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setDuressGracePeriod,
         setLanguage,
         setLowBandwidthMode,
-        setSpinHapticsEnabled,
         setSmsFallbackNumbers,
         setSmsFallbackMessage,
         refreshEntitlement,
