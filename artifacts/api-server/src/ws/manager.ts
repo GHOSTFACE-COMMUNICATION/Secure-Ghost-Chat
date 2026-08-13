@@ -458,6 +458,11 @@ export function createWsServer(wss: WebSocketServer): void {
           // dropping the call attempt entirely.
           try {
             const tokens = await pushTokensForAlias(toAlias);
+            // Tracks whether a push actually went out — not just whether a
+            // token was on file — so a permanently-dead token (cleared
+            // below) doesn't still cost this call the full grace-period
+            // wait for a reconnect that can no longer happen.
+            let sentOk = false;
             if (tokens?.voipPushToken) {
               const result = await sendVoipPushIOS(tokens.voipPushToken, {
                 callId: msg.callId,
@@ -465,6 +470,7 @@ export function createWsServer(wss: WebSocketServer): void {
                 callMode: msg.callMode,
               });
               if (result.ok) {
+                sentOk = true;
                 logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push sent");
               } else {
                 logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push failed to send");
@@ -477,12 +483,15 @@ export function createWsServer(wss: WebSocketServer): void {
                 { type: "incoming-call", callId: msg.callId, from: authedAlias, callMode: msg.callMode },
                 { channelId: "incoming-calls" },
               );
-              if (result.ok) logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake Expo push sent");
+              if (result.ok) {
+                sentOk = true;
+                logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake Expo push sent");
+              }
               if (result.invalidToken) await clearExpoPushTokenForAlias(toAlias);
             } else {
               logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake push skipped — no push token on file");
             }
-            if (tokens?.voipPushToken || tokens?.expoPushToken) {
+            if (sentOk) {
               recipient = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
             }
           } catch (err) {
