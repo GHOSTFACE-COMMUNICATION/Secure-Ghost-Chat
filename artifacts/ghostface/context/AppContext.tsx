@@ -3841,7 +3841,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // resuming — nothing else needed for when the app comes back.
   useEffect(() => {
     const sub = RNAppState.addEventListener("change", (next) => {
-      if ((next === "background" || next === "inactive") && wsRef.current) {
+      if (next === "background" && wsRef.current) {
         wsRef.current.close();
       }
     });
