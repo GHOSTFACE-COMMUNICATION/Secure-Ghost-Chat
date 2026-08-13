@@ -61,17 +61,32 @@ const CALLKEEP_OPTIONS = {
 };
 
 let callKeepReady = false;
+let callKeepSetupPromise: Promise<void> | null = null;
 
-/** Idempotent — safe to call every time the hook mounts. */
-function ensureCallKeepSetup(): void {
-  if (!CallKeep || callKeepReady) return;
-  try {
-    CallKeep.setup(CALLKEEP_OPTIONS);
-    CallKeep.setAvailable(true);
-    callKeepReady = true;
-  } catch (e) {
-    console.warn("[Push] CallKeep setup failed:", e);
-  }
+/**
+ * Idempotent — safe to call every time the hook mounts. Returns the
+ * in-flight/completed setup so callers that need CallKit actually ready
+ * (e.g. before displayIncomingCall) can await it instead of racing it —
+ * CallKeep.setup() is async on the native side (CXProvider configuration),
+ * and calling displayIncomingCall before it resolves can crash on iOS. This
+ * race is tightest on a cold, killed-app launch: PushKit can hand a queued
+ * VoIP payload to the "didLoadWithEvents" replay in the same tick this hook
+ * mounts, well before setup's native work would otherwise have finished.
+ */
+function ensureCallKeepSetup(): Promise<void> {
+  if (!CallKeep) return Promise.resolve();
+  if (callKeepReady) return Promise.resolve();
+  if (callKeepSetupPromise) return callKeepSetupPromise;
+  callKeepSetupPromise = (async () => {
+    try {
+      await CallKeep.setup(CALLKEEP_OPTIONS);
+      CallKeep.setAvailable(true);
+      callKeepReady = true;
+    } catch (e) {
+      console.warn("[Push] CallKeep setup failed:", e);
+    }
+  })();
+  return callKeepSetupPromise;
 }
 
 async function ensureAndroidChannels(): Promise<void> {
@@ -214,10 +229,14 @@ export function usePushNotifications(enabled: boolean): PushTokens {
           setTokens((prev) => ({ ...prev, voipPushToken: token }));
         });
 
-        const handleIncomingVoipPayload = (payload: IncomingCallPayload) => {
+        const handleIncomingVoipPayload = async (payload: IncomingCallPayload) => {
           const callId = payload.callId ?? String(Date.now());
           pendingCalls.set(callId, payload);
           if (CallKeep) {
+            // Must not fire before CallKit's native side has finished setup
+            // (see ensureCallKeepSetup) — tightest on a cold, killed-app
+            // launch, which is exactly when this fires via didLoadWithEvents.
+            await ensureCallKeepSetup();
             CallKeep.displayIncomingCall(
               callId,
               payload.from ?? "Unknown",
