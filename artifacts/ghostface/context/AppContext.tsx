@@ -1494,6 +1494,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const wsRef = React.useRef<WebSocket | null>(null);
+  // Gates the WS reconnect-on-close logic below so a backgrounded app stays
+  // disconnected (see the AppState effect further down) instead of the
+  // generic 5s reconnect timer reopening the socket seconds later while
+  // still backgrounded — reconnectNowRef lets that same effect trigger an
+  // immediate reconnect the moment the app returns to foreground.
+  const backgroundedRef = React.useRef(false);
+  const reconnectNowRef = React.useRef<(() => void) | null>(null);
   const callSignalListenerRef = React.useRef<((s: CallSignal) => void) | null>(null);
   const ghostpadListenerRef = React.useRef<((s: GhostpadSignal) => void) | null>(null);
   const latestStateRef = React.useRef(state);
@@ -3656,6 +3663,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
 
     async function connect() {
+      // Backgrounded: stay disconnected. The AppState effect below flips
+      // this back and calls reconnectNowRef.current() immediately on
+      // foreground, so no retry loop is needed here.
+      if (backgroundedRef.current) return;
       const domain = process.env.EXPO_PUBLIC_DOMAIN;
       if (!domain) return;
 
@@ -3793,10 +3804,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     connect();
+    reconnectNowRef.current = connect;
 
     return () => {
       mounted = false;
       setWsConnected(false);
+      reconnectNowRef.current = null;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) {
         wsRef.current.close();
@@ -3812,12 +3825,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // silently marked "delivered" over a socket that can no longer actually
   // receive it, skipping the push-notification fallback entirely. Calling
   // .close() here fires the onclose handler above exactly as a network
-  // drop would, so the existing reconnect-on-close logic already covers
-  // resuming — nothing else needed for when the app comes back.
+  // drop would — but that handler's generic reconnect timer (5s) would
+  // otherwise reopen a fresh authenticated socket seconds later while still
+  // backgrounded, reopening the exact stale-socket window this is meant to
+  // close. backgroundedRef gates that timer off entirely while backgrounded;
+  // returning to "active" clears it and reconnects immediately here instead
+  // of waiting on the generic delay.
   useEffect(() => {
     const sub = RNAppState.addEventListener("change", (next) => {
-      if (next === "background" && wsRef.current) {
-        wsRef.current.close();
+      if (next === "background") {
+        backgroundedRef.current = true;
+        if (wsRef.current) wsRef.current.close();
+      } else if (next === "active") {
+        backgroundedRef.current = false;
+        if (!wsRef.current || wsRef.current.readyState !== 1) {
+          reconnectNowRef.current?.();
+        }
       }
     });
     return () => sub.remove();
