@@ -84,6 +84,9 @@ function ensureCallKeepSetup(): Promise<void> {
       callKeepReady = true;
     } catch (e) {
       console.warn("[Push] CallKeep setup failed:", e);
+      // Let the next call retry instead of permanently short-circuiting on
+      // this settled-but-failed promise (callKeepReady is still false).
+      callKeepSetupPromise = null;
     }
   })();
   return callKeepSetupPromise;
