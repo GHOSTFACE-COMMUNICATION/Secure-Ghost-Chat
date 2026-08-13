@@ -133,30 +133,48 @@ function getProviderToken(config: ApnsConfig): string {
   return jwt;
 }
 
+export interface VoipPushResult {
+  ok: boolean;
+  /**
+   * True when APNs reported this device token as permanently invalid
+   * (BadDeviceToken / DeviceTokenNotForTopic / Unregistered — stale after a
+   * reinstall or token rotation). The caller should clear the stored token;
+   * every other failure (missing config, connection error, transient APNs
+   * error) leaves it alone since it may still be good.
+   */
+  invalidToken?: boolean;
+}
+
+const APNS_PERMANENT_FAILURE_REASONS = new Set([
+  "BadDeviceToken",
+  "DeviceTokenNotForTopic",
+  "Unregistered",
+]);
+
 /**
  * Sends a VoIP push carrying just enough to display a CallKit incoming-call
  * screen (callId/from/callMode) — never message content, since VoIP push
  * payloads aren't part of this app's E2EE envelope at all.
  */
-export async function sendVoipPushIOS(voipToken: string, payload: Record<string, unknown>): Promise<boolean> {
+export async function sendVoipPushIOS(voipToken: string, payload: Record<string, unknown>): Promise<VoipPushResult> {
   const config = loadApnsConfig();
   if (!config) {
     logger.warn(
       "APNS_KEY_ID/APNS_TEAM_ID/APNS_AUTH_KEY not configured — VoIP push skipped, " +
         "incoming calls will not wake a killed app on iOS until these are set",
     );
-    return false;
+    return { ok: false };
   }
 
   const host = config.production ? "api.push.apple.com" : "api.sandbox.push.apple.com";
   const jwt = getProviderToken(config);
   const body = JSON.stringify(payload);
 
-  return new Promise<boolean>((resolve) => {
+  return new Promise<VoipPushResult>((resolve) => {
     const client = http2.connect(`https://${host}`);
     client.on("error", (err) => {
       logger.warn({ err }, "APNs VoIP push connection failed");
-      resolve(false);
+      resolve({ ok: false });
     });
 
     const req = client.request({
@@ -178,18 +196,26 @@ export async function sendVoipPushIOS(voipToken: string, payload: Record<string,
     });
     req.on("response", (headers) => {
       status = headers[":status"] as number;
-      if (status !== 200) {
-        logger.warn({ status, responseBody }, "APNs VoIP push rejected");
-      }
     });
     req.on("end", () => {
       client.close();
-      resolve(status === 200);
+      if (status === 200) {
+        resolve({ ok: true });
+        return;
+      }
+      logger.warn({ status, responseBody }, "APNs VoIP push rejected");
+      let reason: string | undefined;
+      try {
+        reason = (JSON.parse(responseBody || "{}") as { reason?: string }).reason;
+      } catch {
+        // Non-JSON body — leave reason undefined, treated as transient below.
+      }
+      resolve({ ok: false, invalidToken: !!reason && APNS_PERMANENT_FAILURE_REASONS.has(reason) });
     });
     req.on("error", (err) => {
       logger.warn({ err }, "APNs VoIP push request failed");
       client.close();
-      resolve(false);
+      resolve({ ok: false });
     });
 
     req.write(body);

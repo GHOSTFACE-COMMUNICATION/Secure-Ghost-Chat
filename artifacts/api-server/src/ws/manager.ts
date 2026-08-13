@@ -17,6 +17,7 @@ import {
   pushTokensForAlias,
   pushTokensForDeliveryId,
   clearExpoPushTokenForAlias,
+  clearVoipPushTokenForAlias,
   clearExpoPushTokenForDeliveryId,
 } from "../utils/delivery";
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
@@ -458,16 +459,17 @@ export function createWsServer(wss: WebSocketServer): void {
           try {
             const tokens = await pushTokensForAlias(toAlias);
             if (tokens?.voipPushToken) {
-              const sent = await sendVoipPushIOS(tokens.voipPushToken, {
+              const result = await sendVoipPushIOS(tokens.voipPushToken, {
                 callId: msg.callId,
                 from: authedAlias,
                 callMode: msg.callMode,
               });
-              if (sent) {
+              if (result.ok) {
                 logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push sent");
               } else {
                 logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push failed to send");
               }
+              if (result.invalidToken) await clearVoipPushTokenForAlias(toAlias);
             } else if (tokens?.expoPushToken) {
               const result = await sendExpoPush(
                 tokens.expoPushToken,
