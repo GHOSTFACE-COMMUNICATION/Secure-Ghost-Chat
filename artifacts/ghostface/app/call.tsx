@@ -150,6 +150,17 @@ export default function CallScreen() {
   const localStreamRef = useRef<any>(null);
   const remoteStreamRef = useRef<any>(null);
   const mountedRef     = useRef(true);
+  // WS messages are dispatched to the call-signal listener as they arrive,
+  // without waiting for a prior dispatch's async work to finish (see
+  // AppContext's ws.onmessage / handleIncomingWsMessage) — so a "call-ice"
+  // signal can reach this handler while an in-flight "call-offer"/"call-answer"
+  // invocation is still awaiting makePC()/setRemoteDescription. addIceCandidate
+  // before setRemoteDescription completes throws (or, if pcRef.current isn't
+  // even set yet, there's nothing to call it on) — either way the candidate
+  // would otherwise be silently dropped. Queue it here instead and flush once
+  // the remote description is actually in place.
+  const pendingIceCandidatesRef = useRef<string[]>([]);
+  const remoteDescSetRef = useRef(false);
   // Ref so timeout callbacks always read the latest callState without stale closure
   const callStateRef   = useRef<CallState>(isCaller ? "ringing" : "connecting");
   useEffect(() => { callStateRef.current = callState; }, [callState]);
@@ -311,6 +322,33 @@ export default function CallScreen() {
     }
   }, [isVideo]);
 
+  // Applies one ICE candidate to the peer connection. Only safe to call once
+  // remoteDescSetRef is true (see the ref's comment) — callers are
+  // responsible for that check; this only guards pcRef.current itself being
+  // gone (e.g. the call ended while a candidate was queued).
+  const applyIceCandidate = useCallback(async (payloadJson: string) => {
+    const pc = pcRef.current;
+    if (!pc) return;
+    const ICE = Platform.OS === "web" ? (window as any).RTCIceCandidate : NativeRTCIceCandidate;
+    if (!ICE) return;
+    try {
+      await pc.addIceCandidate(new ICE(JSON.parse(payloadJson)));
+    } catch (e) {
+      console.warn("[WebRTC] addIceCandidate failed:", e);
+    }
+  }, []);
+
+  // Drains candidates queued by the "call-ice" branch below while the remote
+  // description wasn't set yet. Call once right after setRemoteDescription
+  // resolves, on both the offer and answer paths.
+  const flushPendingIce = useCallback(async () => {
+    const queued = pendingIceCandidatesRef.current;
+    pendingIceCandidatesRef.current = [];
+    for (const payload of queued) {
+      await applyIceCandidate(payload);
+    }
+  }, [applyIceCandidate]);
+
   // Closes the peer connection, stops mic capture, clears the duration
   // timer, and restores the non-call audio session. No mountedRef check and
   // no state/navigation — this must also be safe to run from unmount
@@ -423,6 +461,8 @@ export default function CallScreen() {
         const SDP = Platform.OS === "web" ? (window as any).RTCSessionDescription : NativeRTCSessionDescription;
         if (SDP) {
           await pc.setRemoteDescription(new SDP(JSON.parse(signal.payload)));
+          remoteDescSetRef.current = true;
+          await flushPendingIce();
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sendCallSignal({ type: "call-answer", to: alias, callId: effectiveCallId, payload: JSON.stringify(answer) });
@@ -437,6 +477,8 @@ export default function CallScreen() {
         if (SDP) {
           try {
             await pcRef.current.setRemoteDescription(new SDP(JSON.parse(signal.payload)));
+            remoteDescSetRef.current = true;
+            await flushPendingIce();
           } catch (e) {
             console.warn("[WebRTC] setRemoteDescription:", e);
           }
@@ -445,11 +487,14 @@ export default function CallScreen() {
         return;
       }
 
-      // ── call-ice (either) ─────────────────────────────────────────────────
-      if (signal.type === "call-ice" && signal.payload && pcRef.current) {
-        const ICE = Platform.OS === "web" ? (window as any).RTCIceCandidate : NativeRTCIceCandidate;
-        if (ICE) {
-          try { await pcRef.current.addIceCandidate(new ICE(JSON.parse(signal.payload))); } catch { /* ignore malformed ICE candidate */ }
+      // ── call-ice (either) ───────────────────────────────────────────────────
+      // Queue instead of applying directly if the remote description isn't in
+      // place yet — see pendingIceCandidatesRef's comment up top for why.
+      if (signal.type === "call-ice" && signal.payload) {
+        if (remoteDescSetRef.current && pcRef.current) {
+          await applyIceCandidate(signal.payload);
+        } else {
+          pendingIceCandidatesRef.current.push(signal.payload);
         }
         return;
       }
@@ -461,7 +506,7 @@ export default function CallScreen() {
     });
 
     return () => registerCallListener(null);
-  }, [alias, effectiveCallId, isCaller, makePC, getMedia, sendCallSignal, handleEndInternal, registerCallListener]);
+  }, [alias, effectiveCallId, isCaller, makePC, getMedia, applyIceCandidate, flushPendingIce, sendCallSignal, handleEndInternal, registerCallListener]);
 
   // ── UI handlers ───────────────────────────────────────────────────────────
   const handleEnd = () => {
