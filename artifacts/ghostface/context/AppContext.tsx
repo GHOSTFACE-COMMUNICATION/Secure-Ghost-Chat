@@ -789,20 +789,28 @@ async function saveOPKStore(store: Record<string, string>): Promise<void> {
  * Signs the SPK with the ikSign private key (Signal X3DH §2.4).
  * Returns the device token and all key material or null on failure.
  */
-async function registerWithServer(
-  userId: string,
-): Promise<{
-  token:        string;
-  ikPriv:       string;
-  ikPub:        string;
-  spkPriv:      string;
-  spkPub:       string;
-  ikSignPriv:   string;
-  ikSignPub:    string;
-  spkSignature: string;
-  pqkemPriv:    string;
-  pqkemPub:     string;
-} | null> {
+type RegisterResult =
+  | {
+      ok: true;
+      token:        string;
+      ikPriv:       string;
+      ikPub:        string;
+      spkPriv:      string;
+      spkPub:       string;
+      ikSignPriv:   string;
+      ikSignPub:    string;
+      spkSignature: string;
+      pqkemPriv:    string;
+      pqkemPub:     string;
+    }
+  // conflict = alias already registered server-side (409, first-writer-wins).
+  // No token was issued and none can be — see the comment on POST
+  // /prekeys/register. Distinct from `error` so callers can tell "this
+  // alias is permanently unusable on this device" apart from "transient
+  // network/server failure, maybe retry."
+  | { ok: false; conflict: boolean };
+
+async function registerWithServer(userId: string): Promise<RegisterResult | null> {
   const apiBase = getApiBase();
   if (!apiBase) return null;
   try {
@@ -831,11 +839,12 @@ async function registerWithServer(
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: string };
       console.warn("[REGISTER] Server registration failed:", err.error ?? res.status);
-      return null;
+      return { ok: false, conflict: res.status === 409 };
     }
 
     const data = await res.json() as { token: string; userId: string };
     return {
+      ok:           true,
       token:        data.token,
       ikPriv:       ik.priv,
       ikPub:        ik.pub,
@@ -849,7 +858,7 @@ async function registerWithServer(
     };
   } catch (err) {
     console.warn("[REGISTER] Failed to register with server:", err);
-    return null;
+    return { ok: false, conflict: false };
   }
 }
 
@@ -1422,7 +1431,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               if (!token) {
                 console.warn("[AppContext] No device token on mount — re-registering", alias);
                 const reg = await registerWithServer(alias);
-                if (reg) {
+                if (reg?.ok) {
                   await secureSet(DEVICE_TOKEN_KEY, reg.token);
                   await secureSet(MY_IK_PRIV_KEY,  reg.ikPriv);
                   await secureSet(MY_IK_PUB_KEY,   reg.ikPub);
@@ -1432,6 +1441,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   await secureSet(MY_PQKEM_PUB_KEY,  reg.pqkemPub);
                   setState((prev) => ({ ...prev, deviceToken: reg.token }));
                   await generateAndUploadOPKs(alias, reg.token);
+                } else if (reg && reg.conflict) {
+                  // This device has no local device token, but the alias is
+                  // still registered server-side under someone else's token
+                  // (e.g. this install/SecureStore is not the original one).
+                  // By design (see POST /prekeys/register) there is no
+                  // reissue path — surface it instead of failing silently
+                  // forever, since this device can now never send/receive
+                  // push, upload prekeys, or rekey under this alias.
+                  console.warn(
+                    "[AppContext] Alias already registered under a different device token — " +
+                      "this device cannot recover push/session capability for it",
+                    alias,
+                  );
+                  Alert.alert(
+                    "Device not linked to this alias",
+                    "This alias is already registered on another device or install. " +
+                      "Push notifications, calls, and new messages won't work here until " +
+                      "you create a new alias.",
+                  );
                 }
                 return;
               }
@@ -1573,7 +1601,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const existing = await secureGet(DEVICE_TOKEN_KEY);
           if (!existing) {
             const reg = await registerWithServer(alias);
-            if (reg) {
+            if (reg?.ok) {
               await secureSet(DEVICE_TOKEN_KEY, reg.token);
               await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
               await secureSet(MY_IK_PUB_KEY, reg.ikPub);
@@ -1583,6 +1611,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
               setState((prev) => ({ ...prev, deviceToken: reg.token }));
               await generateAndUploadOPKs(alias, reg.token);
+            } else if (reg && reg.conflict) {
+              // Alias was taken between onboarding's availability check and
+              // this registration call (race, or a stale check). No token
+              // was issued, so this device's identity keys were never
+              // actually registered — the user is left "onboarded" but
+              // silently unable to message/call/receive push until they
+              // notice and pick a different alias.
+              console.warn(
+                "[AppContext] Alias became unavailable during registration (race) — no identity registered",
+                alias,
+              );
+              Alert.alert(
+                "Alias already taken",
+                "Someone just registered this alias. Please go back and choose a different one — " +
+                  "messaging, calls, and notifications won't work until you do.",
+              );
             }
           } else {
             // Token persisted but in-memory state was never seeded (first
@@ -3805,17 +3849,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 // Capture alias as a local const so TypeScript can narrow the type
                 // from string | null to string across the async boundary.
                 const currentAlias: string = alias;
-                await Promise.all([
-                  secureDelete(DEVICE_TOKEN_KEY),
-                  secureDelete(MY_IK_PRIV_KEY),
-                  secureDelete(MY_IK_PUB_KEY),
-                  secureDelete(MY_SPK_PRIV_KEY),
-                  secureDelete(MY_SPK_PUB_KEY),
-                  secureDelete(MY_PQKEM_PRIV_KEY),
-                  secureDelete(MY_PQKEM_PUB_KEY),
-                ]);
+                // Don't delete the old device token / private keys up front.
+                // Re-register FIRST, and only overwrite local storage once a
+                // replacement actually exists. If registration fails (409
+                // conflict, or the server/network is just down), the old
+                // keys are still what let this device decrypt any messages
+                // it already has locally — destroying them speculatively on
+                // every transient auth hiccup made that loss permanent and
+                // unrecoverable even when the failure was temporary.
                 const reg = await registerWithServer(currentAlias);
-                if (reg && mounted) {
+                if (reg?.ok && mounted) {
                   await secureSet(DEVICE_TOKEN_KEY, reg.token);
                   await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
                   await secureSet(MY_IK_PUB_KEY, reg.ikPub);
@@ -3826,8 +3869,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   await generateAndUploadOPKs(currentAlias, reg.token);
                   reconnectTimer = setTimeout(connect, 1000);
                 } else if (mounted) {
-                  // Alias taken on server (409) or server unreachable — back off
-                  console.warn("[WS] Re-registration failed — retrying in 15 s");
+                  if (reg && !reg.ok && reg.conflict) {
+                    // Alias is registered server-side under a different
+                    // device token than the one we just failed to auth
+                    // with — this device can't recover push/session
+                    // capability for it. Local keys are left untouched
+                    // (still needed to read anything already received).
+                    console.warn(
+                      "[WS] Re-registration conflict — alias is bound to a different device token",
+                      currentAlias,
+                    );
+                    Alert.alert(
+                      "Device not linked to this alias",
+                      "This alias is registered on another device or install. " +
+                        "Push notifications, calls, and new messages won't work here until " +
+                        "you create a new alias.",
+                    );
+                  } else {
+                    console.warn("[WS] Re-registration failed — retrying in 15 s");
+                  }
                   reconnectTimer = setTimeout(connect, 15_000);
                 }
               } catch {

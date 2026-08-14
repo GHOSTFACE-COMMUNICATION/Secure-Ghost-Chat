@@ -118,10 +118,16 @@ async function registerExpoPushTokenAsync(): Promise<string | null> {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
-  if (finalStatus !== "granted") return null;
+  if (finalStatus !== "granted") {
+    console.warn("[Push] Notification permission not granted — no Expo push token requested", finalStatus);
+    return null;
+  }
 
   const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-  if (!projectId) return null;
+  if (!projectId) {
+    console.warn("[Push] No EAS projectId available — cannot request Expo push token");
+    return null;
+  }
 
   const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
   return data;
