@@ -17,6 +17,7 @@ import {
   pushTokensForAlias,
   pushTokensForDeliveryId,
   clearExpoPushTokenForAlias,
+  clearVoipPushTokenForAlias,
   clearExpoPushTokenForDeliveryId,
 } from "../utils/delivery";
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
@@ -457,12 +458,24 @@ export function createWsServer(wss: WebSocketServer): void {
           // dropping the call attempt entirely.
           try {
             const tokens = await pushTokensForAlias(toAlias);
+            // Tracks whether a push actually went out — not just whether a
+            // token was on file — so a permanently-dead token (cleared
+            // below) doesn't still cost this call the full grace-period
+            // wait for a reconnect that can no longer happen.
+            let sentOk = false;
             if (tokens?.voipPushToken) {
-              await sendVoipPushIOS(tokens.voipPushToken, {
+              const result = await sendVoipPushIOS(tokens.voipPushToken, {
                 callId: msg.callId,
                 from: authedAlias,
                 callMode: msg.callMode,
               });
+              if (result.ok) {
+                sentOk = true;
+                logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push sent");
+              } else {
+                logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake VoIP push failed to send");
+              }
+              if (result.invalidToken) await clearVoipPushTokenForAlias(toAlias);
             } else if (tokens?.expoPushToken) {
               const result = await sendExpoPush(
                 tokens.expoPushToken,
@@ -470,9 +483,15 @@ export function createWsServer(wss: WebSocketServer): void {
                 { type: "incoming-call", callId: msg.callId, from: authedAlias, callMode: msg.callMode },
                 { channelId: "incoming-calls" },
               );
+              if (result.ok) {
+                sentOk = true;
+                logger.info({ alias: toAlias, callId: msg.callId }, "Call-wake Expo push sent");
+              }
               if (result.invalidToken) await clearExpoPushTokenForAlias(toAlias);
+            } else {
+              logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake push skipped — no push token on file");
             }
-            if (tokens?.voipPushToken || tokens?.expoPushToken) {
+            if (sentOk) {
               recipient = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
             }
           } catch (err) {
@@ -612,7 +631,32 @@ export function createWsServer(wss: WebSocketServer): void {
           })
           .returning();
 
+        // Computed here (rather than inside pushFallback below) so it's
+        // available for the two log lines there without a second lookup.
         const recipientAlias = await aliasForDeliveryId(toDeliveryId);
+
+        // Best-effort, same as the call-wake path above: if the push_token
+        // columns aren't migrated yet on this deployment, or the send
+        // throws for any other reason, the message stays queued for normal
+        // poll/reconnect delivery — it must not affect the ack below.
+        const pushFallback = async () => {
+          logger.debug({ msgId: stored.id }, "Message queued for offline delivery");
+          try {
+            // Generic alert text only — never the sender or message content.
+            // This server doesn't know the sender either (see comment above),
+            // and a push body is visible to Apple/Google/Expo in transit.
+            const tokens = await pushTokensForDeliveryId(toDeliveryId);
+            if (tokens?.expoPushToken) {
+              const result = await sendExpoPush(tokens.expoPushToken, "You have a new message", { type: "message" });
+              if (result.ok) logger.info({ alias: recipientAlias, msgId: stored.id }, "Message-wake push sent");
+              if (result.invalidToken) await clearExpoPushTokenForDeliveryId(toDeliveryId);
+            } else {
+              logger.warn({ alias: recipientAlias, msgId: stored.id }, "Message-wake push skipped — no Expo push token on file");
+            }
+          } catch (err) {
+            logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");
+          }
+        };
         const recipient = recipientAlias ? connectedClients.get(recipientAlias) : undefined;
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           const wire: WireMessage = {
@@ -621,30 +665,28 @@ export function createWsServer(wss: WebSocketServer): void {
             payload: msg.payload,
             x3dhHeader: msg.x3dhHeader ?? undefined,
           };
-          recipient.ws.send(JSON.stringify(wire));
-          await db
-            .update(messagesTable)
-            .set({ delivered: true })
-            .where(eq(messagesTable.id, stored.id));
-          logger.debug({ msgId: stored.id }, "Message delivered live");
-        } else {
-          logger.debug({ msgId: stored.id }, "Message queued for offline delivery");
-          // Best-effort, same as the call-wake path above: if the push_token
-          // columns aren't migrated yet on this deployment, or the send
-          // throws for any other reason, the message stays queued for normal
-          // poll/reconnect delivery — it must not affect the ack below.
-          try {
-            // Generic alert text only — never the sender or message content.
-            // This server doesn't know the sender either (see comment above),
-            // and a push body is visible to Apple/Google/Expo in transit.
-            const tokens = await pushTokensForDeliveryId(toDeliveryId);
-            if (tokens?.expoPushToken) {
-              const result = await sendExpoPush(tokens.expoPushToken, "You have a new message", { type: "message" });
-              if (result.invalidToken) await clearExpoPushTokenForDeliveryId(toDeliveryId);
-            }
-          } catch (err) {
-            logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");
+          // readyState can still read OPEN for tens of seconds after a
+          // backgrounded/closed client's socket has actually gone dead (the
+          // heartbeat only detects this every ~30-60s — see the interval
+          // above) — so a send failure here is expected, not exceptional.
+          // Confirm the write actually succeeded via ws.send's callback
+          // before treating this as delivered; on failure, fall back to
+          // push exactly as if the socket had never been open at all.
+          const sendError = await new Promise<Error | undefined>((resolve) => {
+            recipient.ws.send(JSON.stringify(wire), (err) => resolve(err));
+          });
+          if (!sendError) {
+            await db
+              .update(messagesTable)
+              .set({ delivered: true })
+              .where(eq(messagesTable.id, stored.id));
+            logger.debug({ msgId: stored.id }, "Message delivered live");
+          } else {
+            logger.debug({ msgId: stored.id, err: sendError }, "Live send failed on a stale socket — falling back to push");
+            await pushFallback();
           }
+        } else {
+          await pushFallback();
         }
 
         ws.send(JSON.stringify({ type: "ack", msgId: stored.id }));

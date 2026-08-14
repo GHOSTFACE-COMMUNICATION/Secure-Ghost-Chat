@@ -61,17 +61,35 @@ const CALLKEEP_OPTIONS = {
 };
 
 let callKeepReady = false;
+let callKeepSetupPromise: Promise<void> | null = null;
 
-/** Idempotent — safe to call every time the hook mounts. */
-function ensureCallKeepSetup(): void {
-  if (!CallKeep || callKeepReady) return;
-  try {
-    CallKeep.setup(CALLKEEP_OPTIONS);
-    CallKeep.setAvailable(true);
-    callKeepReady = true;
-  } catch (e) {
-    console.warn("[Push] CallKeep setup failed:", e);
-  }
+/**
+ * Idempotent — safe to call every time the hook mounts. Returns the
+ * in-flight/completed setup so callers that need CallKit actually ready
+ * (e.g. before displayIncomingCall) can await it instead of racing it —
+ * CallKeep.setup() is async on the native side (CXProvider configuration),
+ * and calling displayIncomingCall before it resolves can crash on iOS. This
+ * race is tightest on a cold, killed-app launch: PushKit can hand a queued
+ * VoIP payload to the "didLoadWithEvents" replay in the same tick this hook
+ * mounts, well before setup's native work would otherwise have finished.
+ */
+function ensureCallKeepSetup(): Promise<void> {
+  if (!CallKeep) return Promise.resolve();
+  if (callKeepReady) return Promise.resolve();
+  if (callKeepSetupPromise) return callKeepSetupPromise;
+  callKeepSetupPromise = (async () => {
+    try {
+      await CallKeep.setup(CALLKEEP_OPTIONS);
+      CallKeep.setAvailable(true);
+      callKeepReady = true;
+    } catch (e) {
+      console.warn("[Push] CallKeep setup failed:", e);
+      // Let the next call retry instead of permanently short-circuiting on
+      // this settled-but-failed promise (callKeepReady is still false).
+      callKeepSetupPromise = null;
+    }
+  })();
+  return callKeepSetupPromise;
 }
 
 async function ensureAndroidChannels(): Promise<void> {
@@ -214,10 +232,14 @@ export function usePushNotifications(enabled: boolean): PushTokens {
           setTokens((prev) => ({ ...prev, voipPushToken: token }));
         });
 
-        VoipPushNotification.addEventListener("notification", (payload: IncomingCallPayload) => {
+        const handleIncomingVoipPayload = async (payload: IncomingCallPayload) => {
           const callId = payload.callId ?? String(Date.now());
           pendingCalls.set(callId, payload);
           if (CallKeep) {
+            // Must not fire before CallKit's native side has finished setup
+            // (see ensureCallKeepSetup) — tightest on a cold, killed-app
+            // launch, which is exactly when this fires via didLoadWithEvents.
+            await ensureCallKeepSetup();
             CallKeep.displayIncomingCall(
               callId,
               payload.from ?? "Unknown",
@@ -226,7 +248,26 @@ export function usePushNotifications(enabled: boolean): PushTokens {
               payload.callMode === "video",
             );
           }
-        });
+        };
+
+        VoipPushNotification.addEventListener("notification", handleIncomingVoipPayload);
+
+        // On a killed-app cold launch, PushKit wakes the process before any JS
+        // listener can attach, so the native module queues the payload instead
+        // of firing "notification" — then replays the whole queue exactly once,
+        // as a single "didLoadWithEvents" event, once a listener exists. Without
+        // this, a killed-app incoming call is delivered to APNs (200 OK) but
+        // never reaches CallKit — this is that replay path.
+        VoipPushNotification.addEventListener(
+          "didLoadWithEvents",
+          (events: Array<{ name: string; data: IncomingCallPayload }>) => {
+            for (const event of events ?? []) {
+              if (event.name === VoipPushNotification.RNVoipPushRemoteNotificationReceivedEvent) {
+                handleIncomingVoipPayload(event.data);
+              }
+            }
+          },
+        );
       } catch (e) {
         console.warn("[Push] VoIP push registration failed:", e);
       }
@@ -254,6 +295,7 @@ export function usePushNotifications(enabled: boolean): PushTokens {
         try {
           VoipPushNotification.removeEventListener("register");
           VoipPushNotification.removeEventListener("notification");
+          VoipPushNotification.removeEventListener("didLoadWithEvents");
         } catch {
           // best-effort cleanup only
         }

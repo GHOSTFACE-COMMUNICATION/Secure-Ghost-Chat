@@ -84,3 +84,12 @@ export async function clearExpoPushTokenForDeliveryId(deliveryId: string): Promi
     .set({ expoPushToken: null })
     .where(eq(identityKeysTable.deliveryId, deliveryId));
 }
+
+/**
+ * Clears a dead VoIP (PushKit) token — APNs reported it permanently invalid
+ * (BadDeviceToken/Unregistered) — so we stop wasting an APNs round-trip plus
+ * the full call-wake grace window on every future call to this user.
+ */
+export async function clearVoipPushTokenForAlias(userId: string): Promise<void> {
+  await db.update(identityKeysTable).set({ voipPushToken: null }).where(eq(identityKeysTable.userId, userId));
+}

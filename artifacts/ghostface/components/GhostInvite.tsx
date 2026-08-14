@@ -17,6 +17,7 @@ import { useColors } from "@/hooks/useColors";
 import { QRScanner, encodeContactQR, encodeInviteQR } from "@/components/QRScanner";
 import { GoldGradient } from "@/components/GoldGradient";
 import { CODE_REGEX, type RedeemFailReason, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
+import { getApiBase } from "@/lib/apiBase";
 
 const TIMER_OPTIONS = [
   { label: "10 MIN", ms: 10 * 60 * 1000 },
@@ -24,15 +25,6 @@ const TIMER_OPTIONS = [
   { label: "24 HR",  ms: 24 * 60 * 60 * 1000 },
   { label: "7 DAY",  ms: 7 * 24 * 60 * 60 * 1000 },
 ];
-
-function getApiBase(): string {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (!domain) {
-    if (__DEV__) console.error("[ghostface] EXPO_PUBLIC_DOMAIN is not set — invite API calls will be skipped. Set it in .env or eas.json.");
-    return "";
-  }
-  return `https://${domain}/api`;
-}
 
 function genCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

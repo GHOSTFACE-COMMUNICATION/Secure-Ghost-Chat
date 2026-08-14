@@ -71,7 +71,12 @@
         }
       ],
       "expo-web-browser",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
       [
         "expo-camera",
         {
@@ -99,8 +104,7 @@
       ],
       "@config-plugins/react-native-webrtc",
       "./plugins/withAdiRegistration",
-      "./plugins/withVoipPushKit",
-      "expo-asset"
+      "./plugins/withVoipPushKit"
     ],
     "experiments": {
       "typedRoutes": true,

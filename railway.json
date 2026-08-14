@@ -2,7 +2,16 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "pnpm --filter @workspace/api-server run build"
+    "buildCommand": "pnpm --filter @workspace/api-server run build",
+    "watchPatterns": [
+      "artifacts/api-server/**",
+      "lib/db/**",
+      "lib/api-zod/**",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "railway.json"
+    ]
   },
   "deploy": {
     "startCommand": "node --enable-source-maps artifacts/api-server/dist/index.mjs",
