@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Platform,
@@ -57,22 +57,6 @@ if (Platform.OS === "ios") {
     console.warn("[WebRTC] react-native-callkeep not available:", e);
   }
 }
-
-type VoicePreset = {
-  id: string;
-  label: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  description: string;
-};
-
-const VOICE_PRESETS: VoicePreset[] = [
-  { id: "natural",  label: "NATURAL",   icon: "person-outline",        description: "Original voice" },
-  { id: "robot",    label: "ROBOT",     icon: "hardware-chip-outline",  description: "Metallic tone" },
-  { id: "deep",     label: "DEEP",      icon: "arrow-down-outline",     description: "Low frequency" },
-  { id: "ghost",    label: "GHOST",     icon: "skull-outline",          description: "Ethereal echo" },
-  { id: "alien",    label: "ALIEN",     icon: "planet-outline",         description: "Warped signal" },
-  { id: "high",     label: "HIGH",      icon: "arrow-up-outline",       description: "High pitched" },
-];
 
 type IceServer = { urls: string | string[]; username?: string; credential?: string };
 type IceConfig = { iceServers: IceServer[] };
@@ -154,8 +138,6 @@ export default function CallScreen() {
   const [duration, setDuration]       = useState(0);
   const [muted, setMuted]             = useState(false);
   const [speakerOn, setSpeakerOn]     = useState(false);
-  const [showVoiceChanger, setShowVoiceChanger] = useState(false);
-  const [activeVoice, setActiveVoice] = useState("natural");
   const [statusNote, setStatusNote]   = useState("");
   // Mirrors localStreamRef/remoteStreamRef in state so video views re-render
   // when a stream becomes available — refs alone don't trigger that.
@@ -163,7 +145,6 @@ export default function CallScreen() {
   const [remoteStream, setRemoteStream] = useState<any>(null);
 
   const pulseAnim      = useRef(new Animated.Value(1)).current;
-  const voiceSlideAnim = useRef(new Animated.Value(0)).current;
   const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
   const pcRef          = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
@@ -489,12 +470,6 @@ export default function CallScreen() {
     handleEndInternal();
   };
 
-  const toggleVoiceChanger = () => {
-    setShowVoiceChanger((v) => !v);
-    Animated.spring(voiceSlideAnim, { toValue: showVoiceChanger ? 0 : 1, useNativeDriver: true, tension: 80, friction: 12 }).start();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
   const toggleMute = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setMuted((m) => {
@@ -514,8 +489,6 @@ export default function CallScreen() {
   };
 
   const displayAlias = alias ?? "UNKNOWN";
-  const activePreset  = VOICE_PRESETS.find((p) => p.id === activeVoice)!;
-  const voiceActive   = activeVoice !== "natural";
 
   const hasLocalVideoTrack  = !!localStream?.getVideoTracks?.().length;
   const hasRemoteVideoTrack = !!remoteStream?.getVideoTracks?.().length;
@@ -566,30 +539,7 @@ export default function CallScreen() {
     encRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6 },
     encText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
     noteText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1, textAlign: "center" as const, maxWidth: 240 },
-    voiceActiveRow: {
-      flexDirection: "row" as const, alignItems: "center" as const, gap: 6,
-      backgroundColor: `${colors.primary}20`, borderRadius: 20,
-      paddingHorizontal: 12, paddingVertical: 4,
-    },
-    voiceActiveText: { color: colors.primary, fontSize: 10, letterSpacing: 2, fontWeight: "700" as const },
     bottomSection: { gap: 16 },
-    vcPanel: {
-      marginHorizontal: 16, backgroundColor: colors.card,
-      borderRadius: colors.radius, borderWidth: 1,
-      borderColor: voiceActive ? colors.primary : colors.border, overflow: "hidden",
-    },
-    vcHeader: {
-      flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between",
-      paddingHorizontal: 16, paddingVertical: 12,
-      borderBottomWidth: showVoiceChanger ? 1 : 0, borderBottomColor: colors.border,
-    },
-    vcHeaderLeft: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-    vcHeaderTitle: { color: voiceActive ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "700" as const, letterSpacing: 3 },
-    vcHeaderSub: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
-    vcGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, padding: 12, gap: 8 },
-    vcPreset: { flex: 1, minWidth: 80, alignItems: "center" as const, paddingVertical: 12, borderRadius: colors.radius, borderWidth: 1.5, gap: 4 },
-    vcLabel: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 },
-    vcDesc: { fontSize: 8, letterSpacing: 0.5 },
     controls: { flexDirection: "row" as const, gap: 20, alignItems: "center" as const, justifyContent: "center" as const },
     ctrlItem: { alignItems: "center" as const },
     ctrlBtn: {
@@ -598,10 +548,6 @@ export default function CallScreen() {
       alignItems: "center" as const, justifyContent: "center" as const,
     },
     ctrlBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-    ctrlBtnVoice: {
-      backgroundColor: voiceActive ? `${colors.primary}25` : colors.card,
-      borderColor: voiceActive ? colors.primary : colors.border,
-    },
     endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.destructive, alignItems: "center" as const, justifyContent: "center" as const },
     modeLabel: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 4, textAlign: "center" as const },
     webrtcBadge: {
@@ -678,48 +624,9 @@ export default function CallScreen() {
         {statusNote !== "" && (
           <Text style={styles.noteText}>{statusNote}</Text>
         )}
-
-        {voiceActive && (
-          <View style={styles.voiceActiveRow}>
-            <Ionicons name="mic" size={10} color={colors.primary} />
-            <Text style={styles.voiceActiveText}>VOICE: {activePreset.label}</Text>
-          </View>
-        )}
       </View>
 
       <View style={styles.bottomSection}>
-        {/* Voice changer panel */}
-        <Pressable style={styles.vcPanel} onPress={toggleVoiceChanger}>
-          <View style={styles.vcHeader}>
-            <View style={styles.vcHeaderLeft}>
-              <Ionicons name="mic-outline" size={18} color={voiceActive ? colors.primary : colors.mutedForeground} />
-              <View>
-                <Text style={styles.vcHeaderTitle}>VOICE CHANGER {voiceActive ? `· ${activePreset.label}` : ""}</Text>
-                <Text style={styles.vcHeaderSub}>{voiceActive ? activePreset.description.toUpperCase() : "TAP TO CONFIGURE"}</Text>
-              </View>
-            </View>
-            <Ionicons name={showVoiceChanger ? "chevron-down" : "chevron-up"} size={16} color={colors.mutedForeground} />
-          </View>
-          {showVoiceChanger && (
-            <View style={styles.vcGrid}>
-              {VOICE_PRESETS.map((preset) => {
-                const active = activeVoice === preset.id;
-                return (
-                  <Pressable
-                    key={preset.id}
-                    style={[styles.vcPreset, { backgroundColor: active ? `${colors.primary}20` : "transparent", borderColor: active ? colors.primary : colors.border }]}
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveVoice(preset.id); }}
-                  >
-                    <Ionicons name={preset.icon} size={20} color={active ? colors.primary : colors.mutedForeground} />
-                    <Text style={[styles.vcLabel, { color: active ? colors.primary : colors.foreground }]}>{preset.label}</Text>
-                    <Text style={[styles.vcDesc, { color: colors.mutedForeground }]}>{preset.description}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </Pressable>
-
         {/* Call controls */}
         <View style={styles.controls}>
           <View style={styles.ctrlItem}>
@@ -727,13 +634,6 @@ export default function CallScreen() {
               <Ionicons name={muted ? "mic-off" : "mic"} size={22} color={muted ? colors.primaryForeground : colors.foreground} />
             </Pressable>
             <Text style={styles.modeLabel}>{muted ? "UNMUTE" : "MUTE"}</Text>
-          </View>
-
-          <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, styles.ctrlBtnVoice]} onPress={toggleVoiceChanger}>
-              <Ionicons name="mic-circle-outline" size={22} color={voiceActive ? colors.primary : colors.foreground} />
-            </Pressable>
-            <Text style={[styles.modeLabel, voiceActive && { color: colors.primary }]}>VOICE FX</Text>
           </View>
 
           <View style={styles.ctrlItem}>
