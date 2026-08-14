@@ -1598,61 +1598,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false }));
       (async () => {
         try {
-          const existing = await secureGet(DEVICE_TOKEN_KEY);
-          if (!existing) {
-            const reg = await registerWithServer(alias);
-            if (reg?.ok) {
-              await secureSet(DEVICE_TOKEN_KEY, reg.token);
-              await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
-              await secureSet(MY_IK_PUB_KEY, reg.ikPub);
-              await secureSet(MY_SPK_PRIV_KEY, reg.spkPriv);
-              await secureSet(MY_SPK_PUB_KEY, reg.spkPub);
-              await secureSet(MY_PQKEM_PRIV_KEY, reg.pqkemPriv);
-              await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
-              setState((prev) => ({ ...prev, deviceToken: reg.token }));
-              await generateAndUploadOPKs(alias, reg.token);
-            } else if (reg && reg.conflict) {
-              // Alias was taken between onboarding's availability check and
-              // this registration call (race, or a stale check). No token
-              // was issued, so this device's identity keys were never
-              // actually registered — the user is left "onboarded" but
-              // silently unable to message/call/receive push until they
-              // notice and pick a different alias.
-              console.warn(
-                "[AppContext] Alias became unavailable during registration (race) — no identity registered",
-                alias,
-              );
-              Alert.alert(
-                "Alias already taken",
-                "Someone just registered this alias. Please go back and choose a different one — " +
-                  "messaging, calls, and notifications won't work until you do.",
-              );
-            }
-          } else {
-            // Token persisted but in-memory state was never seeded (first
-            // run after onboarding). Hydrate it so screens that need the
-            // bearer token (e.g. GHOST NUMBER) work without a reload.
-            setState((prev) => (prev.deviceToken ? prev : { ...prev, deviceToken: existing }));
-            // Token present — check that own private keys are also stored.
-            // If they're missing (e.g. SecureStore was cleared after a
-            // previous registration), rotate keys on the server so this
-            // device can resume real X3DH sessions.
-            const ikPriv = await secureGet(MY_IK_PRIV_KEY);
-            const pqPriv = await secureGet(MY_PQKEM_PRIV_KEY);
-            if (!ikPriv || !pqPriv) {
-              console.warn("[AppContext] Device token found but own IK/ML-KEM key missing — rekeying");
-              const rekey = await rekeyWithServer(alias, existing);
-              if (rekey) {
-                await secureSet(MY_IK_PRIV_KEY, rekey.ikPriv);
-                await secureSet(MY_IK_PUB_KEY, rekey.ikPub);
-                await secureSet(MY_SPK_PRIV_KEY, rekey.spkPriv);
-                await secureSet(MY_SPK_PUB_KEY, rekey.spkPub);
-                await secureSet(MY_PQKEM_PRIV_KEY, rekey.pqkemPriv);
-                await secureSet(MY_PQKEM_PUB_KEY, rekey.pqkemPub);
-                await generateAndUploadOPKs(alias, existing);
-              }
-            }
-            await generateAndUploadOPKs(alias, existing);
+          // SecureStore is Keychain-backed on iOS, which survives app
+          // deletion/reinstall — unlike the AsyncStorage "alias"/"isOnboarded"
+          // flags checked above, which get wiped on uninstall. So a device
+          // that self-destructed via reinstall (rather than in-app panicWipe,
+          // which does clear these) comes back here as a "fresh" onboarding
+          // with a brand-new alias, but with the PREVIOUS alias's device
+          // token and identity keys still sitting in Keychain. Left
+          // unchecked, the `existing` check below finds that stale token,
+          // treats this device as already registered, and never calls
+          // registerWithServer for the new alias at all — this device
+          // silently stays bound to the old alias forever. Any SecureStore
+          // identity data at the moment a NEW alias is being set necessarily
+          // belongs to a different identity, so always start clean here.
+          await Promise.all([
+            secureDelete(DEVICE_TOKEN_KEY),
+            secureDelete(MY_IK_PRIV_KEY),
+            secureDelete(MY_IK_PUB_KEY),
+            secureDelete(MY_SPK_PRIV_KEY),
+            secureDelete(MY_SPK_PUB_KEY),
+            secureDelete(MY_PQKEM_PRIV_KEY),
+            secureDelete(MY_PQKEM_PUB_KEY),
+          ]);
+          const reg = await registerWithServer(alias);
+          if (reg?.ok) {
+            await secureSet(DEVICE_TOKEN_KEY, reg.token);
+            await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
+            await secureSet(MY_IK_PUB_KEY, reg.ikPub);
+            await secureSet(MY_SPK_PRIV_KEY, reg.spkPriv);
+            await secureSet(MY_SPK_PUB_KEY, reg.spkPub);
+            await secureSet(MY_PQKEM_PRIV_KEY, reg.pqkemPriv);
+            await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
+            setState((prev) => ({ ...prev, deviceToken: reg.token }));
+            await generateAndUploadOPKs(alias, reg.token);
+          } else if (reg && reg.conflict) {
+            // Alias was taken between onboarding's availability check and
+            // this registration call (race, or a stale check). No token
+            // was issued, so this device's identity keys were never
+            // actually registered — the user is left "onboarded" but
+            // silently unable to message/call/receive push until they
+            // notice and pick a different alias.
+            console.warn(
+              "[AppContext] Alias became unavailable during registration (race) — no identity registered",
+              alias,
+            );
+            Alert.alert(
+              "Alias already taken",
+              "Someone just registered this alias. Please go back and choose a different one — " +
+                "messaging, calls, and notifications won't work until you do.",
+            );
           }
         } catch (e) {
           console.warn("[AppContext] Background registration failed:", e);
