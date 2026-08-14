@@ -39,6 +39,25 @@ if (Platform.OS !== "web") {
   }
 }
 
+// CallKeep — iOS only needs this here. A callee answering via CallKit's
+// native UI (see usePushNotifications.ts's "answerCall" listener) has its
+// AVAudioSession owned by CallKit: react-native-webrtc's audio stays silent
+// (ICE/DTLS/SRTP connect and negotiate fine — only audio in/out is affected)
+// until CallKit is explicitly told the call is actually live via
+// setCurrentCallActive. Without that call, iOS never activates the session
+// and "didActivateAudioSession" (which is what wires RTCAudioSession up —
+// see usePushNotifications.ts) never fires. The caller side never goes
+// through CallKit in this app (no CallKeep.startCall anywhere), so it isn't
+// affected — this only matters for the callee.
+let CallKeep: any = null;
+if (Platform.OS === "ios") {
+  try {
+    CallKeep = require("react-native-callkeep").default;
+  } catch (e) {
+    console.warn("[WebRTC] react-native-callkeep not available:", e);
+  }
+}
+
 type VoicePreset = {
   id: string;
   label: string;
@@ -265,12 +284,20 @@ export default function CallScreen() {
     pc.onconnectionstatechange = () => {
       if (!mountedRef.current) return;
       const s = pc.connectionState;
-      if (s === "connected")                       setCallState("active");
+      if (s === "connected") {
+        setCallState("active");
+        // Tell CallKit the call is actually live now — see the CallKeep
+        // comment near the top of this file for why this is required for
+        // audio to work at all on the CallKit-answered (callee) side.
+        if (!isCaller && CallKeep) {
+          try { CallKeep.setCurrentCallActive(effectiveCallId); } catch (e) { console.warn("[CallKit] setCurrentCallActive failed:", e); }
+        }
+      }
       if (s === "disconnected" || s === "failed")  handleEndInternal();
     };
 
     return pc;
-  }, [alias, effectiveCallId, sendCallSignal, isVideo]);
+  }, [alias, effectiveCallId, sendCallSignal, isVideo, isCaller]);
 
   const getMedia = useCallback(async (pc: any) => {
     if (!pc) return;
