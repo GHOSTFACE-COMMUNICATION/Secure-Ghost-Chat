@@ -170,8 +170,18 @@ function PrivacySnapshotCover() {
 
 // ── Root navigator ────────────────────────────────────────────────────────────
 function RootNavigator() {
-  const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall, decoyMode, alias, deviceToken } =
-    useApp();
+  const {
+    isOnboarded,
+    isLocked,
+    loaded,
+    setLocked,
+    autoLockTimeout,
+    incomingCall,
+    decoyMode,
+    alias,
+    deviceToken,
+    forceReconnect,
+  } = useApp();
   const appState = useRef(AppState.currentState);
   const backgroundedAtRef = useRef<number | null>(null);
   const [privacyCoverVisible, setPrivacyCoverVisible] = useState(false);
@@ -187,7 +197,7 @@ function RootNavigator() {
   // wake for exactly the state the app spends most of its time in. The
   // tokens themselves aren't sent anywhere by the hook; the effect below
   // POSTs them to the server whenever they change.
-  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded);
+  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded, forceReconnect);
 
   useEffect(() => {
     if (!alias || !deviceToken) return;

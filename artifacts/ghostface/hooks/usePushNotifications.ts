@@ -170,7 +170,7 @@ function navigateToCall(callId: string, payload: IncomingCallPayload): void {
  * dev-client/EAS build) — they no-op silently in Expo Go or a build that
  * doesn't include them.
  */
-export function usePushNotifications(enabled: boolean): PushTokens {
+export function usePushNotifications(enabled: boolean, onForceReconnect?: () => void): PushTokens {
   const [tokens, setTokens] = useState<PushTokens>({ expoPushToken: null, voipPushToken: null });
 
   useEffect(() => {
@@ -197,6 +197,12 @@ export function usePushNotifications(enabled: boolean): PushTokens {
     if (CallKeep) {
       try {
         CallKeep.addEventListener("answerCall", ({ callUUID }: { callUUID: string }) => {
+          // Answering via CallKit's native UI can happen before RN's JS side
+          // has observed an AppState "active" transition (e.g. answering
+          // from the lock screen on a killed/backgrounded app) — force the
+          // WS reconnect now instead of waiting on that listener, or the
+          // offer/answer/ICE exchange in call.tsx races a closed socket.
+          onForceReconnect?.();
           const payload = pendingCalls.get(callUUID);
           pendingCalls.delete(callUUID);
           navigateToCall(callUUID, payload ?? {});
@@ -301,7 +307,7 @@ export function usePushNotifications(enabled: boolean): PushTokens {
         }
       }
     };
-  }, [enabled]);
+  }, [enabled, onForceReconnect]);
 
   return tokens;
 }

@@ -641,6 +641,13 @@ interface AppContextType extends AppState {
   refreshEntitlement: () => Promise<void>;
   sendCallSignal: (msg: object) => void;
   registerCallListener: (fn: ((s: CallSignal) => void) | null) => void;
+  /**
+   * Forces an immediate WS reconnect attempt, bypassing the backgrounded
+   * gate and any pending reconnect backoff. Used by the CallKeep "answerCall"
+   * path so a call answered before the AppState "active" transition has
+   * fired doesn't sit on a closed socket for the rest of that transition.
+   */
+  forceReconnect: () => void;
   sendGhostpadSignal: (msg: object) => void;
   registerGhostpadListener: (fn: ((s: GhostpadSignal) => void) | null) => void;
   setGhostpadMode: (mode: GhostpadSession["mode"]) => void;
@@ -1501,6 +1508,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // immediate reconnect the moment the app returns to foreground.
   const backgroundedRef = React.useRef(false);
   const reconnectNowRef = React.useRef<(() => void) | null>(null);
+  // Short-lived buffer for call-signal sends (offer/answer/ICE/hangup) made
+  // while the WS is closed, e.g. mid-reconnect after backgrounding. Flushed
+  // on the next successful open; entries older than CALL_SIGNAL_QUEUE_TTL_MS
+  // are dropped there since a stale ICE candidate is worse than a lost one.
+  const pendingCallSignalsRef = React.useRef<Array<{ msg: object; queuedAt: number }>>([]);
   const callSignalListenerRef = React.useRef<((s: CallSignal) => void) | null>(null);
   const ghostpadListenerRef = React.useRef<((s: GhostpadSignal) => void) | null>(null);
   const latestStateRef = React.useRef(state);
@@ -2790,6 +2802,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify(msg));
+    } else {
+      pendingCallSignalsRef.current.push({ msg, queuedAt: Date.now() });
+      console.warn(
+        `[CallSignal] WS not open (readyState=${ws?.readyState ?? "none"}) — queued signal:`,
+        msg,
+      );
+    }
+  }, []);
+
+  // Signals queued by sendCallSignal while the WS was closed. Must be
+  // flushed only once the server has actually ack'd auth (see the "ack"
+  // branch in handleIncomingWsMessage below) — api-server's ws/manager.ts
+  // awaits validateToken() before setting authedAlias, so anything sent
+  // right after ws.onopen can still race that await and get rejected
+  // server-side with "not authenticated", silently dropped rather than
+  // relayed. Flushing on the ack means the socket is provably authed first.
+  const CALL_SIGNAL_QUEUE_TTL_MS = 15_000;
+  const flushPendingCallSignals = useCallback(() => {
+    const ws = wsRef.current;
+    const queued = pendingCallSignalsRef.current;
+    pendingCallSignalsRef.current = [];
+    const now = Date.now();
+    for (const { msg, queuedAt } of queued) {
+      const age = now - queuedAt;
+      if (age > CALL_SIGNAL_QUEUE_TTL_MS) {
+        console.warn(`[CallSignal] Dropping stale queued signal (${age}ms old):`, msg);
+        continue;
+      }
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify(msg));
+      } else {
+        console.warn("[CallSignal] Dropping queued signal — socket not open at flush time:", msg);
+      }
     }
   }, []);
 
@@ -3175,6 +3220,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       linkStatsRef.current.reconnectingSince = 0;
       recomputeLinkQuality();
       drainOutbox().catch(console.error);
+      flushPendingCallSignals();
       return;
     }
 
@@ -3643,7 +3689,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, conversations: updated };
       });
     }
-  }, [persistConversations, drainOutbox]);
+  }, [persistConversations, drainOutbox, flushPendingCallSignals]);
 
   useEffect(() => {
     const alias = state.alias;
@@ -3818,6 +3864,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state.alias, state.isLocked, state.isOnboarded, handleIncomingWsMessage]);
 
+  // Shared by the AppState "active" transition below and by the CallKeep
+  // "answerCall" path (wired through usePushNotifications -> RootNavigator,
+  // since backgroundedRef/reconnectNowRef aren't otherwise reachable outside
+  // this provider). Answering a call via CallKit can happen before RN's JS
+  // side has observed the "active" transition, so that path needs to force
+  // this synchronously instead of waiting on the AppState listener.
+  const forceReconnect = useCallback(() => {
+    backgroundedRef.current = false;
+    if (!wsRef.current || wsRef.current.readyState !== 1) {
+      reconnectNowRef.current?.();
+    }
+  }, []);
+
   // Close the WS explicitly the moment the app backgrounds. Without this,
   // backgrounding/closing the app never sends a clean close frame — the
   // server has to wait out its own ~30-60s heartbeat timeout to notice the
@@ -3837,14 +3896,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         backgroundedRef.current = true;
         if (wsRef.current) wsRef.current.close();
       } else if (next === "active") {
-        backgroundedRef.current = false;
-        if (!wsRef.current || wsRef.current.readyState !== 1) {
-          reconnectNowRef.current?.();
-        }
+        forceReconnect();
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [forceReconnect]);
 
   return (
     <AppContext.Provider
@@ -3887,6 +3943,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         verifyConversation,
         sendCallSignal,
         registerCallListener,
+        forceReconnect,
         sendGhostpadSignal,
         registerGhostpadListener,
         presence,
