@@ -1,3 +1,4 @@
+import { createHmac } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { logger } from "../lib/logger";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
@@ -12,7 +13,7 @@ type IceServer = {
 
 type IceConfigResponse = {
   iceServers: IceServer[];
-  source: "twilio" | "static" | "stun-only";
+  source: "twilio" | "static" | "openrelay";
   ttl: number;
 };
 
@@ -22,7 +23,6 @@ const STUN_SERVERS: IceServer[] = [
 ];
 
 const REFRESH_SKEW_MS = 60_000;
-const STUN_FALLBACK_TTL_SECONDS = 300;
 const TWILIO_FETCH_TIMEOUT_MS = 4_000;
 
 type CachedConfig = { body: IceConfigResponse; expiresAt: number };
@@ -55,6 +55,35 @@ function staticConfigFromEnv(): IceConfigResponse | null {
     iceServers: [...STUN_SERVERS, turnEntry],
     source: "static",
     ttl: 3600,
+  };
+}
+
+// Metered's Open Relay project — a free, public, shared TURN relay. No
+// signup/API key needed: credentials are generated locally via the standard
+// TURN REST API static-auth-secret scheme (RFC draft-uberti-behave-turn-rest;
+// this is the same mechanism coturn's use-auth-secret implements, and what
+// Metered's docs say Nextcloud Talk uses against this exact relay). Kept
+// below Twilio and any self-hosted TURN_URLS in the fallback chain — it's a
+// shared public resource with no capacity/reliability guarantee, meant as a
+// stopgap so calls behind strict NAT aren't stuck on STUN-only.
+const OPENRELAY_HOST = "staticauth.openrelay.metered.ca";
+const OPENRELAY_SECRET = "openrelayprojectsecret";
+const OPENRELAY_TTL_SECONDS = 3600;
+
+function openRelayConfig(): IceConfigResponse {
+  const username = String(Math.floor(Date.now() / 1000) + OPENRELAY_TTL_SECONDS);
+  const credential = createHmac("sha1", OPENRELAY_SECRET).update(username).digest("base64");
+
+  const turnEntries: IceServer[] = [
+    { urls: `turn:${OPENRELAY_HOST}:80`, username, credential },
+    { urls: `turn:${OPENRELAY_HOST}:443`, username, credential },
+    { urls: `turns:${OPENRELAY_HOST}:443?transport=tcp`, username, credential },
+  ];
+
+  return {
+    iceServers: [...STUN_SERVERS, ...turnEntries],
+    source: "openrelay",
+    ttl: OPENRELAY_TTL_SECONDS,
   };
 }
 
@@ -118,8 +147,8 @@ router.get("/ice-config", async (req: Request, res: Response) => {
 
   const now = Date.now();
   // Serve from cache until we're inside the refresh skew window. This applies
-  // to every source — including the STUN fallback — so we don't recompute on
-  // every request.
+  // to every source — including the Open Relay fallback — so we don't
+  // recompute on every request.
   if (cached && now < cached.expiresAt - REFRESH_SKEW_MS) {
     res.json(cached.body);
     return;
@@ -143,16 +172,12 @@ router.get("/ice-config", async (req: Request, res: Response) => {
     return;
   }
 
-  const fallback: IceConfigResponse = {
-    iceServers: STUN_SERVERS,
-    source: "stun-only",
-    ttl: STUN_FALLBACK_TTL_SECONDS,
-  };
-  cached = { body: fallback, expiresAt: now + STUN_FALLBACK_TTL_SECONDS * 1000 };
+  const fromOpenRelay = openRelayConfig();
+  cached = { body: fromOpenRelay, expiresAt: now + fromOpenRelay.ttl * 1000 };
   logger.warn(
-    "No TURN credentials configured (set TWILIO_* or TURN_URLS); calls behind strict NAT may fail.",
+    "No TWILIO_*/TURN_URLS configured — falling back to Metered's public Open Relay TURN.",
   );
-  res.json(fallback);
+  res.json(fromOpenRelay);
 });
 
 export default router;
