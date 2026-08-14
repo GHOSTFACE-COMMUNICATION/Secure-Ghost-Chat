@@ -30,9 +30,10 @@ let cached: CachedConfig | null = null;
 
 // Per-IP rate limit. TURN credentials are real money (Twilio NTS) and even
 // though we cache them, leaking a fresh token lets a stranger relay media
-// through our account. 60 requests / hour / IP comfortably covers normal
-// call usage while bounding scraping.
-const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 60 });
+// through our account. 600 requests / hour / IP covers normal call usage
+// (including client reconnect/retry bursts around CallKit answer/WS
+// re-auth) while still bounding scraping.
+const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 600 });
 
 function staticConfigFromEnv(): IceConfigResponse | null {
   const urlsRaw = process.env.TURN_URLS?.trim();
