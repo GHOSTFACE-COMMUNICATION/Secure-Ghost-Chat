@@ -913,6 +913,35 @@ async function rekeyWithServer(
 }
 
 /**
+ * Releases this device's server-side registration for userId — called from
+ * panicWipe before it wipes the local device token, since that token is the
+ * only proof of ownership the server accepts (no reissue path otherwise; see
+ * DELETE /prekeys/:userId). Best-effort and silent by design: self-destruct
+ * must still fully wipe local state even if this fails (offline, server
+ * down, timeout) — a failed unregister just means the alias stays claimed
+ * server-side until someone can reach the server, it never blocks the wipe.
+ */
+async function unregisterFromServer(userId: string, token: string): Promise<void> {
+  const apiBase = getApiBase();
+  if (!apiBase) return;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(`${apiBase}/prekeys/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) {
+      console.warn("[UNREGISTER] Server unregister failed:", res.status);
+    }
+  } catch (e) {
+    console.warn("[UNREGISTER] Failed:", e);
+  }
+}
+
+/**
  * Generate a batch of OPKs, save private keys locally, and upload public keys
  * to the server with device-token authentication.
  */
@@ -2764,6 +2793,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await handoffSmsFallback(snapshotNumbers, snapshotMessage);
       } catch (err) {
         console.warn("[AppContext] SMS fallback handoff failed:", err);
+      }
+    }
+
+    // Release the alias server-side while we still hold a valid device
+    // token to prove ownership — this must happen before the SecureStore
+    // wipe below deletes that token. See unregisterFromServer for why:
+    // without this, re-registering the same alias after self-destructing
+    // always 409s, since the server otherwise has no way to reissue it.
+    {
+      const currentAlias = latestStateRef.current.alias;
+      const currentToken = await secureGet(DEVICE_TOKEN_KEY);
+      if (currentAlias && currentToken) {
+        await unregisterFromServer(currentAlias, currentToken);
       }
     }
 

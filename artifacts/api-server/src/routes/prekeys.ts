@@ -311,6 +311,34 @@ router.post(
   },
 );
 
+// ── DELETE /api/prekeys/:userId — release this device's registration ──────────
+// Called by the client during self-destruct (panicWipe), before it clears its
+// own local device token — that's the last moment the app can still prove
+// ownership of the alias. Without this, panicWipe only ever cleared local
+// state: the server-side registration survived, and re-registering the same
+// alias afterward always 409'd (no reissue path, by design — see
+// /prekeys/register above) since the server had no way to tell "the true
+// owner released this" apart from "an attacker is trying to steal it." A
+// valid bearer token for userId IS that proof.
+// Requires: Authorization: Bearer <device-token>
+router.delete(
+  "/prekeys/:userId",
+  (req, res, next) => requireDeviceAuth(req, res, next),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.params["userId"] as string;
+      await db.transaction(async (tx) => {
+        await tx.delete(prekeysTable).where(eq(prekeysTable.userId, userId));
+        await tx.delete(deviceTokensTable).where(eq(deviceTokensTable.userId, userId));
+        await tx.delete(identityKeysTable).where(eq(identityKeysTable.userId, userId));
+      });
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ error: toErrorMessage(err) });
+    }
+  },
+);
+
 // ── GET /api/prekeys/:userId/bundle — fetch a full prekey bundle ──────────────
 //
 // Returns a complete X3DH prekey bundle for initiating a session with userId:
