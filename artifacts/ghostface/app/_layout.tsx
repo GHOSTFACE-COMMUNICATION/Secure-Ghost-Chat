@@ -204,10 +204,23 @@ function RootNavigator() {
     if (!expoPushToken && !voipPushToken) return;
     const apiBase = getApiBase();
     if (!apiBase) return;
+    // expoPushToken and voipPushToken resolve independently (separate async
+    // registrations) and this effect re-fires on either one changing — so it
+    // commonly runs once with only one of the two populated. The server
+    // treats an explicit `null` as "clear this field" (vs. `undefined` =
+    // "leave unchanged"), and JSON.stringify keeps `null` keys but drops
+    // `undefined` ones. Sending the still-null token verbatim used to wipe
+    // out whatever was already stored for it server-side — e.g. a fast
+    // VoIP-token registration would clear a previously-registered
+    // expoPushToken, silently killing new-message push wake. Only include a
+    // token in the body once it's actually known.
+    const body: { expoPushToken?: string; voipPushToken?: string } = {};
+    if (expoPushToken) body.expoPushToken = expoPushToken;
+    if (voipPushToken) body.voipPushToken = voipPushToken;
     fetch(`${apiBase}/push/${encodeURIComponent(alias)}/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${deviceToken}` },
-      body: JSON.stringify({ expoPushToken, voipPushToken }),
+      body: JSON.stringify(body),
     }).catch((err) => console.warn("[Push] Failed to register push tokens:", err));
   }, [alias, deviceToken, expoPushToken, voipPushToken]);
 

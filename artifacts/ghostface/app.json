@@ -23,7 +23,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "voip",
-          "audio"
+          "audio",
+          "remote-notification"
         ]
       },
       "privacyManifests": {
