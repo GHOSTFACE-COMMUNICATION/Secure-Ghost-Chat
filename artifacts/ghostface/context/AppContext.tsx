@@ -3885,10 +3885,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         "Push notifications, calls, and new messages won't work here until " +
                         "you create a new alias.",
                     );
+                    // A 409 conflict is permanent, not transient — retrying
+                    // on a timer would just resend the same rejected token
+                    // and re-trigger this exact branch, alert included,
+                    // every 15s forever. Stay disconnected instead; the
+                    // normal connect effect picks back up if alias changes.
                   } else {
                     console.warn("[WS] Re-registration failed — retrying in 15 s");
+                    reconnectTimer = setTimeout(connect, 15_000);
                   }
-                  reconnectTimer = setTimeout(connect, 15_000);
                 }
               } catch {
                 if (mounted) reconnectTimer = setTimeout(connect, 10_000);
