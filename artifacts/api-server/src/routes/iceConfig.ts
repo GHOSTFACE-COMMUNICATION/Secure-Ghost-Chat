@@ -13,7 +13,7 @@ type IceServer = {
 
 type IceConfigResponse = {
   iceServers: IceServer[];
-  source: "twilio" | "static" | "openrelay";
+  source: "twilio" | "coturn" | "static" | "stun-only";
   ttl: number;
 };
 
@@ -23,7 +23,9 @@ const STUN_SERVERS: IceServer[] = [
 ];
 
 const REFRESH_SKEW_MS = 60_000;
+const STUN_FALLBACK_TTL_SECONDS = 300;
 const TWILIO_FETCH_TIMEOUT_MS = 4_000;
+const DEFAULT_TURN_TTL_SECONDS = 3_600;
 
 type CachedConfig = { body: IceConfigResponse; expiresAt: number };
 let cached: CachedConfig | null = null;
@@ -35,6 +37,8 @@ let cached: CachedConfig | null = null;
 // re-auth) while still bounding scraping.
 const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 600 });
 
+// Literal, pre-issued static credentials — only reached when TURN_SECRET
+// isn't set (see coturnConfig below, which takes priority when it is).
 function staticConfigFromEnv(): IceConfigResponse | null {
   const urlsRaw = process.env.TURN_URLS?.trim();
   if (!urlsRaw) return null;
@@ -58,32 +62,32 @@ function staticConfigFromEnv(): IceConfigResponse | null {
   };
 }
 
-// Metered's Open Relay project — a free, public, shared TURN relay. No
-// signup/API key needed: credentials are generated locally via the standard
-// TURN REST API static-auth-secret scheme (RFC draft-uberti-behave-turn-rest;
-// this is the same mechanism coturn's use-auth-secret implements, and what
-// Metered's docs say Nextcloud Talk uses against this exact relay). Kept
-// below Twilio and any self-hosted TURN_URLS in the fallback chain — it's a
-// shared public resource with no capacity/reliability guarantee, meant as a
-// stopgap so calls behind strict NAT aren't stuck on STUN-only.
-const OPENRELAY_HOST = "staticauth.openrelay.metered.ca";
-const OPENRELAY_SECRET = "openrelayprojectsecret";
-const OPENRELAY_TTL_SECONDS = 3600;
+// Self-hosted coturn, authenticated via use-auth-secret (RFC
+// draft-uberti-behave-turn-rest's "TURN REST API" convention). coturn parses
+// everything before the first colon in `username` as the credential's unix
+// expiry timestamp, and computes the expected password as
+// base64(HMAC-SHA1(secret, username)) over the FULL username string —
+// timestamp, colon, and label all included. A bare timestamp with no colon
+// (what this file used to send, aimed at Metered's Open Relay) doesn't parse
+// as a valid coturn username at all and gets rejected outright.
+function coturnConfig(): IceConfigResponse | null {
+  const urlsRaw = process.env.TURN_URLS?.trim();
+  const secret = process.env.TURN_SECRET?.trim();
+  if (!urlsRaw || !secret) return null;
+  const urls = urlsRaw
+    .split(",")
+    .map((u) => u.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return null;
 
-function openRelayConfig(): IceConfigResponse {
-  const username = String(Math.floor(Date.now() / 1000) + OPENRELAY_TTL_SECONDS);
-  const credential = createHmac("sha1", OPENRELAY_SECRET).update(username).digest("base64");
-
-  const turnEntries: IceServer[] = [
-    { urls: `turn:${OPENRELAY_HOST}:80`, username, credential },
-    { urls: `turn:${OPENRELAY_HOST}:443`, username, credential },
-    { urls: `turns:${OPENRELAY_HOST}:443?transport=tcp`, username, credential },
-  ];
+  const ttl = Math.max(120, Number(process.env.TURN_TTL_SECONDS) || DEFAULT_TURN_TTL_SECONDS);
+  const username = `${Math.floor(Date.now() / 1000) + ttl}:ghostface`;
+  const credential = createHmac("sha1", secret).update(username).digest("base64");
 
   return {
-    iceServers: [...STUN_SERVERS, ...turnEntries],
-    source: "openrelay",
-    ttl: OPENRELAY_TTL_SECONDS,
+    iceServers: [...STUN_SERVERS, { urls, username, credential }],
+    source: "coturn",
+    ttl,
   };
 }
 
@@ -147,7 +151,7 @@ router.get("/ice-config", async (req: Request, res: Response) => {
 
   const now = Date.now();
   // Serve from cache until we're inside the refresh skew window. This applies
-  // to every source — including the Open Relay fallback — so we don't
+  // to every source — including the STUN-only fallback — so we don't
   // recompute on every request.
   if (cached && now < cached.expiresAt - REFRESH_SKEW_MS) {
     res.json(cached.body);
@@ -165,6 +169,13 @@ router.get("/ice-config", async (req: Request, res: Response) => {
     logger.warn({ err }, "Twilio NTS unavailable, falling back");
   }
 
+  const fromCoturn = coturnConfig();
+  if (fromCoturn) {
+    cached = { body: fromCoturn, expiresAt: now + fromCoturn.ttl * 1000 };
+    res.json(fromCoturn);
+    return;
+  }
+
   const fromStatic = staticConfigFromEnv();
   if (fromStatic) {
     cached = { body: fromStatic, expiresAt: now + fromStatic.ttl * 1000 };
@@ -172,12 +183,16 @@ router.get("/ice-config", async (req: Request, res: Response) => {
     return;
   }
 
-  const fromOpenRelay = openRelayConfig();
-  cached = { body: fromOpenRelay, expiresAt: now + fromOpenRelay.ttl * 1000 };
+  const fallback: IceConfigResponse = {
+    iceServers: STUN_SERVERS,
+    source: "stun-only",
+    ttl: STUN_FALLBACK_TTL_SECONDS,
+  };
+  cached = { body: fallback, expiresAt: now + STUN_FALLBACK_TTL_SECONDS * 1000 };
   logger.warn(
-    "No TWILIO_*/TURN_URLS configured — falling back to Metered's public Open Relay TURN.",
+    "No TWILIO_*/TURN_SECRET/TURN_URLS configured; calls behind strict NAT may fail.",
   );
-  res.json(fromOpenRelay);
+  res.json(fallback);
 });
 
 export default router;
