@@ -9,8 +9,11 @@ import { Platform } from "react-native";
    dev-client/EAS build, never in Expo Go. Same dynamic-require + graceful-fallback pattern as
    react-native-webrtc in app/call.tsx. */
 let CallKeep: any = null;
+let CallKeepConstants: any = null;
 try {
-  CallKeep = require("react-native-callkeep").default;
+  const callKeepModule = require("react-native-callkeep");
+  CallKeep = callKeepModule.default;
+  CallKeepConstants = callKeepModule.CONSTANTS;
 } catch (e) {
   console.warn("[Push] react-native-callkeep not available (needs a custom dev-client build):", e);
 }
@@ -150,6 +153,62 @@ interface IncomingCallPayload {
 // call never got answered, which is harmless.
 const pendingCalls = new Map<string, IncomingCallPayload>();
 
+// callIds that currently have a CallKit CXCall outstanding — added the
+// moment displayIncomingCall reports one, removed by notifyCallEnded below.
+// Deliberately separate from pendingCalls above, which only covers the
+// pre-answer window (cleared the instant answerCall fires): this needs to
+// survive the full post-answer call lifecycle too, since call.tsx's
+// local/remote-hangup paths need to know whether THIS call was ever reported
+// to CallKit at all — including a call answered via the in-app overlay
+// (bypassing CallKit's own answerCall event) while a VoIP push had already
+// reported it, which would otherwise leave a CXCall dangling forever.
+const activeCallKitUUIDs = new Set<string>();
+
+export type CallEndOutcome = "local" | "remote" | "decline" | "unanswered";
+
+/**
+ * Tells CallKit a call is over. Only acts on calls actually reported via
+ * displayIncomingCall — self-guarded via activeCallKitUUIDs, so calling this
+ * for a call that never went through CallKit (e.g. answered via the in-app
+ * overlay with no VoIP push involved) is always a safe no-op. Idempotent:
+ * the uuid is removed from tracking before the CallKeep call runs, so a
+ * second invocation for the same uuid — e.g. a local hangup racing an
+ * incoming remote-hangup — finds nothing tracked and no-ops rather than
+ * double-ending.
+ *
+ *   local      -> endCall            this device's user actively ended it
+ *   decline    -> rejectCall         this device's user declined it
+ *   remote     -> reportEndCallWithUUID(REMOTE_ENDED)  the other party ended it
+ *   unanswered -> reportEndCallWithUUID(UNANSWERED)    caller gave up / timed out
+ *
+ * remote/unanswered go through reportEndCallWithUUID rather than endCall so
+ * CallKit records the actual reason instead of "local user ended it" — get
+ * this wrong consistently enough and it can feed into CallKit flagging the
+ * app for misuse (reporting calls it never properly resolves).
+ */
+export function notifyCallEnded(uuid: string, outcome: CallEndOutcome): void {
+  if (!CallKeep || !activeCallKitUUIDs.has(uuid)) return;
+  activeCallKitUUIDs.delete(uuid);
+  try {
+    switch (outcome) {
+      case "local":
+        CallKeep.endCall(uuid);
+        break;
+      case "decline":
+        CallKeep.rejectCall(uuid);
+        break;
+      case "remote":
+        CallKeep.reportEndCallWithUUID(uuid, CallKeepConstants?.END_CALL_REASONS?.REMOTE_ENDED ?? 2);
+        break;
+      case "unanswered":
+        CallKeep.reportEndCallWithUUID(uuid, CallKeepConstants?.END_CALL_REASONS?.UNANSWERED ?? 3);
+        break;
+    }
+  } catch (e) {
+    console.warn("[Push] notifyCallEnded failed:", e);
+  }
+}
+
 function navigateToCall(callId: string, payload: IncomingCallPayload): void {
   router.push({
     pathname: "/call",
@@ -252,6 +311,7 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
             // (see ensureCallKeepSetup) — tightest on a cold, killed-app
             // launch, which is exactly when this fires via didLoadWithEvents.
             await ensureCallKeepSetup();
+            activeCallKitUUIDs.add(callId);
             CallKeep.displayIncomingCall(
               callId,
               payload.from ?? "Unknown",

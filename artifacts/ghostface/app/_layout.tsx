@@ -23,7 +23,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider, getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
-import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { notifyCallEnded, usePushNotifications } from "@/hooks/usePushNotifications";
 import { emitLockTimestamp } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
 import LockScreen from "@/app/lock";
@@ -73,6 +73,7 @@ function IncomingCallOverlay() {
 
   const handleDecline = () => {
     sendCallSignal({ type: "call-hangup", to: incomingCall.from, callId: incomingCall.callId });
+    notifyCallEnded(incomingCall.callId, "decline");
     dismissIncomingCall();
   };
 

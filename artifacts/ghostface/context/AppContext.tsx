@@ -1,6 +1,7 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
+import { notifyCallEnded } from "@/hooks/usePushNotifications";
 export { getApiBase } from "@/lib/apiBase";
 import {
   classifyLinkQuality,
@@ -2906,7 +2907,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     for (const { msg, queuedAt } of queued) {
       const age = now - queuedAt;
-      if (age > CALL_SIGNAL_QUEUE_TTL_MS) {
+      // A hangup is exempt from the TTL: it's still meaningful arbitrarily
+      // late (worst case the receiver's incoming-call UI dismisses a bit
+      // late), whereas dropping it leaves that UI — CallKit's native banner
+      // or our in-app overlay — stuck showing a call that's actually over.
+      // Everything else here (offers/answers/ICE candidates) really is
+      // useless once stale, so those keep the cutoff.
+      const msgType = (msg as { type?: string }).type;
+      if (msgType !== "call-hangup" && age > CALL_SIGNAL_QUEUE_TTL_MS) {
         console.warn(`[CallSignal] Dropping stale queued signal (${age}ms old):`, msg);
         continue;
       }
@@ -3402,6 +3410,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...prev,
           incomingCall: { callId: wsMsg.callId ?? "unknown", from: wsMsg.from!.toUpperCase(), mode: (wsMsg.callMode as "voice" | "video") ?? "voice" },
         }));
+      } else if (wsMsg.type === "call-hangup" && !callSignalListenerRef.current) {
+        // The caller cancelled/gave up before we (the callee) answered —
+        // call.tsx never mounted, so there's no listener to forward to.
+        // callSignalListenerRef being null is exactly how we tell this apart
+        // from a remote-hangup on an in-progress call, which call.tsx handles
+        // itself once mounted (registerCallListener(null) on its unmount is
+        // what clears this ref). Clear the incoming-call banner if it's still
+        // showing this call, and tell CallKit — it may have a CXCall pending
+        // from a VoIP push for the same callId.
+        if (latestStateRef.current.incomingCall?.callId === wsMsg.callId) {
+          setState((prev) => ({ ...prev, incomingCall: null }));
+        }
+        if (wsMsg.callId) notifyCallEnded(wsMsg.callId, "unanswered");
       } else {
         callSignalListenerRef.current?.({ type: wsMsg.type, from: wsMsg.from.toUpperCase(), payload: wsMsg.payload, callId: wsMsg.callId, callMode: wsMsg.callMode });
       }

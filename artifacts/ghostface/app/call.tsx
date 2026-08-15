@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { notifyCallEnded } from "@/hooks/usePushNotifications";
 
 // ── Native WebRTC (react-native-webrtc) — loaded only on native platforms ───
 // On web we use the browser's built-in WebRTC APIs instead.
@@ -419,6 +420,13 @@ export default function CallScreen() {
       const timeout = setTimeout(() => {
         // Use ref so we read the CURRENT callState, not the stale closure value
         if (mountedRef.current && callStateRef.current === "ringing") {
+          // Tell the callee we gave up — without this the callee's incoming-call
+          // UI (CallKit's native banner, or the in-app overlay) has no way to
+          // know and just sits there until CallKit's own native ~60s timeout
+          // silently ends it. Queued if the socket's mid-reconnect rather than
+          // dropped, and exempt from the call-signal queue's TTL (see
+          // flushPendingCallSignals) since a late hangup is still meaningful.
+          sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
           setCallState("no_answer");
           setTimeout(() => { if (mountedRef.current) router.back(); }, 1500);
         }
@@ -501,6 +509,7 @@ export default function CallScreen() {
 
       // ── call-hangup (either receives) ─────────────────────────────────────
       if (signal.type === "call-hangup") {
+        notifyCallEnded(effectiveCallId, "remote");
         handleEndInternal();
       }
     });
@@ -512,6 +521,7 @@ export default function CallScreen() {
   const handleEnd = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
+    notifyCallEnded(effectiveCallId, "local");
     handleEndInternal();
   };
 
