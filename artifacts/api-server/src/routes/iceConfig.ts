@@ -189,8 +189,13 @@ router.get("/ice-config", async (req: Request, res: Response) => {
     ttl: STUN_FALLBACK_TTL_SECONDS,
   };
   cached = { body: fallback, expiresAt: now + STUN_FALLBACK_TTL_SECONDS * 1000 };
+  // Silent degradation to STUN-only is exactly what made the last TURN outage
+  // hard to find — signalling and ICE both "connect" fine, media just never
+  // flows for anyone behind a symmetric NAT. Log loudly so this shows up in
+  // deploy logs immediately instead of only surfacing as a user report.
   logger.warn(
-    "No TWILIO_*/TURN_SECRET/TURN_URLS configured; calls behind strict NAT may fail.",
+    "No TURN configured (TWILIO_*, TURN_SECRET, or TURN_USERNAME/TURN_CREDENTIAL); " +
+      "serving STUN-only. Calls will fail behind symmetric NAT.",
   );
   res.json(fallback);
 });
