@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -93,7 +93,13 @@ export default function MessagesScreen() {
     if (wsConnected && !hadConnection) setHadConnection(true);
   }, [wsConnected, hadConnection]);
 
-  const [pageTab, setPageTab] = useState<PageTab>("messages");
+  // Allows callers (e.g. the Call tab's empty state) to land directly on a
+  // specific segment via router.push({ pathname: "/(tabs)/messages", params: { tab: "invite" } }).
+  // Read once at mount — this screen is always freshly pushed, never updated in place.
+  const { tab: initialTabParam } = useLocalSearchParams<{ tab?: string }>();
+  const [pageTab, setPageTab] = useState<PageTab>(
+    initialTabParam === "invite" || initialTabParam === "tools" ? initialTabParam : "messages",
+  );
   const [showNew, setShowNew] = useState(false);
   const [newAlias, setNewAlias] = useState("");
 

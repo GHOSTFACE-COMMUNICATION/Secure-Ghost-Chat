@@ -103,6 +103,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="calls"
+        options={{
+          title: "CALL",
+          tabBarIcon: ({ color, focused }) => (
+            <PulseIcon focused={focused}>
+              <Ionicons name="call-outline" size={20} color={color} />
+            </PulseIcon>
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="wallet"
         options={{
           title: "WALLET",

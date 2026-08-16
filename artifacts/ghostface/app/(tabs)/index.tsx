@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -257,12 +259,7 @@ export default function HomeScreen() {
     {
       icon: "call-outline",
       label: "CALL",
-      onPress: go(() =>
-        router.push({
-          pathname: "/call",
-          params: { alias: "SECURE_LINE", mode: "voice" },
-        }),
-      ),
+      onPress: go(() => router.push("/(tabs)/calls")),
     },
     {
       icon: "shield-outline",
@@ -484,17 +481,35 @@ export default function HomeScreen() {
                       pressed && { opacity: 0.7 },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.nodeCircle,
-                        active && styles.nodeCircleActive,
-                      ]}
-                    >
-                      <Ionicons
-                        name={node.icon}
-                        size={20}
-                        color={active ? "#FFFFFF" : "rgba(255,255,255,0.75)"}
-                      />
+                    <View style={styles.nodeCircleShadow}>
+                      <View style={styles.nodeCircle}>
+                        <BlurView
+                          intensity={active ? 45 : 32}
+                          tint="dark"
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <LinearGradient
+                          pointerEvents="none"
+                          colors={
+                            active
+                              ? ["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]
+                              : ["rgba(255,255,255,0.45)", "rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)"]
+                          }
+                          locations={[0, 0.55, 1]}
+                          start={{ x: 0.15, y: 0 }}
+                          end={{ x: 0.85, y: 1 }}
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <View
+                          pointerEvents="none"
+                          style={[styles.nodeCircleRim, active && styles.nodeCircleRimActive]}
+                        />
+                        <Ionicons
+                          name={node.icon}
+                          size={20}
+                          color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                        />
+                      </View>
                     </View>
                     <Text
                       style={[
@@ -687,6 +702,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   nodeInner: { alignItems: "center", gap: 6 },
+  nodeCircleShadow: {
+    borderRadius: 22,
+    boxShadow: boxShadow("#000000", 0.35, 10, 0, 4),
+  },
   nodeCircle: {
     width: 44,
     height: 44,
@@ -694,11 +713,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.07)",
+    overflow: "hidden",
+  },
+  nodeCircleRim: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.3)",
   },
-  nodeCircleActive: {
-    backgroundColor: "rgba(255,255,255,0.16)",
+  nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",
   },
   nodeLabel: {

@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassCallButton } from "@/components/GlassCallButton";
 import { GoldGradient } from "@/components/GoldGradient";
 import { SecureBadge } from "@/components/SecureBadge";
 import { StatusDot } from "@/components/StatusDot";
@@ -1123,28 +1124,24 @@ export default function ChatScreen() {
               )}
             </View>
           )}
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
+          <GlassCallButton
+            icon="call-outline"
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Date.now().toString() } });
             }}
             testID="voice-call-btn"
-          >
-            <Ionicons name="call-outline" size={20} color={colors.primary} />
-          </Pressable>
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
+            accessibilityLabel="Voice call"
+          />
+          <GlassCallButton
+            icon="videocam-outline"
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Date.now().toString() } });
             }}
             testID="video-call-btn"
-          >
-            <Ionicons name="videocam-outline" size={20} color={colors.primary} />
-          </Pressable>
+            accessibilityLabel="Video call"
+          />
           <Pressable
             style={styles.callBtn}
             hitSlop={6}
