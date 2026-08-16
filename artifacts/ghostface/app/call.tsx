@@ -3,6 +3,7 @@
    and are not statically typed uniformly across web/native platforms. */
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
+import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -131,8 +132,13 @@ export default function CallScreen() {
   const { sendCallSignal, registerCallListener, wsConnected } = useApp();
 
   const isCaller = (role ?? "caller") === "caller";
-  // useMemo so Date.now() is only called once on mount even if callId is undefined
-  const effectiveCallId = useMemo(() => callId ?? Date.now().toString(), []);
+  // useMemo so this only runs once on mount even if callId is undefined.
+  // Must be a real UUID, not just any unique string: this value is relayed
+  // through the VoIP push payload and passed straight to CallKit's native
+  // reportNewIncomingCall/displayIncomingCall on the callee's device, which
+  // parses it with NSUUID(uuidString:) — a non-UUID string silently fails
+  // there (nil), so the callee's phone would never actually ring.
+  const effectiveCallId = useMemo(() => callId ?? Crypto.randomUUID(), []);
   const isVideo = mode === "video";
 
   const [callState, setCallState]     = useState<CallState>(isCaller ? "ringing" : "connecting");

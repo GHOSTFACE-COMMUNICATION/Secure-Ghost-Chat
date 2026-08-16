@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import * as Crypto from "expo-crypto";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
@@ -304,7 +305,13 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
         });
 
         const handleIncomingVoipPayload = async (payload: IncomingCallPayload) => {
-          const callId = payload.callId ?? String(Date.now());
+          // Must be a real UUID, not just unique: this is handed straight to
+          // CallKeep.displayIncomingCall below, which iOS parses with
+          // NSUUID(uuidString:) — a non-UUID string silently fails there.
+          // (payload.callId should always be present in practice — callers
+          // generate a real UUID in app/call.tsx — this is a last-resort
+          // fallback only.)
+          const callId = payload.callId ?? Crypto.randomUUID();
           pendingCalls.set(callId, payload);
           if (CallKeep) {
             // Must not fire before CallKit's native side has finished setup
