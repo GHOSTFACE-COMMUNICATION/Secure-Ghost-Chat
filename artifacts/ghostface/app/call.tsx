@@ -450,7 +450,15 @@ export default function CallScreen() {
   // ── Call signal listener ──────────────────────────────────────────────────
   useEffect(() => {
     registerCallListener(async (signal) => {
-      if (signal.callId && signal.callId !== effectiveCallId) return;
+      // Reject anything not provably from the peer this screen is actually
+      // calling: the server relays call signals to any alias with no
+      // relationship check (by design — this app is metadata-blind), so an
+      // unrelated authenticated user could otherwise forge e.g. a
+      // call-hangup for a victim mid-call by simply omitting callId (the
+      // old check only rejected a *mismatched* callId, not a missing one).
+      // Both callId and from must match this call's actual peer.
+      if (signal.callId !== effectiveCallId) return;
+      if (signal.from?.toUpperCase() !== alias?.toUpperCase()) return;
       if (!mountedRef.current) return;
 
       // ── call-accept (caller receives) ─────────────────────────────────────
