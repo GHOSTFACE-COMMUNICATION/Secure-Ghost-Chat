@@ -129,7 +129,18 @@ const CALL_SIGNAL_TYPES = new Set([
 // existing "callee offline" bounce. Polling (not a single timeout) so a
 // reconnect is picked up as soon as it happens rather than waiting out the
 // full window every time.
-const CALL_WAKE_GRACE_MS = 8_000;
+//
+// Must cover the full cold-launch chain on a killed app, not just network
+// delivery: VoIP push -> CallKit shows the native ringing screen -> the
+// human notices and taps Answer -> only THEN does the app cold-launch,
+// mount AppProvider, wire up usePushNotifications' "answerCall" listener,
+// call forceReconnect(), open the WS, and complete auth. The previous 8s
+// budget covered barely any of that — real calls were getting bounced back
+// to the caller as "offline" while the callee's phone was still audibly
+// ringing, before they had a realistic chance to answer. Kept a few
+// seconds under call.tsx's 30s caller-side ring timeout so this bounce
+// fires first rather than racing it.
+const CALL_WAKE_GRACE_MS = 25_000;
 const CALL_WAKE_POLL_MS = 500;
 
 async function waitForReconnect(alias: string, timeoutMs: number): Promise<AuthedSocket | null> {
