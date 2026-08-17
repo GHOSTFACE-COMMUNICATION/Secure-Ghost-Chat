@@ -16,6 +16,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -988,6 +989,17 @@ export default function ChatScreen() {
       borderTopLeftRadius: 20, borderTopRightRadius: 20,
       borderWidth: 1, borderBottomWidth: 0, borderColor: colors.border,
       paddingBottom: insets.bottom + 24,
+      // Caps the sheet so its header (title + close button) always stays
+      // on-screen and reachable — sheetBody scrolls internally instead of
+      // the whole sheet growing past the viewport. Without this, a
+      // conversation with a full Double Ratchet info panel (protocol rows +
+      // wallpaper swatches + verify/clear buttons) overflows the screen
+      // height; since the overlay is bottom-anchored (justifyContent:
+      // "flex-end"), the excess pushed the handle, title, and close button
+      // off the TOP of the screen — leaving no way to dismiss the sheet
+      // except backing into it via another button lower down (e.g. Clear
+      // Chat, whose onPress also happens to call setShowInfo(false)).
+      maxHeight: "88%",
     },
     handle: {
       width: 40, height: 4, borderRadius: 2,
@@ -999,7 +1011,7 @@ export default function ChatScreen() {
       borderBottomWidth: 1, borderBottomColor: colors.border,
     },
     sheetTitle: { color: colors.foreground, fontSize: 13, fontWeight: "800", letterSpacing: 4 },
-    sheetBody: { padding: 20, gap: 16 },
+    sheetBody: { padding: 20, gap: 16 }, // used as ScrollView contentContainerStyle
     emojiRow: {
       flexDirection: "row",
       justifyContent: "space-around",
@@ -1762,7 +1774,7 @@ export default function ChatScreen() {
                   <Ionicons name="close" size={20} color={colors.mutedForeground} />
                 </Pressable>
               </View>
-              <View style={styles.sheetBody}>
+              <ScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator={false}>
                 {/* Safety number */}
                 {conv.safetyNumber && (
                   <View style={[
@@ -1955,7 +1967,7 @@ export default function ChatScreen() {
                   <Ionicons name="trash-outline" size={14} color={colors.destructive} />
                   <Text style={styles.clearBtnTxt}>CLEAR CHAT</Text>
                 </Pressable>
-              </View>
+              </ScrollView>
             </View>
         </View>
       </Modal>
