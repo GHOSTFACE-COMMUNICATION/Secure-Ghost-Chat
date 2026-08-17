@@ -157,12 +157,29 @@ const ghostpadPartners = new Map<string, string>(); // alias -> paired alias
 // just extending that tier to cover presence. Subscriptions are purely
 // in-memory and scoped to "which alias is watching which alias", never
 // persisted, and torn down on unsubscribe or disconnect.
+//
+// Mutual-only by design: there's deliberately no server-side contacts/
+// relationship table anywhere in this app (POST /invites/:code/consume
+// never even records who redeemed a code) — the server is never supposed
+// to learn who talks to whom. So presence can't be gated on "are these two
+// actually in a conversation" the way a normal app would. Instead, alias A
+// only ever learns alias B's online status once B has *also* subscribed to
+// A — a one-directional subscribe (watching someone who doesn't know it)
+// delivers nothing. In practice this only lights up between two people who
+// both have each other's chat open, which is what legitimate use looks
+// like, without the server needing to persist a social graph to enforce it.
 const presenceSubscribers = new Map<string, Set<string>>(); // target alias -> watcher aliases
+const MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET = 200;
+
+function mutuallySubscribed(a: string, b: string): boolean {
+  return !!presenceSubscribers.get(a)?.has(b) && !!presenceSubscribers.get(b)?.has(a);
+}
 
 function notifyPresence(alias: string, online: boolean): void {
   const watchers = presenceSubscribers.get(alias);
   if (!watchers || watchers.size === 0) return;
   for (const watcherAlias of watchers) {
+    if (!mutuallySubscribed(alias, watcherAlias)) continue;
     const watcher = connectedClients.get(watcherAlias);
     if (watcher && watcher.ws.readyState === WebSocket.OPEN) {
       watcher.ws.send(JSON.stringify({ type: "presence", from: alias, online }));
@@ -592,11 +609,23 @@ export function createWsServer(wss: WebSocketServer): void {
       // ── Presence: subscribe/unsubscribe to another alias's online status ───
       if (msg.type === "presence-subscribe") {
         if (!msg.to) return;
+        if (myPresenceSubscriptions.size >= MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET) return;
         const targetAlias = normalizeAlias(msg.to);
         if (!presenceSubscribers.has(targetAlias)) presenceSubscribers.set(targetAlias, new Set());
         presenceSubscribers.get(targetAlias)!.add(authedAlias);
         myPresenceSubscriptions.add(targetAlias);
-        ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: connectedClients.has(targetAlias) }));
+        // Mutual-only (see comment on presenceSubscribers above) — a
+        // one-directional subscribe reveals nothing. Once this subscribe
+        // completes reciprocity, tell both sides each other's status; the
+        // other side may have been sitting on a one-directional subscribe
+        // of their own for a while, waiting for exactly this.
+        if (mutuallySubscribed(authedAlias, targetAlias)) {
+          ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: connectedClients.has(targetAlias) }));
+          const target = connectedClients.get(targetAlias);
+          if (target && target.ws.readyState === WebSocket.OPEN) {
+            target.ws.send(JSON.stringify({ type: "presence", from: authedAlias, online: true }));
+          }
+        }
         return;
       }
 
