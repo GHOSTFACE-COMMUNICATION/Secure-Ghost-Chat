@@ -811,6 +811,25 @@ type RegisterResult =
   // network/server failure, maybe retry."
   | { ok: false; conflict: boolean };
 
+// Same lookup onboarding.tsx uses to warn about a taken alias before
+// registration — reused here so the mount self-heal path (which sees "no
+// local device token" on every cold start where SecureStore lost the key,
+// not just a genuinely-never-registered alias) can tell "safe to register"
+// apart from "already claimed — registering again would just 409," instead
+// of finding out the hard way via a failed POST /prekeys/register.
+async function checkAliasExists(alias: string): Promise<boolean | null> {
+  const apiBase = getApiBase();
+  if (!apiBase) return null;
+  try {
+    const res = await fetch(`${apiBase}/users/exists/${encodeURIComponent(alias)}`);
+    if (res.status === 404) return false;
+    if (!res.ok) return null;
+    return true;
+  } catch {
+    return null;
+  }
+}
+
 async function registerWithServer(userId: string): Promise<RegisterResult | null> {
   const apiBase = getApiBase();
   if (!apiBase) return null;
@@ -1459,7 +1478,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             try {
               const token = await secureGet(DEVICE_TOKEN_KEY);
               if (!token) {
-                console.warn("[AppContext] No device token on mount — re-registering", alias);
+                // "No local token" doesn't distinguish "never registered"
+                // from "registered fine, but the local write got
+                // interrupted" (e.g. setAlias's registration was still
+                // finishing when the app backgrounded/reloaded) — blindly
+                // calling registerWithServer here previously self-inflicted
+                // a 409 on this device's OWN just-claimed alias. Check
+                // first, and only attempt registration when the alias is
+                // confirmed genuinely unclaimed.
+                console.warn("[AppContext] No device token on mount — checking alias state", alias);
+                const exists = await checkAliasExists(alias);
+                if (exists === true) {
+                  console.warn(
+                    "[AppContext] Alias already registered server-side but no local token — " +
+                      "not blindly re-registering (would just 409)",
+                    alias,
+                  );
+                  Alert.alert(
+                    "Device not linked to this alias",
+                    "This alias is already registered on another device or install. " +
+                      "Push notifications, calls, and new messages won't work here until " +
+                      "you create a new alias.",
+                  );
+                  return;
+                }
+                if (exists === null) {
+                  // Couldn't reach the server to check — don't guess either
+                  // way. The next mount (or the WS auth-rejected path once
+                  // connected) gets another chance.
+                  console.warn("[AppContext] Could not determine alias state (offline?) — skipping for now", alias);
+                  return;
+                }
                 const reg = await registerWithServer(alias);
                 if (reg?.ok) {
                   await secureSet(DEVICE_TOKEN_KEY, reg.token);
@@ -1472,16 +1521,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   setState((prev) => ({ ...prev, deviceToken: reg.token }));
                   await generateAndUploadOPKs(alias, reg.token);
                 } else if (reg && reg.conflict) {
-                  // This device has no local device token, but the alias is
-                  // still registered server-side under someone else's token
-                  // (e.g. this install/SecureStore is not the original one).
-                  // By design (see POST /prekeys/register) there is no
-                  // reissue path — surface it instead of failing silently
-                  // forever, since this device can now never send/receive
-                  // push, upload prekeys, or rekey under this alias.
+                  // Alias became taken between our exists-check above and
+                  // this registration call (race). By design (see POST
+                  // /prekeys/register) there is no reissue path — surface
+                  // it instead of failing silently forever, since this
+                  // device can now never send/receive push, upload
+                  // prekeys, or rekey under this alias.
                   console.warn(
-                    "[AppContext] Alias already registered under a different device token — " +
-                      "this device cannot recover push/session capability for it",
+                    "[AppContext] Alias became unavailable between check and registration (race)",
                     alias,
                   );
                   Alert.alert(
@@ -1626,65 +1673,75 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.setItem("alias", alias);
       await AsyncStorage.setItem("isOnboarded", "true");
       setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false }));
-      (async () => {
-        try {
-          // SecureStore is Keychain-backed on iOS, which survives app
-          // deletion/reinstall — unlike the AsyncStorage "alias"/"isOnboarded"
-          // flags checked above, which get wiped on uninstall. So a device
-          // that self-destructed via reinstall (rather than in-app panicWipe,
-          // which does clear these) comes back here as a "fresh" onboarding
-          // with a brand-new alias, but with the PREVIOUS alias's device
-          // token and identity keys still sitting in Keychain. Left
-          // unchecked, the `existing` check below finds that stale token,
-          // treats this device as already registered, and never calls
-          // registerWithServer for the new alias at all — this device
-          // silently stays bound to the old alias forever. Any SecureStore
-          // identity data at the moment a NEW alias is being set necessarily
-          // belongs to a different identity, so always start clean here.
-          await Promise.all([
-            secureDelete(DEVICE_TOKEN_KEY),
-            secureDelete(MY_IK_PRIV_KEY),
-            secureDelete(MY_IK_PUB_KEY),
-            secureDelete(MY_SPK_PRIV_KEY),
-            secureDelete(MY_SPK_PUB_KEY),
-            secureDelete(MY_PQKEM_PRIV_KEY),
-            secureDelete(MY_PQKEM_PUB_KEY),
-          ]);
-          const reg = await registerWithServer(alias);
-          if (reg?.ok) {
-            await secureSet(DEVICE_TOKEN_KEY, reg.token);
-            await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
-            await secureSet(MY_IK_PUB_KEY, reg.ikPub);
-            await secureSet(MY_SPK_PRIV_KEY, reg.spkPriv);
-            await secureSet(MY_SPK_PUB_KEY, reg.spkPub);
-            await secureSet(MY_PQKEM_PRIV_KEY, reg.pqkemPriv);
-            await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
-            setState((prev) => ({ ...prev, deviceToken: reg.token }));
-            await generateAndUploadOPKs(alias, reg.token);
-          } else if (reg && reg.conflict) {
-            // Alias was taken between onboarding's availability check and
-            // this registration call (race, or a stale check). No token
-            // was issued, so this device's identity keys were never
-            // actually registered — the user is left "onboarded" but
-            // silently unable to message/call/receive push until they
-            // notice and pick a different alias.
-            console.warn(
-              "[AppContext] Alias became unavailable during registration (race) — no identity registered",
-              alias,
-            );
-            Alert.alert(
-              "Alias already taken",
-              "Someone just registered this alias. Please go back and choose a different one — " +
-                "messaging, calls, and notifications won't work until you do.",
-            );
-          }
-        } catch (e) {
-          console.warn("[AppContext] Background registration failed:", e);
-        }
-      })();
     } catch (err) {
       console.error("[AppContext] Failed to save alias:", err);
       throw err;
+    }
+    // Awaited (not fire-and-forget) so callers — onboarding — don't navigate
+    // away until this has genuinely finished. Previously this ran in an
+    // un-awaited inner IIFE: onboarding's `await setAlias(...)` resolved as
+    // soon as the AsyncStorage writes above landed, then immediately
+    // navigated while registration was still in flight. If the app
+    // backgrounded/reloaded in that window, the server registration could
+    // have already succeeded (claiming the alias) while the device token
+    // never made it into SecureStore locally — leaving this device with no
+    // proof it registered. The mount self-heal effect below would then see
+    // "no local token" and re-register the same alias, self-inflicting a
+    // 409 "already registered" against an alias this same device had
+    // legitimately just claimed seconds earlier.
+    try {
+      // SecureStore is Keychain-backed on iOS, which survives app
+      // deletion/reinstall — unlike the AsyncStorage "alias"/"isOnboarded"
+      // flags checked above, which get wiped on uninstall. So a device
+      // that self-destructed via reinstall (rather than in-app panicWipe,
+      // which does clear these) comes back here as a "fresh" onboarding
+      // with a brand-new alias, but with the PREVIOUS alias's device
+      // token and identity keys still sitting in Keychain. Left
+      // unchecked, the `existing` check below finds that stale token,
+      // treats this device as already registered, and never calls
+      // registerWithServer for the new alias at all — this device
+      // silently stays bound to the old alias forever. Any SecureStore
+      // identity data at the moment a NEW alias is being set necessarily
+      // belongs to a different identity, so always start clean here.
+      await Promise.all([
+        secureDelete(DEVICE_TOKEN_KEY),
+        secureDelete(MY_IK_PRIV_KEY),
+        secureDelete(MY_IK_PUB_KEY),
+        secureDelete(MY_SPK_PRIV_KEY),
+        secureDelete(MY_SPK_PUB_KEY),
+        secureDelete(MY_PQKEM_PRIV_KEY),
+        secureDelete(MY_PQKEM_PUB_KEY),
+      ]);
+      const reg = await registerWithServer(alias);
+      if (reg?.ok) {
+        await secureSet(DEVICE_TOKEN_KEY, reg.token);
+        await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
+        await secureSet(MY_IK_PUB_KEY, reg.ikPub);
+        await secureSet(MY_SPK_PRIV_KEY, reg.spkPriv);
+        await secureSet(MY_SPK_PUB_KEY, reg.spkPub);
+        await secureSet(MY_PQKEM_PRIV_KEY, reg.pqkemPriv);
+        await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
+        setState((prev) => ({ ...prev, deviceToken: reg.token }));
+        await generateAndUploadOPKs(alias, reg.token);
+      } else if (reg && reg.conflict) {
+        // Alias was taken between onboarding's availability check and
+        // this registration call (race, or a stale check). No token
+        // was issued, so this device's identity keys were never
+        // actually registered — the user is left "onboarded" but
+        // silently unable to message/call/receive push until they
+        // notice and pick a different alias.
+        console.warn(
+          "[AppContext] Alias became unavailable during registration (race) — no identity registered",
+          alias,
+        );
+        Alert.alert(
+          "Alias already taken",
+          "Someone just registered this alias. Please go back and choose a different one — " +
+            "messaging, calls, and notifications won't work until you do.",
+        );
+      }
+    } catch (e) {
+      console.warn("[AppContext] Background registration failed:", e);
     }
   }, []);
 
