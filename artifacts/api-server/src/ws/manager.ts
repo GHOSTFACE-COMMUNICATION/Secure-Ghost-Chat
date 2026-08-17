@@ -143,6 +143,43 @@ const CALL_SIGNAL_TYPES = new Set([
 const CALL_WAKE_GRACE_MS = 25_000;
 const CALL_WAKE_POLL_MS = 500;
 
+// Call signalling has no concept of "this pair already has a call in
+// progress" — every call-ring is handled as a fully independent attempt,
+// keyed only by its own callId. Without tracking below, rapid repeat
+// call-rings between the same two aliases (manual retries, or a caller
+// re-ringing after a bounce) each get their own VoIP push and their own
+// native CallKit banner on the callee's phone — answering one does nothing
+// to stop the others, which keep ringing/bouncing on their own schedules.
+// This map makes "one call at a time per pair" an actual invariant: a
+// second call-ring for a pair that already has an entry is rejected
+// immediately with a distinct "busy" hangup instead of stacking a parallel
+// attempt on top of the existing one.
+interface ActiveCall {
+  callId: string;
+  caller: string;
+  callee: string;
+  startedAt: number;
+}
+const activeCallsByPair = new Map<string, ActiveCall>();
+
+// Safety valve: if a hangup is ever lost (crash, dropped frame, a future
+// bug in this cleanup) a stuck entry would otherwise block this pair from
+// ever calling each other again. No real call lasts this long, so treat an
+// entry older than this as abandoned and let a new call-ring through.
+const MAX_CALL_AGE_MS = 2 * 60 * 60 * 1000;
+
+function callPairKey(a: string, b: string): string {
+  return [a, b].sort().join(":");
+}
+
+function clearActiveCall(a: string, b: string, callId?: string): void {
+  const key = callPairKey(a, b);
+  const existing = activeCallsByPair.get(key);
+  if (existing && (!callId || existing.callId === callId)) {
+    activeCallsByPair.delete(key);
+  }
+}
+
 async function waitForReconnect(alias: string, timeoutMs: number): Promise<AuthedSocket | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -352,6 +389,14 @@ export function createWsServer(wss: WebSocketServer): void {
     const cleanup = () => {
       if (authedAlias) {
         connectedClients.delete(authedAlias);
+        // A dropped connection mid-call must release its pair lock too,
+        // otherwise this alias can never call (or be called by) the other
+        // party again until the stale entry ages out.
+        for (const [pairKey, call] of activeCallsByPair) {
+          if (call.caller === authedAlias || call.callee === authedAlias) {
+            activeCallsByPair.delete(pairKey);
+          }
+        }
         revokeGhostpadCode(authedAlias);
         endGhostpadSession(authedAlias);
         for (const target of myPresenceSubscriptions) {
@@ -474,6 +519,38 @@ export function createWsServer(wss: WebSocketServer): void {
         const toAlias = normalizeAlias(msg.to);
         let recipient: AuthedSocket | null | undefined = connectedClients.get(toAlias);
 
+        if (msg.type === "call-ring") {
+          const pairKey = callPairKey(authedAlias, toAlias);
+          const existingCall = activeCallsByPair.get(pairKey);
+          if (existingCall && Date.now() - existingCall.startedAt < MAX_CALL_AGE_MS) {
+            // This pair already has a call ringing or in progress (its own
+            // callId, tracked separately) — reject this one immediately
+            // rather than sending a second independent VoIP push/CallKit
+            // banner that would keep ringing after the first is answered.
+            ws.send(
+              JSON.stringify({
+                type: "call-hangup",
+                from: toAlias,
+                callId: msg.callId,
+                payload: "busy",
+              }),
+            );
+            logger.debug(
+              { from: authedAlias, to: toAlias, existingCallId: existingCall.callId },
+              "Call ring rejected: pair already has a call in progress",
+            );
+            return;
+          }
+          activeCallsByPair.set(pairKey, {
+            callId: msg.callId ?? "",
+            caller: authedAlias,
+            callee: toAlias,
+            startedAt: Date.now(),
+          });
+        } else if (msg.type === "call-hangup") {
+          clearActiveCall(authedAlias, toAlias, msg.callId);
+        }
+
         // Callee isn't connected — before giving up, try to wake their device
         // (VoIP push on iOS via CallKit, high-priority data push on Android)
         // and give it a short window to reconnect. If neither push token is
@@ -543,6 +620,7 @@ export function createWsServer(wss: WebSocketServer): void {
             }),
           );
           logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+          clearActiveCall(authedAlias, toAlias, msg.callId);
         }
         return;
       }
