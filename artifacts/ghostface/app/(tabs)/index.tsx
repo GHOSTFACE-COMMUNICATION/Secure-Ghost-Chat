@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
@@ -22,6 +23,14 @@ import { boxShadow } from "@/lib/shadow";
 
 const BG = "#000";
 const GOLD = "#bf9b30";
+// Real native Liquid Glass (iOS 26+, via expo-glass-effect) for the radial
+// menu nodes where available; older iOS/Android keep the BlurView +
+// gradient approximation below. Inactive nodes use a cool cyan-blue tint
+// (matching GlassCallButton) instead of plain white; the active node keeps
+// gold since that's a functional selection signal, not just decoration.
+const USE_NATIVE_GLASS = isLiquidGlassAvailable();
+const NODE_GLASS_TINT_ACTIVE = "rgba(245,200,80,0.4)";
+const NODE_GLASS_TINT_INACTIVE = "rgba(94,200,255,0.28)";
 
 const FONT_SERIF = Platform.select({
   ios: "Georgia",
@@ -482,34 +491,49 @@ export default function HomeScreen() {
                     ]}
                   >
                     <View style={styles.nodeCircleShadow}>
-                      <View style={styles.nodeCircle}>
-                        <BlurView
-                          intensity={active ? 45 : 32}
-                          tint="dark"
-                          style={StyleSheet.absoluteFill}
-                        />
-                        <LinearGradient
-                          pointerEvents="none"
-                          colors={
-                            active
-                              ? ["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]
-                              : ["rgba(255,255,255,0.45)", "rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)"]
-                          }
-                          locations={[0, 0.55, 1]}
-                          start={{ x: 0.15, y: 0 }}
-                          end={{ x: 0.85, y: 1 }}
-                          style={StyleSheet.absoluteFill}
-                        />
-                        <View
-                          pointerEvents="none"
-                          style={[styles.nodeCircleRim, active && styles.nodeCircleRimActive]}
-                        />
-                        <Ionicons
-                          name={node.icon}
-                          size={20}
-                          color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
-                        />
-                      </View>
+                      {USE_NATIVE_GLASS ? (
+                        <GlassView
+                          style={styles.nodeCircleGlass}
+                          glassEffectStyle="clear"
+                          tintColor={active ? NODE_GLASS_TINT_ACTIVE : NODE_GLASS_TINT_INACTIVE}
+                          isInteractive
+                        >
+                          <Ionicons
+                            name={node.icon}
+                            size={20}
+                            color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                          />
+                        </GlassView>
+                      ) : (
+                        <View style={styles.nodeCircle}>
+                          <BlurView
+                            intensity={active ? 45 : 32}
+                            tint="dark"
+                            style={StyleSheet.absoluteFill}
+                          />
+                          <LinearGradient
+                            pointerEvents="none"
+                            colors={
+                              active
+                                ? ["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]
+                                : ["rgba(120,195,255,0.45)", "rgba(94,170,230,0.12)", "rgba(80,150,210,0.04)"]
+                            }
+                            locations={[0, 0.55, 1]}
+                            start={{ x: 0.15, y: 0 }}
+                            end={{ x: 0.85, y: 1 }}
+                            style={StyleSheet.absoluteFill}
+                          />
+                          <View
+                            pointerEvents="none"
+                            style={[styles.nodeCircleRim, active && styles.nodeCircleRimActive]}
+                          />
+                          <Ionicons
+                            name={node.icon}
+                            size={20}
+                            color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                          />
+                        </View>
+                      )}
                     </View>
                     <Text
                       style={[
@@ -715,11 +739,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.07)",
     overflow: "hidden",
   },
+  // No manual background/border here — GlassView renders its own native
+  // blur and refraction (see nodeCircle's comment-equivalent in
+  // GlassCallButton.tsx for why layering the fallback's tint underneath
+  // would just mute it).
+  nodeCircleGlass: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   nodeCircleRim: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor: "rgba(150,210,255,0.3)",
   },
   nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",
