@@ -791,14 +791,18 @@ export function initSessionAliceWithHeader(
 ): { session: DRSession; x3dhHeader: X3DHHeader } {
   // ── SPK signature verification (Signal X3DH §2.4) ─────────────────────────
   // Must verify before performing any DH operations. An invalid signature means
-  // the server returned a tampered bundle — reject immediately.
-  if (bundle.spkSignature && bundle.ikSignPublicKey) {
-    const valid = verifySPKSignature(bundle.spkPublicKey, bundle.spkSignature, bundle.ikSignPublicKey);
-    if (!valid) {
-      throw new Error("[X3DH] SPK signature verification FAILED — bundle rejected (possible MITM)");
-    }
-  } else {
-    console.warn("[X3DH] Bundle has no SPK signature — proceeding without MITM protection (legacy registration)");
+  // the server returned a tampered bundle — reject immediately. Strict, like the
+  // ML-KEM check below: GET /prekeys/:userId/bundle is unauthenticated by design,
+  // so a compromised/malicious server can freely omit these two fields from what
+  // it serves regardless of what was actually registered — silently proceeding
+  // without verification here would hand it exactly the MITM this check exists
+  // to prevent.
+  if (!bundle.spkSignature || !bundle.ikSignPublicKey) {
+    throw new Error("[X3DH] Bundle has no SPK signature — bundle rejected (possible MITM)");
+  }
+  const validSpk = verifySPKSignature(bundle.spkPublicKey, bundle.spkSignature, bundle.ikSignPublicKey);
+  if (!validSpk) {
+    throw new Error("[X3DH] SPK signature verification FAILED — bundle rejected (possible MITM)");
   }
 
   const IK_A: DHKeyPair = { priv: fromHex(myIKPriv), pub: fromHex(myIKPub) };
