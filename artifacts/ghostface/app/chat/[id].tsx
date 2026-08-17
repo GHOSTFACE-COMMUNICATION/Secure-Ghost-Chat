@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as Clipboard from "expo-clipboard";
+import * as Crypto from "expo-crypto";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
@@ -1128,7 +1129,9 @@ export default function ChatScreen() {
             icon="call-outline"
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Date.now().toString() } });
+              // Must be a real UUID — relayed through the VoIP push payload and
+              // parsed with NSUUID(uuidString:) on the callee's device.
+              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Crypto.randomUUID() } });
             }}
             testID="voice-call-btn"
             accessibilityLabel="Voice call"
@@ -1137,7 +1140,7 @@ export default function ChatScreen() {
             icon="videocam-outline"
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Date.now().toString() } });
+              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Crypto.randomUUID() } });
             }}
             testID="video-call-btn"
             accessibilityLabel="Video call"

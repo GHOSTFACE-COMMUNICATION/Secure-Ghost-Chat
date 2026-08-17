@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React from "react";
@@ -22,8 +23,12 @@ export default function CallScreen() {
   const startCall = (alias: string, mode: "voice" | "video") => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push({
+      // Must be a real UUID, not just unique: this is relayed through the
+      // VoIP push payload and passed straight to CallKit's native
+      // reportNewIncomingCall on the callee's device, which parses it with
+      // NSUUID(uuidString:) — a non-UUID string fails there.
       pathname: "/call",
-      params: { alias, mode, role: "caller", callId: Date.now().toString() },
+      params: { alias, mode, role: "caller", callId: Crypto.randomUUID() },
     });
   };
 
