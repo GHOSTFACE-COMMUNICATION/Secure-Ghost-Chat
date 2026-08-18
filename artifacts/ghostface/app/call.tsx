@@ -292,7 +292,15 @@ export default function CallScreen() {
           try { CallKeep.setCurrentCallActive(effectiveCallId); } catch (e) { console.warn("[CallKit] setCurrentCallActive failed:", e); }
         }
       }
-      if (s === "disconnected" || s === "failed")  handleEndInternal();
+      if (s === "disconnected" || s === "failed") {
+        // Connection dropped without an explicit call-hangup signal (network
+        // blip, ICE failure, ...). handleEndInternal() tears down WebRTC and
+        // navigates away, but CallKit doesn't know the call is over unless
+        // told explicitly — without this, the callee's native call UI
+        // (Dynamic Island / lock-screen call screen) stays up indefinitely.
+        notifyCallEnded(effectiveCallId, "remote");
+        handleEndInternal();
+      }
     };
 
     return pc;
@@ -405,6 +413,12 @@ export default function CallScreen() {
     return () => {
       if (callStateRef.current === "active") {
         sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
+        // Same reasoning as the call-hangup signal path in handleEnd(): this
+        // device's call session is ending without going through handleEnd()
+        // (e.g. the app locked/backgrounded mid-call), so CallKit needs to be
+        // told directly or its native call UI stays up after the app has
+        // already torn everything else down.
+        notifyCallEnded(effectiveCallId, "local");
       }
       teardownCallResources();
     };
