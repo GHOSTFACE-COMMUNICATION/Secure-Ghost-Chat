@@ -4,12 +4,19 @@
 
 - **Canonical repo**: `~/Projects/ghostface-clean` (this directory). It is the
   one source of truth — the several similarly-named GitHub repos under
-  `ghostzeronz-coder` are empty or abandoned. See `SETUP-READ-ME-FIRST.md`.
+  `ghostzeronz-coder` are empty or abandoned.
 - **The real Expo app lives in `artifacts/ghostface/`**, not the repo root.
-  Run `expo`/`pnpm` app commands from there. The root is a pnpm workspace
-  (`artifacts/*`, `lib/*`, `scripts`).
+  Run `expo`/`pnpm` app commands from there. The root is a pnpm workspace;
+  `pnpm-workspace.yaml` lists packages **explicitly**, not by glob — add new
+  ones by hand.
 - `artifacts/api-server/` is the backend (Express + TypeScript, deployed to
-  Railway). `artifacts/vault2fa/` and `artifacts/mockup-sandbox/` are separate.
+  Railway).
+- **vault2fa is not part of this repo.** It is a separate project at
+  `~/Projects/vault2fa` with its own git remote. It formerly sat at
+  `artifacts/vault2fa/` and was wrongly absorbed by the old `artifacts/*`
+  glob. Do not move it back.
+- `mockup-sandbox/`, `ghostface-1/` and `SETUP-READ-ME-FIRST.md` were archived
+  to `~/Projects/_archive/ghostface-clean-2026-08-18/` on 18 Aug 2026.
 - Replit pushes to branches `replit-main` / `replit-workspace` on the same
   `origin` remote. `replit-main` has **no common git ancestor** with our
   working branches — treat any merge between them as a manual port, never a
