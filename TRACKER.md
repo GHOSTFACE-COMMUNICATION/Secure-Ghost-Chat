@@ -49,7 +49,7 @@ Last updated: 2026-08-19 (Claude Code session — call-hangup fix verified, comm
 |---|---|---|
 | Call bug: hangup during ring leaves callee ringing + call bounces back | ✅ 19 Aug | Fixed in `api-server/src/ws/manager.ts`; `callSignals.test.ts` 53/53 green. Committed `864a40f`, **deployed to Railway 22:48 (deployment f79b1fb6, commit 47e27ed) — live in production.** Remaining: Benji re-tests the original repro on devices (call out → hang up before answer → callee's ring should stop on app wake, no bounce-back). Note: CallKit ringing on a dead app can't be cancelled mid-push; the fix stops it at first app contact. |
 | Local STATUS/TRACKER commits unpushed | ✅ 19 Aug | Pushed — `feat/push-notifications` now in sync with origin through `864a40f`. |
-| pg_dumpall incident backups on disk | ⬜ | Two files, contain full data + role hashes. Locate → delete or encrypt. |
+| pg_dumpall incident backups on disk | ✅ 19 Aug | Located and deleted `pre-rotation-dump-20260819.sql` (1.8MB, full cluster dump incl. role password hashes) + its `.stderr` sibling, found in Claude Code session `e968c7a2`'s scratchpad (`/private/tmp/claude-501/.../scratchpad/`). **Only 1 file found, not 2 as STATUS.md's "one per rotation" implied** — exhaustive search of home, /tmp, /var, and all session scratchpads on this Mac turned up nothing else. If a second dump exists it may be on a different machine/session already cleaned up; flag to Benji if that matters. |
 | Legacy AD/plaintext tiers in secureStorage | ⏸ scheduled | Remove a release or two after 72 ships; unknown format then becomes a hard error (audit #6 follow-up). |
 
 ## Incidents

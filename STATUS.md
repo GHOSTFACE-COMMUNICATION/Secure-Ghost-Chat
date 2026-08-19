@@ -36,10 +36,14 @@ Durable facts:
 - Incident tmp scripts (artifacts/api-server/_*-tmp.*) deleted after
   close. The "public Patroni API domain" from an early readout could not
   be found on re-check — treat as misread, nothing to restrict.
-- ⚠ Two local pg_dumpall backup files were taken during the incident
-  (one per rotation). They contain full data AND role password hashes.
-  Delete them or move them into encrypted storage — still pending, ask
-  Benji where they were saved.
+- ✅ pg_dumpall backup cleanup done (19 Aug, Claude Code session): found
+  and deleted `pre-rotation-dump-20260819.sql` (1.8MB cluster dump incl.
+  role password hashes) + its `.stderr` sibling, sitting in Claude Code
+  session `e968c7a2`'s scratchpad. Only one file turned up despite this
+  note's original claim of two ("one per rotation") — exhaustive search
+  of home, /tmp, /var, and every session scratchpad on this Mac found
+  nothing else. If a second dump genuinely exists (different machine, or
+  a session already cleaned up), it's still out there — flag to Benji.
 - Seven `artifacts/api-server/_*-tmp.*` scripts are incident tooling from
   that session — untracked on purpose; delete after the incident closes.
 
