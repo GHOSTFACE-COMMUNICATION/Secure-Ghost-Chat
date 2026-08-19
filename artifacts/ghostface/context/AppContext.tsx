@@ -59,7 +59,7 @@ import {
 import { x25519, ed25519 } from "@noble/curves/ed25519.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { randomBytes } from "@noble/hashes/utils.js";
+import { randomBytes } from "@/lib/csprng";
 import { keyToRecoveryPhrase, recoveryPhraseToKey } from "@/lib/recoveryPhrase";
 
 const toHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join("");

@@ -15,7 +15,7 @@
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { managedNonce } from "@noble/ciphers/utils.js";
-import { randomBytes } from "@noble/hashes/utils.js";
+import { randomBytes } from "@/lib/csprng";
 
 // btoa/atob are provided by Hermes (React Native) and the browser, but
 // aren't declared in the Expo TS lib set. Declare them locally so we get

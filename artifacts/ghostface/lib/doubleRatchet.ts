@@ -28,7 +28,7 @@ import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { randomBytes } from "@noble/hashes/utils.js";
+import { randomBytes } from "@/lib/csprng";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 
 const MAX_SKIP = 1000;

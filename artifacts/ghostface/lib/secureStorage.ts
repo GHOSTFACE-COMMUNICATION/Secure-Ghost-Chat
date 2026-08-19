@@ -19,7 +19,7 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { managedNonce } from "@noble/ciphers/utils.js";
-import { randomBytes } from "@noble/hashes/utils.js";
+import { randomBytes } from "@/lib/csprng";
 
 const STORAGE_KEY_NAME = "ghostface_storage_enc_key";
 

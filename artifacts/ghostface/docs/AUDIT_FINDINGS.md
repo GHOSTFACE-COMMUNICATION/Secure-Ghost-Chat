@@ -39,9 +39,52 @@ See #2.
 
 See #2.
 
-## #5 — *(not yet logged)*
+## #5 — CSPRNG wiring not verified for release builds — **RESOLVED**
 
-See #2.
+**Finding**: key generation, nonces, and ML-KEM encapsulation randomness
+must come from a true OS CSPRNG in production bundles, not a JS
+polyfill/fallback (e.g. a `Math.random`-backed shim, or a dev-only global
+that's absent in release) — but nothing in the app verified that at
+runtime, and the actual wiring had never been traced end to end.
+
+**Trace**: `index.js` installs `react-native-get-random-values` as its
+first statement (before `expo-router/entry`), backing
+`globalThis.crypto.getRandomValues` with `SecRandomCopyBytes` on iOS and
+`java.security.SecureRandom` on Android. `@noble/hashes/utils.js`'s
+`randomBytes()` reads that global and throws if it's absent — no silent
+fallback at that layer — and `@noble/post-quantum/utils.js` (used by
+`ml_kem768`'s `encapsulate`) re-exports that exact same function, so ML-KEM
+encapsulation, DH ratchet keys, AEAD nonces, and storage/blob keys all
+funnel through one identical call. The one real gap: `react-native-get-random-values`
+itself has a dev-only fallback (`isRemoteDebuggingInChrome()` →
+`Math.random()`-backed shim, `console.warn` only, never throws) that
+nothing in the app detected or asserted against.
+
+**Fix**: `lib/csprng.ts` — the single approved randomness source. Positively
+detects the native module (`NativeModules.RNGetRandomValues`/`ExpoRandom`/
+`ExpoCrypto`, mirroring `react-native-get-random-values`'s own branching)
+before trusting the global at all, and throws `InsecureCsprngError` instead
+of ever drawing from a non-native fallback. All five direct call sites
+(`context/AppContext.tsx`, `lib/secureStorage.ts`, `lib/blobStore.ts`,
+`lib/crypto.ts`, `lib/doubleRatchet.ts`) now import `randomBytes` from this
+module instead of `@noble/hashes/utils.js` directly; `lib/crypto.ts`'s four
+`managedNonce(chacha20poly1305)` call sites now pass it explicitly too, so
+even ChaCha20-Poly1305's auto-nonce generation (previously defaulting to
+`@noble/ciphers`'s own independent `randomBytes`) routes through the same
+chokepoint. `index.js` calls `assertCsprngHealthy()` — generates 32 bytes
+twice, asserts non-equal, asserts not all-zero, asserts native backing —
+immediately after the polyfill import and before `expo-router/entry`, so
+no code path can create identity/key material without this having already
+passed; it fails closed (throws, refuses to boot) rather than continuing on
+unverified randomness. Test coverage in `lib/csprng.test.ts` (native-backing
+detection incl. alternate native surfaces, throw-not-fallback behavior with
+native backing absent, self-test pass/fail-closed paths).
+
+**Native backing, explicitly**: iOS release and Android release both go
+through `react-native-get-random-values`'s native module —
+`SecRandomCopyBytes(kSecRandomDefault, ...)` on iOS,
+`java.security.SecureRandom` on Android — never the JS fallback, which is
+unreachable when `__DEV__` is false.
 
 ## #6 — No associated data on `secureStorage.ts` / `crypto.ts` sealed envelopes — **OPEN**
 

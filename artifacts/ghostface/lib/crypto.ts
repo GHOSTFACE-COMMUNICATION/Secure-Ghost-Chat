@@ -32,7 +32,7 @@ import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { managedNonce } from "@noble/ciphers/utils.js";
 import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { randomBytes } from "@noble/hashes/utils.js";
+import { randomBytes } from "@/lib/csprng";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,13 +96,13 @@ export interface EncryptedMessage {
 }
 
 export function encryptMessage(plaintext: string, key: Uint8Array): EncryptedMessage {
-  const chacha = managedNonce(chacha20poly1305);
+  const chacha = managedNonce(chacha20poly1305, randomBytes);
   const encrypted = chacha(key).encrypt(strToBytes(plaintext));
   return { ciphertext: bytesToHex(encrypted), algorithm: "ChaCha20-Poly1305", sealed: false, version: 1 };
 }
 
 export function decryptMessage(msg: EncryptedMessage, key: Uint8Array): string {
-  const chacha = managedNonce(chacha20poly1305);
+  const chacha = managedNonce(chacha20poly1305, randomBytes);
   const decrypted = chacha(key).decrypt(hexToBytes(msg.ciphertext));
   return bytesToStr(decrypted);
 }
@@ -148,7 +148,7 @@ export function sealedEncryptMessage(
 ): SealedMessage {
   const envelope: SealedEnvelope = { from: senderAlias, content, ts: Date.now() };
   const payload = JSON.stringify(envelope);
-  const chacha = managedNonce(chacha20poly1305);
+  const chacha = managedNonce(chacha20poly1305, randomBytes);
   const encrypted = chacha(key).encrypt(strToBytes(payload));
   return {
     ciphertext: bytesToHex(encrypted),
@@ -166,7 +166,7 @@ export function sealedDecryptMessage(
   msg: SealedMessage,
   key: Uint8Array
 ): SealedEnvelope {
-  const chacha = managedNonce(chacha20poly1305);
+  const chacha = managedNonce(chacha20poly1305, randomBytes);
   const decrypted = chacha(key).decrypt(hexToBytes(msg.ciphertext));
   return JSON.parse(bytesToStr(decrypted)) as SealedEnvelope;
 }
