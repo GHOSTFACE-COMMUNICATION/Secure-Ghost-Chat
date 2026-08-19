@@ -7,6 +7,11 @@ state: active incidents, audit board, pre-ship gates, in-flight work.
 **Update it before ending any session** in which state changed. A stale
 STATUS.md is worse than none.
 
+**`TRACKER.md` (repo root) is the task board** — GF-xx business tasks,
+audit findings, release gates, open engineering items. When you finish,
+start, or block a piece of work, update its row in the same commit as the
+work itself. Don't wait to be asked.
+
 ## Repo layout
 
 - **Canonical repo**: `~/Projects/ghostface-clean` (this directory). It is the
