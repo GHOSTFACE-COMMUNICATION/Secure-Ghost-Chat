@@ -1,5 +1,12 @@
 # GHOSTFACE — working agreement
 
+## Start here, every session
+
+**Read `STATUS.md` (repo root) first** — it is the living cross-session
+state: active incidents, audit board, pre-ship gates, in-flight work.
+**Update it before ending any session** in which state changed. A stale
+STATUS.md is worse than none.
+
 ## Repo layout
 
 - **Canonical repo**: `~/Projects/ghostface-clean` (this directory). It is the
