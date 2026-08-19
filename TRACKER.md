@@ -8,7 +8,7 @@ to set.
 
 Status legend: ✅ done · 🔄 in progress · ⏸ blocked/waiting · ⬜ not started
 
-Last updated: 2026-08-19 (Cowork session)
+Last updated: 2026-08-19 (Claude Code session — call-hangup fix verified, committed, pushed)
 
 ## Business / legal (GF tracker)
 
@@ -47,8 +47,8 @@ Last updated: 2026-08-19 (Cowork session)
 
 | Item | Status | Next action |
 |---|---|---|
-| Call bug: hangup during ring leaves callee ringing + call bounces back | 🔄 fix written | `api-server/src/ws/manager.ts` + `callSignals.test.ts` done, tsc clean. **Run `npx vitest run` on host** (sandbox can't — mac-built node_modules). Green → commit `fix(api): deliver call-hangup to waking callees, drop stale parked call-rings` → push → deploy to Railway. |
-| Local STATUS/TRACKER commits unpushed | 🔄 | `git push` from Benji's terminal (sandbox has no GitHub creds). |
+| Call bug: hangup during ring leaves callee ringing + call bounces back | ✅ 19 Aug | Fixed in `api-server/src/ws/manager.ts`; `callSignals.test.ts` 53/53 green, tsc clean. Committed `864a40f`, pushed to `feat/push-notifications`. **Next: deploy to Railway.** (2/4 new tests initially failed on test-isolation, not the fix — `connectedClients` is module-scoped and fake sockets never fired `close`, so a stale alias from an earlier test polluted a later one expecting it offline; fixed by giving each test a unique never-reused alias pair.) |
+| Local STATUS/TRACKER commits unpushed | ✅ 19 Aug | Pushed — `feat/push-notifications` now in sync with origin through `864a40f`. |
 | pg_dumpall incident backups on disk | ⬜ | Two files, contain full data + role hashes. Locate → delete or encrypt. |
 | Legacy AD/plaintext tiers in secureStorage | ⏸ scheduled | Remove a release or two after 72 ships; unknown format then becomes a hard error (audit #6 follow-up). |
 
