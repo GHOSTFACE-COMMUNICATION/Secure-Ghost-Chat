@@ -378,7 +378,7 @@ export default function MessagesScreen() {
       borderRadius: colors.radius,
     },
     emptyBtnTxt: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,
@@ -432,7 +432,7 @@ export default function MessagesScreen() {
       alignItems: "center",
     },
     sheetBtnTxt: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,

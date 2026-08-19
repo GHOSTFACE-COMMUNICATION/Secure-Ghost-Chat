@@ -978,6 +978,10 @@ export default function ChatScreen() {
       alignItems: "center", justifyContent: "center",
       borderWidth: 1, borderColor: colors.border,
     },
+    recorderBtnGoldFill: {
+      width: "100%", paddingVertical: 12,
+      alignItems: "center", justifyContent: "center",
+    },
     recorderBtnTxt: {
       fontSize: 11, fontWeight: "800", letterSpacing: 2,
     },
@@ -1599,7 +1603,7 @@ export default function ChatScreen() {
                 <Ionicons
                   name="send"
                   size={16}
-                  color={colors.primaryForeground}
+                  color="#FFFFFF"
                 />
               </GoldGradient>
             ) : (
@@ -1745,17 +1749,16 @@ export default function ChatScreen() {
                 <Text style={[styles.recorderBtnTxt, { color: colors.mutedForeground }]}>CANCEL</Text>
               </Pressable>
               <Pressable
-                style={[
-                  styles.recorderBtn,
-                  { backgroundColor: colors.primary, borderColor: colors.primary },
-                ]}
+                style={[styles.recorderBtn, { borderColor: colors.primary, padding: 0, overflow: "hidden" }]}
                 onPress={() => stopRecorder(true)}
                 disabled={!isRecording}
                 testID="recorder-stop"
               >
-                <Text style={[styles.recorderBtnTxt, { color: colors.primaryForeground }]}>
-                  STOP &amp; ATTACH
-                </Text>
+                <GoldGradient style={styles.recorderBtnGoldFill}>
+                  <Text style={[styles.recorderBtnTxt, { color: "#FFFFFF" }]}>
+                    STOP &amp; ATTACH
+                  </Text>
+                </GoldGradient>
               </Pressable>
             </View>
           </View>

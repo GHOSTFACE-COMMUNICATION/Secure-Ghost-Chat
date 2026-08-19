@@ -71,7 +71,7 @@ export default function CallScreen() {
     emptySub: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 1, opacity: 0.6 },
     emptyBtn: { marginTop: 8, borderRadius: colors.radius, overflow: "hidden" },
     emptyBtnInner: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: colors.radius },
-    emptyBtnTxt: { color: colors.primaryForeground, fontSize: 12, fontWeight: "800", letterSpacing: 3 },
+    emptyBtnTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800", letterSpacing: 3 },
     pad: { height: 110 },
   });
 

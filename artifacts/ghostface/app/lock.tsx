@@ -499,6 +499,12 @@ export default function LockScreen() {
       borderWidth: 1,
       borderColor: colors.border,
     },
+    keyBtnGoldFill: {
+      width: "100%",
+      height: "100%",
+      alignItems: "center",
+      justifyContent: "center",
+    },
     keyText: {
       color: colors.foreground,
       fontSize: 22,
@@ -600,7 +606,7 @@ export default function LockScreen() {
       borderRadius: colors.radius,
     },
     enterBtnText: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 15,
       fontWeight: "800" as const,
       letterSpacing: 6,
@@ -827,11 +833,15 @@ export default function LockScreen() {
                     return (
                       <Pressable
                         key={ki}
-                        style={[styles.keyBtn, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                        style={[styles.keyBtn, { borderColor: colors.primary, overflow: "hidden" }]}
                         onPress={handleSubmit}
                         testID="key-submit"
                       >
-                        <Ionicons name="checkmark" size={26} color={colors.primaryForeground} />
+                        <GoldGradient style={StyleSheet.absoluteFill}>
+                          <View style={styles.keyBtnGoldFill}>
+                            <Ionicons name="checkmark" size={26} color="#FFFFFF" />
+                          </View>
+                        </GoldGradient>
                       </Pressable>
                     );
                   }

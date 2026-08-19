@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GoldGradient } from "@/components/GoldGradient";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
@@ -629,8 +630,13 @@ export default function CallScreen() {
       width: 56, height: 56, borderRadius: 28,
       backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
       alignItems: "center" as const, justifyContent: "center" as const,
+      overflow: "hidden" as const,
     },
-    ctrlBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    ctrlBtnActiveWrap: { borderColor: colors.primary },
+    ctrlBtnGoldFill: {
+      width: "100%" as const, height: "100%" as const,
+      alignItems: "center" as const, justifyContent: "center" as const,
+    },
     endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.destructive, alignItems: "center" as const, justifyContent: "center" as const },
     modeLabel: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 4, textAlign: "center" as const },
     webrtcBadge: {
@@ -713,8 +719,14 @@ export default function CallScreen() {
         {/* Call controls */}
         <View style={styles.controls}>
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]} onPress={toggleMute}>
-              <Ionicons name={muted ? "mic-off" : "mic"} size={22} color={muted ? colors.primaryForeground : colors.foreground} />
+            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActiveWrap]} onPress={toggleMute}>
+              {muted ? (
+                <GoldGradient style={styles.ctrlBtnGoldFill}>
+                  <Ionicons name="mic-off" size={22} color="#FFFFFF" />
+                </GoldGradient>
+              ) : (
+                <Ionicons name="mic" size={22} color={colors.foreground} />
+              )}
             </Pressable>
             <Text style={styles.modeLabel}>{muted ? "UNMUTE" : "MUTE"}</Text>
           </View>
@@ -727,8 +739,14 @@ export default function CallScreen() {
           </View>
 
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSpeakerOn((s) => !s); }}>
-              <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={22} color={speakerOn ? colors.primaryForeground : colors.foreground} />
+            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActiveWrap]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSpeakerOn((s) => !s); }}>
+              {speakerOn ? (
+                <GoldGradient style={styles.ctrlBtnGoldFill}>
+                  <Ionicons name="volume-high" size={22} color="#FFFFFF" />
+                </GoldGradient>
+              ) : (
+                <Ionicons name="volume-medium" size={22} color={colors.foreground} />
+              )}
             </Pressable>
             <Text style={styles.modeLabel}>SPEAKER</Text>
           </View>

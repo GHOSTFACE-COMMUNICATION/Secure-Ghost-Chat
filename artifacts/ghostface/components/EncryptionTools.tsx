@@ -188,7 +188,7 @@ export default function EncryptionTools() {
     modeTxt: { fontSize: 11, letterSpacing: 2, fontWeight: "700" },
     btn: { borderRadius: colors.radius, overflow: "hidden" },
     btnGold: { borderRadius: colors.radius, paddingVertical: 13, alignItems: "center" },
-    btnTxt: { color: colors.primaryForeground, fontSize: 12, fontWeight: "800", letterSpacing: 3 },
+    btnTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800", letterSpacing: 3 },
     out: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: colors.radius, padding: 12 },
     outTxt: { color: colors.primary, fontSize: 11, fontFamily: MONO },
     copyRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, alignSelf: "flex-end" },

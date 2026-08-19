@@ -648,7 +648,7 @@ export default function SettingsScreen() {
       borderRadius: colors.radius,
     },
     modalBtnText: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800" as const,
       letterSpacing: 3,
@@ -1342,15 +1342,16 @@ export default function SettingsScreen() {
                   ) : null}
                   <Pressable
                     style={[
-                      styles.modalBtn,
-                      { backgroundColor: colors.primary },
+                      styles.modalBtnGold,
                       decoyPin.length < 4 && { opacity: 0.4 },
                     ]}
                     onPress={handleDecoyPinSave}
                     disabled={decoyPin.length < 4}
                     testID="decoy-pin-save-btn"
                   >
-                    <Text style={styles.modalBtnText}>SET DECOY PIN</Text>
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>SET DECOY PIN</Text>
+                    </GoldGradient>
                   </Pressable>
                   {hasDecoyPin && (
                     <Pressable

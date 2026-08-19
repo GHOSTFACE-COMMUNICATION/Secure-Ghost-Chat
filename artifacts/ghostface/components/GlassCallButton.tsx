@@ -4,14 +4,14 @@ import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { GOLD_GLASS_TINT } from "@/components/GoldGradient";
 import { boxShadow } from "@/lib/shadow";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
 const SIZE = 40;
-// Cool cyan-blue tint for the glass effect — distinct from the app's gold
-// accent, which stays reserved for primary actions elsewhere.
-const GLASS_TINT = "rgba(94,200,255,0.32)";
+// Same gold liquid-glass tint used everywhere else in the app.
+const GLASS_TINT = GOLD_GLASS_TINT;
 
 interface GlassCallButtonProps {
   icon: IoniconName;
@@ -23,8 +23,8 @@ interface GlassCallButtonProps {
 
 // Uses real native Liquid Glass (iOS 26+, via expo-glass-effect) where
 // available. Older iOS/Android fall back to the hand-rolled BlurView +
-// gradient approximation this component used before — same cool-blue tint
-// so the two paths read as the same design.
+// gradient approximation this component used before — same gold tint so
+// the two paths read as the same design.
 const useNativeGlass = isLiquidGlassAvailable();
 
 export function GlassCallButton({
@@ -57,7 +57,7 @@ export function GlassCallButton({
             <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
             <LinearGradient
               pointerEvents="none"
-              colors={["rgba(120,195,255,0.45)", "rgba(94,170,230,0.12)", "rgba(80,150,210,0.04)"]}
+              colors={["rgba(245,200,80,0.45)", "rgba(191,155,48,0.12)", "rgba(154,122,36,0.04)"]}
               locations={[0, 0.55, 1]}
               start={{ x: 0.15, y: 0 }}
               end={{ x: 0.85, y: 1 }}
@@ -100,6 +100,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: SIZE / 2,
     borderWidth: 1,
-    borderColor: "rgba(150,210,255,0.35)",
+    borderColor: "rgba(217,184,74,0.35)",
   },
 });

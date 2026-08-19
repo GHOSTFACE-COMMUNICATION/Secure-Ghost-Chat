@@ -1,19 +1,19 @@
 const colors = {
   dark: {
-    text: "#EDEDED",
+    text: "#FFFFFF",
     tint: "#bf9b30",
 
     background: "#000000",
-    foreground: "#EDEDED",
+    foreground: "#FFFFFF",
 
     card: "#0A0A0A",
-    cardForeground: "#EDEDED",
+    cardForeground: "#FFFFFF",
 
     primary: "#bf9b30",
     primaryForeground: "#000000",
 
     secondary: "#0F0F0F",
-    secondaryForeground: "#EDEDED",
+    secondaryForeground: "#FFFFFF",
 
     muted: "#161616",
     mutedForeground: "#6B6B6B",
@@ -29,24 +29,24 @@ const colors = {
 
     success: "#7dd3fc",
     warning: "#bf9b30",
-    ghost: "#EDEDED",
+    ghost: "#FFFFFF",
   },
 
   light: {
-    text: "#EDEDED",
+    text: "#FFFFFF",
     tint: "#bf9b30",
 
     background: "#000000",
-    foreground: "#EDEDED",
+    foreground: "#FFFFFF",
 
     card: "#0A0A0A",
-    cardForeground: "#EDEDED",
+    cardForeground: "#FFFFFF",
 
     primary: "#bf9b30",
     primaryForeground: "#000000",
 
     secondary: "#0F0F0F",
-    secondaryForeground: "#EDEDED",
+    secondaryForeground: "#FFFFFF",
 
     muted: "#161616",
     mutedForeground: "#6B6B6B",
@@ -62,7 +62,7 @@ const colors = {
 
     success: "#7dd3fc",
     warning: "#bf9b30",
-    ghost: "#EDEDED",
+    ghost: "#FFFFFF",
   },
 
   radius: 6,

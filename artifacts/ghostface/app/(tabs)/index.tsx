@@ -25,12 +25,12 @@ const BG = "#000";
 const GOLD = "#bf9b30";
 // Real native Liquid Glass (iOS 26+, via expo-glass-effect) for the radial
 // menu nodes where available; older iOS/Android keep the BlurView +
-// gradient approximation below. Inactive nodes use a cool cyan-blue tint
-// (matching GlassCallButton) instead of plain white; the active node keeps
-// gold since that's a functional selection signal, not just decoration.
+// gradient approximation below. Both states are the app's standard gold —
+// active/inactive is distinguished by brightness, not by switching color,
+// so every glass surface in the app reads as the same gold liquid glass.
 const USE_NATIVE_GLASS = isLiquidGlassAvailable();
 const NODE_GLASS_TINT_ACTIVE = "rgba(245,200,80,0.4)";
-const NODE_GLASS_TINT_INACTIVE = "rgba(94,200,255,0.28)";
+const NODE_GLASS_TINT_INACTIVE = "rgba(191,155,48,0.22)";
 
 const FONT_SERIF = Platform.select({
   ios: "Georgia",
@@ -516,7 +516,7 @@ export default function HomeScreen() {
                             colors={
                               active
                                 ? ["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]
-                                : ["rgba(120,195,255,0.45)", "rgba(94,170,230,0.12)", "rgba(80,150,210,0.04)"]
+                                : ["rgba(191,155,48,0.32)", "rgba(154,122,36,0.10)", "rgba(154,122,36,0.03)"]
                             }
                             locations={[0, 0.55, 1]}
                             start={{ x: 0.15, y: 0 }}
@@ -754,7 +754,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(150,210,255,0.3)",
+    borderColor: "rgba(217,184,74,0.3)",
   },
   nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",

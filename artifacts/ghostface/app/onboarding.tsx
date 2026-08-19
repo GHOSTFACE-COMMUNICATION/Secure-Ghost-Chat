@@ -228,7 +228,7 @@ export default function OnboardingScreen() {
       opacity: 0.3,
     },
     confirmBtnText: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 13,
       fontWeight: "800" as const,
       letterSpacing: 3,

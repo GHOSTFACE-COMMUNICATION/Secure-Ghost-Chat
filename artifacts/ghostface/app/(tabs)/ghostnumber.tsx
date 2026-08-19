@@ -488,7 +488,7 @@ export default function GhostNumberScreen() {
       borderRadius: colors.radius,
     },
     rotateNowBtnText: {
-      color: "#000",
+      color: "#FFFFFF",
       fontSize: 10,
       fontWeight: "800",
       letterSpacing: 2,
@@ -539,7 +539,7 @@ export default function GhostNumberScreen() {
       opacity: 0.5,
     },
     acquireBtnText: {
-      color: "#000",
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,
@@ -728,10 +728,10 @@ export default function GhostNumberScreen() {
                 >
                   <GoldGradient style={styles.rotateNowBtnInner}>
                     {rotatingNow === n.id ? (
-                      <ActivityIndicator size="small" color="#000" />
+                      <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <>
-                        <Ionicons name="refresh-outline" size={12} color="#000" />
+                        <Ionicons name="refresh-outline" size={12} color="#FFFFFF" />
                         <Text style={styles.rotateNowBtnText}>ROTATE NOW</Text>
                       </>
                     )}
@@ -769,10 +769,10 @@ export default function GhostNumberScreen() {
         >
           <GoldGradient style={styles.acquireBtnInner}>
             {provisioning || !loaded ? (
-              <ActivityIndicator color="#000" />
+              <ActivityIndicator color="#FFFFFF" />
             ) : (
               <>
-                <Ionicons name="add-circle-outline" size={16} color="#000" />
+                <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
                 <Text style={styles.acquireBtnText}>ACQUIRE NUMBER</Text>
               </>
             )}
