@@ -83,11 +83,12 @@ type NavNode = {
   label: string;
   onPress: () => void;
   activeKey?: "vpn";
+  locked?: boolean;
 };
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { alias, vpnConnected, panicWipe } = useApp();
+  const { alias, vpnConnected, panicWipe, hasWalletPin } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Decorative ring spin
@@ -280,6 +281,7 @@ export default function HomeScreen() {
       icon: "wallet-outline",
       label: "WALLET",
       onPress: go(() => router.push("/(tabs)/wallet")),
+      locked: hasWalletPin,
     },
     {
       icon: "phone-portrait-outline",
@@ -534,6 +536,11 @@ export default function HomeScreen() {
                           />
                         </View>
                       )}
+                      {node.locked && (
+                        <View style={styles.nodeLockBadge} pointerEvents="none">
+                          <Ionicons name="lock-closed" size={9} color="#000000" />
+                        </View>
+                      )}
                     </View>
                     <Text
                       style={[
@@ -758,6 +765,19 @@ const styles = StyleSheet.create({
   },
   nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",
+  },
+  nodeLockBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#bf9b30",
+    borderWidth: 1.5,
+    borderColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
   },
   nodeLabel: {
     fontFamily: FONT_MONO,

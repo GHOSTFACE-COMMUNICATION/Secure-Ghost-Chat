@@ -1,24 +1,45 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
-import React from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassCallButton } from "@/components/GlassCallButton";
 import { GoldGradient } from "@/components/GoldGradient";
 import { SecureBadge } from "@/components/SecureBadge";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
-import { useApp } from "@/context/AppContext";
+import { CallLogEntry, useApp } from "@/context/AppContext";
 import { getProfileColor } from "@/lib/chatColors";
 import { useColors } from "@/hooks/useColors";
+
+function formatTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  const d = new Date(ts);
+  if (mins < 1) return "NOW";
+  if (mins < 60) return `${mins}m`;
+  if (mins < 1440) return `${Math.floor(mins / 60)}h`;
+  return `${d.getDate()}/${d.getMonth() + 1}`;
+}
+
+function formatDuration(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export default function CallScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { conversations } = useApp();
+  const { callHistory, markCallsSeen } = useApp();
 
-  const sorted = [...conversations].sort((a, b) => b.timestamp - a.timestamp);
+  // Clear the missed-call badge whenever this tab is actually viewed.
+  useFocusEffect(
+    useCallback(() => {
+      markCallsSeen();
+    }, [markCallsSeen])
+  );
 
   const startCall = (alias: string, mode: "voice" | "video") => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -61,9 +82,13 @@ export default function CallScreen() {
     },
     avatarTxt: { color: colors.foreground, fontSize: 15, fontWeight: "800", letterSpacing: 1 },
     itemBody: { flex: 1 },
+    aliasRow: { flexDirection: "row", alignItems: "center", gap: 6 },
     alias: { color: colors.foreground, fontSize: 14, fontWeight: "700", letterSpacing: 2 },
-    sealedRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
-    sealedTxt: { color: colors.destructive, fontSize: 8, fontWeight: "800", letterSpacing: 1.5 },
+    aliasMissed: { color: colors.destructive },
+    metaRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 },
+    metaTxt: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
+    metaMissed: { color: colors.destructive },
+    timeTxt: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
     actions: { flexDirection: "row", gap: 10 },
     itemDivider: { height: 1, backgroundColor: colors.border, marginLeft: 80 },
     empty: { alignItems: "center", paddingTop: 60, gap: 12 },
@@ -84,13 +109,13 @@ export default function CallScreen() {
         </View>
 
         <FlatList
-          data={sorted}
+          data={callHistory}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="call-outline" size={48} color={colors.border} />
-              <Text style={styles.emptyTxt}>NO CONTACTS</Text>
+              <Text style={styles.emptyTxt}>NO CALLS YET</Text>
               <Text style={styles.emptySub}>Add a contact to start calling</Text>
               <Pressable
                 style={styles.emptyBtn}
@@ -105,8 +130,24 @@ export default function CallScreen() {
               </Pressable>
             </View>
           }
-          renderItem={({ item, index }) => {
-            const sealed = !!item.destroyedAt;
+          renderItem={({ item, index }: { item: CallLogEntry; index: number }) => {
+            const missed = item.outcome === "missed" && item.direction === "incoming";
+            const directionIcon =
+              item.outcome === "declined"
+                ? "close-circle-outline"
+                : item.direction === "outgoing"
+                ? "arrow-up-outline"
+                : "arrow-down-outline";
+            const outcomeLabel =
+              item.outcome === "declined"
+                ? "DECLINED"
+                : missed
+                ? "MISSED"
+                : item.outcome === "missed"
+                ? "NO ANSWER" // outgoing call the other side never picked up
+                : item.durationSec !== undefined
+                ? formatDuration(item.durationSec)
+                : "";
             return (
               <View>
                 <View style={styles.item}>
@@ -114,32 +155,40 @@ export default function CallScreen() {
                     <Text style={styles.avatarTxt}>{item.alias.slice(0, 2)}</Text>
                   </View>
                   <View style={styles.itemBody}>
-                    <Text style={styles.alias}>{item.alias}</Text>
-                    {sealed && (
-                      <View style={styles.sealedRow}>
-                        <Ionicons name="skull-outline" size={9} color={colors.destructive} />
-                        <Text style={styles.sealedTxt}>SELF-DESTRUCTED</Text>
-                      </View>
-                    )}
-                  </View>
-                  {!sealed && (
-                    <View style={styles.actions}>
-                      <GlassCallButton
-                        icon="call-outline"
-                        onPress={() => startCall(item.alias, "voice")}
-                        testID={`call-voice-${item.id}`}
-                        accessibilityLabel={`Voice call ${item.alias}`}
-                      />
-                      <GlassCallButton
-                        icon="videocam-outline"
-                        onPress={() => startCall(item.alias, "video")}
-                        testID={`call-video-${item.id}`}
-                        accessibilityLabel={`Video call ${item.alias}`}
-                      />
+                    <View style={styles.aliasRow}>
+                      <Text style={[styles.alias, missed && styles.aliasMissed]}>{item.alias}</Text>
                     </View>
-                  )}
+                    <View style={styles.metaRow}>
+                      <Ionicons
+                        name={directionIcon}
+                        size={10}
+                        color={missed ? colors.destructive : colors.mutedForeground}
+                      />
+                      <Ionicons
+                        name={item.mode === "video" ? "videocam-outline" : "call-outline"}
+                        size={10}
+                        color={missed ? colors.destructive : colors.mutedForeground}
+                      />
+                      <Text style={[styles.metaTxt, missed && styles.metaMissed]}>{outcomeLabel}</Text>
+                      <Text style={styles.timeTxt}>· {formatTime(item.timestamp)}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.actions}>
+                    <GlassCallButton
+                      icon="call-outline"
+                      onPress={() => startCall(item.alias, "voice")}
+                      testID={`call-voice-${item.id}`}
+                      accessibilityLabel={`Voice call ${item.alias}`}
+                    />
+                    <GlassCallButton
+                      icon="videocam-outline"
+                      onPress={() => startCall(item.alias, "video")}
+                      testID={`call-video-${item.id}`}
+                      accessibilityLabel={`Video call ${item.alias}`}
+                    />
+                  </View>
                 </View>
-                {index < sorted.length - 1 && <View style={styles.itemDivider} />}
+                {index < callHistory.length - 1 && <View style={styles.itemDivider} />}
               </View>
             );
           }}

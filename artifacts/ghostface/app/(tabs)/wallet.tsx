@@ -48,8 +48,31 @@ export default function WalletScreen() {
     solBalance,
     connectWallet,
     disconnectWallet,
+    hasWalletPin,
+    walletUnlocked,
+    checkWalletPin,
   } = useApp();
   const { scrollRef, onScroll } = useScrollPersist<ScrollView>();
+
+  const [gatePin, setGatePin] = useState("");
+  const [gateError, setGateError] = useState("");
+  const [gateChecking, setGateChecking] = useState(false);
+
+  const handleUnlock = async () => {
+    if (gatePin.length < 4) return;
+    setGateChecking(true);
+    setGateError("");
+    const ok = await checkWalletPin(gatePin);
+    setGateChecking(false);
+    if (!ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setGateError("INCORRECT PIN");
+      setGatePin("");
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setGatePin("");
+  };
 
   const [copied, setCopied] = useState(false);
   const [copiedConnected, setCopiedConnected] = useState(false);
@@ -569,6 +592,70 @@ export default function WalletScreen() {
     },
 
   });
+
+  const gateStyles = StyleSheet.create({
+    container: { alignItems: "center", gap: 14, paddingHorizontal: 32 },
+    title: { color: colors.foreground, fontSize: 16, fontWeight: "800", letterSpacing: 4, marginTop: 8 },
+    sub: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 1, textAlign: "center" },
+    input: {
+      width: "100%",
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: colors.radius,
+      backgroundColor: colors.input,
+      color: colors.foreground,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 14,
+      letterSpacing: 4,
+      textAlign: "center",
+      marginTop: 10,
+    },
+    error: { color: colors.destructive, fontSize: 11, letterSpacing: 2, fontWeight: "700" },
+    unlockBtn: { width: "100%", borderRadius: colors.radius, overflow: "hidden", marginTop: 4 },
+    unlockBtnInner: { paddingVertical: 14, alignItems: "center" },
+    unlockBtnTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800", letterSpacing: 3 },
+  });
+
+  if (hasWalletPin && !walletUnlocked) {
+    return (
+      <TabScreenWrapper>
+        <View style={[styles.container, gateStyles.container, { paddingTop: insets.top + 40 }]}>
+          <Ionicons name="lock-closed" size={40} color={colors.primary} />
+          <Text style={gateStyles.title}>WALLET LOCKED</Text>
+          <Text style={gateStyles.sub}>Enter your wallet PIN to continue</Text>
+          <TextInput
+            style={gateStyles.input}
+            value={gatePin}
+            onChangeText={(t) => { setGatePin(t.replace(/[^0-9]/g, "")); setGateError(""); }}
+            placeholder="WALLET PIN"
+            placeholderTextColor={colors.mutedForeground}
+            keyboardType="numeric"
+            secureTextEntry
+            maxLength={8}
+            autoFocus
+            onSubmitEditing={handleUnlock}
+            testID="wallet-pin-input"
+          />
+          {gateError ? <Text style={gateStyles.error}>{gateError}</Text> : null}
+          <Pressable
+            style={[gateStyles.unlockBtn, (gatePin.length < 4 || gateChecking) && { opacity: 0.4 }]}
+            onPress={handleUnlock}
+            disabled={gatePin.length < 4 || gateChecking}
+            testID="wallet-unlock-btn"
+          >
+            <GoldGradient style={gateStyles.unlockBtnInner}>
+              {gateChecking ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={gateStyles.unlockBtnTxt}>UNLOCK</Text>
+              )}
+            </GoldGradient>
+          </Pressable>
+        </View>
+      </TabScreenWrapper>
+    );
+  }
 
   return (
     <TabScreenWrapper>

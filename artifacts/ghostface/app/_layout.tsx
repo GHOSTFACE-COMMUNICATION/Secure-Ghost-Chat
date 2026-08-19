@@ -43,7 +43,7 @@ const blockScreenCapture = Platform.OS !== "web" && !__DEV__;
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 function IncomingCallOverlay() {
-  const { incomingCall, dismissIncomingCall, sendCallSignal } = useApp();
+  const { incomingCall, dismissIncomingCall, sendCallSignal, logCall } = useApp();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(-200)).current;
@@ -74,6 +74,13 @@ function IncomingCallOverlay() {
   const handleDecline = () => {
     sendCallSignal({ type: "call-hangup", to: incomingCall.from, callId: incomingCall.callId });
     notifyCallEnded(incomingCall.callId, "decline");
+    logCall({
+      alias: incomingCall.from,
+      direction: "incoming",
+      mode: incomingCall.mode,
+      outcome: "declined",
+      timestamp: Date.now(),
+    });
     dismissIncomingCall();
   };
 

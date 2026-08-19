@@ -61,6 +61,23 @@ if (Platform.OS === "ios") {
   }
 }
 
+// Speaker/earpiece output routing. expo-av's Audio.setAudioModeAsync (used
+// elsewhere in this file for the mic/session setup) has no route-forcing
+// API at all, and react-native-webrtc doesn't expose one either — this is
+// the only piece that actually moves audio between the earpiece and the
+// loudspeaker. Use setForceSpeakerphoneOn specifically, not
+// setSpeakerphoneOn: per this library's own README, setSpeakerphoneOn is
+// unsupported on iOS ("but not force"); setForceSpeakerphoneOn is the one
+// method documented to work on both platforms.
+let InCallManager: any = null;
+if (Platform.OS !== "web") {
+  try {
+    InCallManager = require("react-native-incall-manager").default;
+  } catch (e) {
+    console.warn("[Call] react-native-incall-manager not available:", e);
+  }
+}
+
 type IceServer = { urls: string | string[]; username?: string; credential?: string };
 type IceConfig = { iceServers: IceServer[] };
 
@@ -130,7 +147,7 @@ export default function CallScreen() {
     callId?: string;
   }>();
 
-  const { sendCallSignal, registerCallListener, wsConnected } = useApp();
+  const { sendCallSignal, registerCallListener, wsConnected, logCall } = useApp();
 
   const isCaller = (role ?? "caller") === "caller";
   // useMemo so this only runs once on mount even if callId is undefined.
@@ -172,6 +189,21 @@ export default function CallScreen() {
   // Ref so timeout callbacks always read the latest callState without stale closure
   const callStateRef   = useRef<CallState>(isCaller ? "ringing" : "connecting");
   useEffect(() => { callStateRef.current = callState; }, [callState]);
+  // Set true the moment the peer connection actually reaches "connected" —
+  // used at teardown to decide whether this call was answered (log with
+  // duration) vs missed, independent of what callStateRef reads by then
+  // (it's usually already "ended" via handleEndInternal before unmount).
+  const everConnectedRef = useRef(false);
+  // Mirrors `duration` so the unmount-cleanup effect (a stable closure that
+  // can't re-read state) always logs the actual elapsed seconds, including
+  // a call answered-and-ended within the same second (duration still 0).
+  const durationRef = useRef(0);
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  // Call logging happens exactly once, in the unmount-cleanup effect below —
+  // this guards the one case that doesn't go through unmount at all (the
+  // caller's 30s ring-timeout) so it isn't ALSO logged again if that effect
+  // somehow ran twice in dev/fast-refresh.
+  const loggedCallRef = useRef(false);
 
   // ── Start call duration timer when call goes active ──────────────────────
   useEffect(() => {
@@ -285,6 +317,7 @@ export default function CallScreen() {
       if (!mountedRef.current) return;
       const s = pc.connectionState;
       if (s === "connected") {
+        everConnectedRef.current = true;
         setCallState("active");
         // Tell CallKit the call is actually live now — see the CallKeep
         // comment near the top of this file for why this is required for
@@ -383,6 +416,11 @@ export default function CallScreen() {
         console.warn("[Call] Failed to restore audio session on teardown:", e);
       });
     }
+    if (InCallManager) {
+      // null = "use default behavior" — don't leave this call's forced route
+      // (speaker on/off) applied to whatever the user does next.
+      try { InCallManager.setForceSpeakerphoneOn(null); } catch { /* best-effort cleanup only */ }
+    }
   }, []);
 
   const handleEndInternal = useCallback(() => {
@@ -421,6 +459,36 @@ export default function CallScreen() {
         // already torn everything else down.
         notifyCallEnded(effectiveCallId, "local");
       }
+      // Call history: this unmount is the one place every real end path
+      // eventually passes through (End button, remote hangup, connection
+      // drop, or the app backgrounding mid-call above), so it's the single
+      // spot that logs "answered"/"missed" for this call.tsx instance. The
+      // caller's 30s ring-timeout is the one end path that DOESN'T reach
+      // "connecting" before giving up, so it logs itself, separately, below.
+      if (!loggedCallRef.current) {
+        loggedCallRef.current = true;
+        if (everConnectedRef.current) {
+          logCall({
+            alias: alias ?? "UNKNOWN",
+            direction: isCaller ? "outgoing" : "incoming",
+            mode: isVideo ? "video" : "voice",
+            outcome: "answered",
+            timestamp: Date.now(),
+            durationSec: durationRef.current,
+          });
+        } else if (callStateRef.current === "connecting") {
+          // Accepted (in-app or via CallKit) but the connection never
+          // completed — from the user's perspective this is a missed call,
+          // not a "declined" or "answered" one.
+          logCall({
+            alias: alias ?? "UNKNOWN",
+            direction: isCaller ? "outgoing" : "incoming",
+            mode: isVideo ? "video" : "voice",
+            outcome: "missed",
+            timestamp: Date.now(),
+          });
+        }
+      }
       teardownCallResources();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -449,6 +517,14 @@ export default function CallScreen() {
           // flushPendingCallSignals) since a late hangup is still meaningful.
           sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
           setCallState("no_answer");
+          loggedCallRef.current = true;
+          logCall({
+            alias: alias ?? "UNKNOWN",
+            direction: "outgoing",
+            mode: isVideo ? "video" : "voice",
+            outcome: "missed",
+            timestamp: Date.now(),
+          });
           setTimeout(() => { if (mountedRef.current) router.back(); }, 1500);
         }
       }, 30_000);
@@ -480,7 +556,7 @@ export default function CallScreen() {
       if (signal.type === "call-accept" && isCaller) {
         setCallState("connecting");
         const pc = await makePC();
-        if (!pc) { setCallState("active"); return; }
+        if (!pc) { everConnectedRef.current = true; setCallState("active"); return; }
         pcRef.current = pc;
         await getMedia(pc);
         const offer = await pc.createOffer();
@@ -492,7 +568,7 @@ export default function CallScreen() {
       // ── call-offer (callee receives) ──────────────────────────────────────
       if (signal.type === "call-offer" && !isCaller && signal.payload) {
         const pc = await makePC();
-        if (!pc) { setCallState("active"); return; }
+        if (!pc) { everConnectedRef.current = true; setCallState("active"); return; }
         pcRef.current = pc;
         await getMedia(pc);
         const SDP = Platform.OS === "web" ? (window as any).RTCSessionDescription : NativeRTCSessionDescription;
@@ -547,6 +623,17 @@ export default function CallScreen() {
   }, [alias, effectiveCallId, isCaller, makePC, getMedia, applyIceCandidate, flushPendingIce, sendCallSignal, handleEndInternal, registerCallListener]);
 
   // ── UI handlers ───────────────────────────────────────────────────────────
+  const toggleSpeaker = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSpeakerOn((s) => {
+      const next = !s;
+      if (InCallManager) {
+        try { InCallManager.setForceSpeakerphoneOn(next); } catch (e) { console.warn("[Call] setForceSpeakerphoneOn failed:", e); }
+      }
+      return next;
+    });
+  };
+
   const handleEnd = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
@@ -565,6 +652,47 @@ export default function CallScreen() {
       return next;
     });
   };
+
+  // Native (react-native-webrtc): `_switchCamera()` flips the same track's
+  // underlying camera device in place — no renegotiation, no new track, so
+  // nothing else here needs to change.
+  const facingModeRef = useRef<"user" | "environment">("user");
+  const toggleCamera = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const videoTrack = localStreamRef.current?.getVideoTracks?.()[0];
+    if (!videoTrack) return;
+
+    if (Platform.OS !== "web") {
+      if (typeof (videoTrack as any)._switchCamera === "function") {
+        (videoTrack as any)._switchCamera();
+      }
+      return;
+    }
+
+    // Web has no in-place flip: re-acquire a video track for the other-facing
+    // camera and hot-swap it on the peer connection sender (RTCRtpSender.
+    // replaceTrack avoids a full renegotiation), then rebuild the local
+    // preview stream so the <video> effect (keyed on the `localStream` object
+    // identity) actually picks up the new track.
+    const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
+    try {
+      const newVideoStream: MediaStream = await (navigator as any).mediaDevices.getUserMedia({
+        video: { facingMode: nextFacing },
+      });
+      const newTrack = newVideoStream.getVideoTracks()[0];
+      const sender = pcRef.current?.getSenders?.().find((s: any) => s.track?.kind === "video");
+      if (sender) await sender.replaceTrack(newTrack);
+
+      videoTrack.stop();
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      const rebuilt = new (window as any).MediaStream([...audioTracks, newTrack]);
+      localStreamRef.current = rebuilt;
+      setLocalStream(rebuilt);
+      facingModeRef.current = nextFacing;
+    } catch (e) {
+      console.warn("[Call] toggleCamera (web) failed:", e);
+    }
+  }, []);
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -739,7 +867,7 @@ export default function CallScreen() {
           </View>
 
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActiveWrap]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSpeakerOn((s) => !s); }}>
+            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActiveWrap]} onPress={toggleSpeaker}>
               {speakerOn ? (
                 <GoldGradient style={styles.ctrlBtnGoldFill}>
                   <Ionicons name="volume-high" size={22} color="#FFFFFF" />
@@ -750,6 +878,15 @@ export default function CallScreen() {
             </Pressable>
             <Text style={styles.modeLabel}>SPEAKER</Text>
           </View>
+
+          {isVideo && (
+            <View style={styles.ctrlItem}>
+              <Pressable style={styles.ctrlBtn} onPress={toggleCamera} testID="flip-camera-btn">
+                <Ionicons name="camera-reverse-outline" size={22} color={colors.foreground} />
+              </Pressable>
+              <Text style={styles.modeLabel}>FLIP</Text>
+            </View>
+          )}
         </View>
       </View>
     </View>

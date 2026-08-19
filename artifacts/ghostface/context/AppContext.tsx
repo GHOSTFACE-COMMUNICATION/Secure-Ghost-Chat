@@ -545,6 +545,25 @@ export interface IncomingCall {
   mode: "voice" | "video";
 }
 
+/**
+ * Local call-history record. Purely device-side, like Conversation — this
+ * app is metadata-blind (the server never learns who called whom), so each
+ * device builds its own log from the WebRTC signals it directly observed.
+ * A caller and callee therefore each get their own independent entry for
+ * the same call, not a shared/synced one.
+ */
+export interface CallLogEntry {
+  id: string;
+  alias: string;
+  direction: "incoming" | "outgoing";
+  mode: "voice" | "video";
+  outcome: "answered" | "missed" | "declined";
+  timestamp: number;
+  durationSec?: number;
+  /** Cleared when the user views the Calls tab; drives the missed-call badge. */
+  seen: boolean;
+}
+
 interface AppState {
   alias: string | null;
   deviceToken: string | null;
@@ -559,6 +578,7 @@ interface AppState {
   vpnConnected: boolean;
   vpnServer: VPNServer | null;
   conversations: Conversation[];
+  callHistory: CallLogEntry[];
   fdBalance: number;
   casperBalance: number;
   appTokens: AppToken[];
@@ -596,6 +616,8 @@ interface AppContextType extends AppState {
   hasPin: boolean;
   hasDuressPin: boolean;
   hasDecoyPin: boolean;
+  hasWalletPin: boolean;
+  walletUnlocked: boolean;
   decoyMode: boolean;
   loadError: string | null;
   setAlias: (alias: string) => Promise<void>;
@@ -610,6 +632,9 @@ interface AppContextType extends AppState {
   clearDuressPin: () => Promise<void>;
   setDecoyPin: (pin: string) => Promise<void>;
   clearDecoyPin: () => Promise<void>;
+  setWalletPin: (pin: string) => Promise<void>;
+  checkWalletPin: (input: string) => Promise<boolean>;
+  clearWalletPin: () => Promise<void>;
   enterDecoyMode: () => void;
   exitDecoyMode: () => void;
   setBiometricEnabled: (enabled: boolean) => Promise<void>;
@@ -642,6 +667,8 @@ interface AppContextType extends AppState {
   refreshEntitlement: () => Promise<void>;
   sendCallSignal: (msg: object) => void;
   registerCallListener: (fn: ((s: CallSignal) => void) | null) => void;
+  logCall: (entry: Omit<CallLogEntry, "id" | "seen">) => void;
+  markCallsSeen: () => void;
   /**
    * Forces an immediate WS reconnect attempt, bypassing the backgrounded
    * gate and any pending reconnect backoff. Used by the CallKeep "answerCall"
@@ -721,7 +748,9 @@ export { VPN_SERVERS };
 const SECURE_PIN_KEY = "ghostface_pin";
 const SECURE_DURESS_PIN_KEY = "ghostface_duress_pin";
 const SECURE_DECOY_PIN_KEY = "ghostface_decoy_pin";
+const SECURE_WALLET_PIN_KEY = "ghostface_wallet_pin";
 const CONVERSATIONS_KEY = "ghostface_conversations";
+const CALL_HISTORY_KEY = "ghostface_call_history";
 const OUTBOX_KEY = "ghostface_outbox";
 const CONNECTED_WALLET_KEY = "ghostface_connected_wallet";
 const OPK_STORE_KEY = "ghostface_opk_store";
@@ -748,6 +777,7 @@ const APP_STORAGE_KEYS = [
   "isOnboarded",
   "biometricEnabled",
   CONVERSATIONS_KEY,
+  CALL_HISTORY_KEY,
   OUTBOX_KEY,
   CONNECTED_WALLET_KEY,
   OPK_STORE_KEY,
@@ -1236,6 +1266,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [hasPin, setHasPin] = useState(false);
   const [hasDuressPin, setHasDuressPin] = useState(false);
   const [hasDecoyPin, setHasDecoyPin] = useState(false);
+  const [hasWalletPin, setHasWalletPin] = useState(false);
+  // Session-scoped: cleared whenever the app (re)locks, same as the decoy/
+  // duress model — a wallet PIN unlock doesn't outlive the app lock.
+  const [walletUnlocked, setWalletUnlocked] = useState(false);
   // In-memory only, never persisted — a decoy session must leave no trace
   // that distinguishes it from a normal one once the app is force-closed.
   const [decoyMode, setDecoyMode] = useState(false);
@@ -1252,6 +1286,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     vpnConnected: false,
     vpnServer: null,
     conversations: createDefaultConversations(),
+    callHistory: [],
     fdBalance: 0,
     casperBalance: 0,
     appTokens: [],
@@ -1278,14 +1313,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, biometric, onboarded, convData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
           secureGet(SECURE_DECOY_PIN_KEY),
+          secureGet(SECURE_WALLET_PIN_KEY),
           AsyncStorage.getItem("biometricEnabled"),
           AsyncStorage.getItem("isOnboarded"),
           readEncryptedString(CONVERSATIONS_KEY),
+          readEncryptedString(CALL_HISTORY_KEY),
           AsyncStorage.getItem(CONNECTED_WALLET_KEY),
           AsyncStorage.getItem(AUTO_LOCK_TIMEOUT_KEY),
           secureGet(DEVICE_TOKEN_KEY),
@@ -1301,6 +1338,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const hasPinValue = !!pinValue;
         setHasDuressPin(!!duressValue);
         setHasDecoyPin(!!decoyValue);
+        setHasWalletPin(!!walletPinValue);
         const biometricOn = biometric === "true";
         const isOnboarded = onboarded === "true";
 
@@ -1311,6 +1349,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (Array.isArray(parsed)) conversations = parsed;
           } catch (parseErr) {
             console.warn("[AppContext] Failed to parse conversations:", parseErr);
+          }
+        }
+
+        let callHistory: CallLogEntry[] = [];
+        if (callHistoryData) {
+          try {
+            const parsed = JSON.parse(callHistoryData);
+            if (Array.isArray(parsed)) callHistory = parsed;
+          } catch (parseErr) {
+            console.warn("[AppContext] Failed to parse call history:", parseErr);
           }
         }
 
@@ -1424,6 +1472,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           isOnboarded,
           isLocked: true,
           conversations,
+          callHistory,
           connectedWalletAddress: connectedWallet ?? null,
           autoLockTimeout,
           duressGracePeriod,
@@ -1600,6 +1649,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       console.warn("[AppContext] Failed to persist conversations:", err);
     }
   }, []);
+
+  const persistCallHistory = useCallback(async (history: CallLogEntry[]) => {
+    try {
+      await writeEncryptedString(CALL_HISTORY_KEY, JSON.stringify(history));
+    } catch (err) {
+      console.warn("[AppContext] Failed to persist call history:", err);
+    }
+  }, []);
+
+  // Capped so an unanswered-call storm (or years of daily use) can't grow
+  // the encrypted blob unboundedly — same idea as conversations, which are
+  // naturally bounded by contact count instead.
+  const MAX_CALL_HISTORY = 200;
+
+  const logCall = useCallback((entry: Omit<CallLogEntry, "id" | "seen">) => {
+    setState((prev) => {
+      const full: CallLogEntry = {
+        ...entry,
+        id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
+        // Only a missed INCOMING call is something the user could have
+        // "missed" seeing — outgoing/declined/answered never drive the badge.
+        seen: !(entry.direction === "incoming" && entry.outcome === "missed"),
+      };
+      const callHistory = [full, ...prev.callHistory].slice(0, MAX_CALL_HISTORY);
+      persistCallHistory(callHistory);
+      return { ...prev, callHistory };
+    });
+  }, [persistCallHistory]);
+
+  const markCallsSeen = useCallback(() => {
+    setState((prev) => {
+      if (prev.callHistory.every((c) => c.seen)) return prev;
+      const callHistory = prev.callHistory.map((c) => (c.seen ? c : { ...c, seen: true }));
+      persistCallHistory(callHistory);
+      return { ...prev, callHistory };
+    });
+  }, [persistCallHistory]);
 
   const persistOutbox = useCallback((items: OutboxItem[]) => {
     AsyncStorage.setItem(OUTBOX_KEY, JSON.stringify(items)).catch(console.error);
@@ -1835,6 +1921,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const setWalletPin = useCallback(async (pin: string) => {
+    try {
+      await secureSet(SECURE_WALLET_PIN_KEY, pin);
+      setHasWalletPin(true);
+      // Setting/changing the PIN counts as unlocking — don't immediately
+      // re-prompt for the PIN you just typed.
+      setWalletUnlocked(true);
+    } catch (err) {
+      console.error("[AppContext] Failed to save wallet PIN:", err);
+      throw err;
+    }
+  }, []);
+
+  const checkWalletPin = useCallback(async (input: string): Promise<boolean> => {
+    try {
+      const stored = await secureGet(SECURE_WALLET_PIN_KEY);
+      const correct = stored !== null && stored === input;
+      if (correct) setWalletUnlocked(true);
+      return correct;
+    } catch (err) {
+      console.error("[AppContext] Failed to check wallet PIN:", err);
+      return false;
+    }
+  }, []);
+
+  const clearWalletPin = useCallback(async () => {
+    try {
+      await secureDelete(SECURE_WALLET_PIN_KEY);
+      setHasWalletPin(false);
+      setWalletUnlocked(false);
+    } catch (err) {
+      console.error("[AppContext] Failed to clear wallet PIN:", err);
+      throw err;
+    }
+  }, []);
+
   const enterDecoyMode = useCallback(() => {
     setDecoyMode(true);
   }, []);
@@ -1968,6 +2090,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setLocked = useCallback((locked: boolean) => {
     setState((prev) => ({ ...prev, isLocked: locked }));
+    // A wallet-PIN unlock is scoped to this app-unlock session — the next
+    // time the app locks (auto-lock, manual lock, backgrounding), the
+    // wallet screen must ask again.
+    if (locked) setWalletUnlocked(false);
   }, []);
 
   const setAutoLockTimeout = useCallback(async (ms: number | null) => {
@@ -2873,6 +2999,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         secureDelete(SECURE_PIN_KEY),
         secureDelete(SECURE_DURESS_PIN_KEY),
         secureDelete(SECURE_DECOY_PIN_KEY),
+        secureDelete(SECURE_WALLET_PIN_KEY),
         secureDelete(DEVICE_TOKEN_KEY),
         secureDelete(MY_IK_PRIV_KEY),
         secureDelete(MY_IK_PUB_KEY),
@@ -2902,6 +3029,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setHasPin(false);
     setHasDuressPin(false);
     setHasDecoyPin(false);
+    setHasWalletPin(false);
+    setWalletUnlocked(false);
     setDecoyMode(false);
     setState({
       alias: null,
@@ -2913,6 +3042,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vpnConnected: false,
       vpnServer: null,
       conversations: [],
+      callHistory: [],
       fdBalance: 0,
       casperBalance: 0,
       appTokens: [],
@@ -3476,10 +3606,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // what clears this ref). Clear the incoming-call banner if it's still
         // showing this call, and tell CallKit — it may have a CXCall pending
         // from a VoIP push for the same callId.
-        if (latestStateRef.current.incomingCall?.callId === wsMsg.callId) {
+        const pendingIncoming =
+          latestStateRef.current.incomingCall?.callId === wsMsg.callId
+            ? latestStateRef.current.incomingCall
+            : null;
+        if (pendingIncoming) {
           setState((prev) => ({ ...prev, incomingCall: null }));
         }
         if (wsMsg.callId) notifyCallEnded(wsMsg.callId, "unanswered");
+        logCall({
+          alias: (pendingIncoming?.from ?? wsMsg.from).toUpperCase(),
+          direction: "incoming",
+          mode: pendingIncoming?.mode ?? "voice",
+          outcome: "missed",
+          timestamp: Date.now(),
+        });
       } else {
         callSignalListenerRef.current?.({ type: wsMsg.type, from: wsMsg.from.toUpperCase(), payload: wsMsg.payload, callId: wsMsg.callId, callMode: wsMsg.callMode });
       }
@@ -4088,6 +4229,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         hasPin,
         hasDuressPin,
         hasDecoyPin,
+        hasWalletPin,
+        walletUnlocked,
         decoyMode,
         loadError,
         setAlias,
@@ -4102,6 +4245,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         clearDuressPin,
         setDecoyPin,
         clearDecoyPin,
+        setWalletPin,
+        checkWalletPin,
+        clearWalletPin,
         enterDecoyMode,
         exitDecoyMode,
         setBiometricEnabled,
@@ -4122,6 +4268,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         verifyConversation,
         sendCallSignal,
         registerCallListener,
+        logCall,
+        markCallsSeen,
         forceReconnect,
         sendGhostpadSignal,
         registerGhostpadListener,

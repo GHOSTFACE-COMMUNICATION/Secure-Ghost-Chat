@@ -5,6 +5,7 @@ import React, { useEffect, useRef } from "react";
 import { Animated, Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 
 // NOTE: Every tab screen added here must wrap its root view in <TabScreenWrapper>
@@ -41,6 +42,8 @@ export default function TabLayout() {
   const safeAreaInsets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+  const { callHistory } = useApp();
+  const missedCallCount = callHistory.filter((c) => !c.seen).length;
 
   return (
     <Tabs
@@ -106,6 +109,8 @@ export default function TabLayout() {
         name="calls"
         options={{
           title: "CALL",
+          tabBarBadge: missedCallCount > 0 ? missedCallCount : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.destructive },
           tabBarIcon: ({ color, focused }) => (
             <PulseIcon focused={focused}>
               <Ionicons name="call-outline" size={20} color={color} />

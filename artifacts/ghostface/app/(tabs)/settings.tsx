@@ -95,6 +95,7 @@ export default function SettingsScreen() {
     biometricEnabled,
     hasDuressPin,
     hasDecoyPin,
+    hasWalletPin,
     autoLockTimeout,
     duressGracePeriod,
     language,
@@ -117,6 +118,8 @@ export default function SettingsScreen() {
     clearDuressPin,
     setDecoyPin,
     clearDecoyPin,
+    setWalletPin,
+    clearWalletPin,
     setLocked,
     panicWipe,
     setAutoLockTimeout,
@@ -268,6 +271,11 @@ export default function SettingsScreen() {
   const [decoyPinConfirm, setDecoyPinConfirm] = useState("");
   const [decoyPinError, setDecoyPinError] = useState("");
   const [decoyPinSaved, setDecoyPinSaved] = useState(false);
+  const [showWalletPin, setShowWalletPin] = useState(false);
+  const [walletPin, setWalletPinInput] = useState("");
+  const [walletPinConfirm, setWalletPinConfirm] = useState("");
+  const [walletPinError, setWalletPinError] = useState("");
+  const [walletPinSaved, setWalletPinSaved] = useState(false);
 
   // ── Satellite SMS fallback (Task #113) ───────────────────────────────────
   const [showSmsFallback, setShowSmsFallback] = useState(false);
@@ -487,6 +495,47 @@ export default function SettingsScreen() {
     setDecoyPinInput("");
     setDecoyPinConfirm("");
     setDecoyPinError("");
+  };
+
+  const handleWalletPinSave = async () => {
+    if (walletPin.length < 4) {
+      setWalletPinError("Minimum 4 digits");
+      return;
+    }
+    if (walletPin !== walletPinConfirm) {
+      setWalletPinError("PINs do not match");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    // Not a hard requirement like decoy/duress (which share the main lock
+    // screen's entry field and would be genuinely ambiguous) — the wallet
+    // PIN has its own dedicated entry screen. But a wallet PIN identical to
+    // the main PIN adds no real protection, so still guard against it.
+    const matchesMain = await checkPin(walletPin);
+    if (matchesMain) {
+      setWalletPinError("WALLET PIN CANNOT MATCH YOUR MAIN PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    await setWalletPin(walletPin);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setWalletPinSaved(true);
+    setTimeout(() => {
+      setWalletPinSaved(false);
+      setShowWalletPin(false);
+      setWalletPinInput("");
+      setWalletPinConfirm("");
+      setWalletPinError("");
+    }, 1500);
+  };
+
+  const handleClearWalletPin = async () => {
+    await clearWalletPin();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowWalletPin(false);
+    setWalletPinInput("");
+    setWalletPinConfirm("");
+    setWalletPinError("");
   };
 
   const styles = StyleSheet.create({
@@ -937,6 +986,35 @@ export default function SettingsScreen() {
           <View style={styles.settingDivider} />
           <Pressable
             style={styles.settingRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setWalletPinInput("");
+              setWalletPinConfirm("");
+              setWalletPinError("");
+              setShowWalletPin(true);
+            }}
+            testID="wallet-pin-row"
+          >
+            <View style={styles.settingIcon}>
+              <Ionicons name="wallet-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingLabel}>WALLET PIN</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                EXTRA PIN REQUIRED TO OPEN THE WALLET
+              </Text>
+            </View>
+            {hasWalletPin ? (
+              <View style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ color: colors.primaryForeground, fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
+              </View>
+            ) : (
+              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+            )}
+          </Pressable>
+          <View style={styles.settingDivider} />
+          <Pressable
+            style={styles.settingRow}
             onPress={handleAutoLockPress}
             testID="auto-lock-row"
           >
@@ -1365,6 +1443,91 @@ export default function SettingsScreen() {
                   <Pressable
                     style={styles.cancelBtn}
                     onPress={() => setShowDecoyPin(false)}
+                  >
+                    <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Wallet PIN modal */}
+      <Modal
+        visible={showWalletPin}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWalletPin(false)}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletPin(false)} />
+            <View style={styles.modalContent}>
+              {walletPinSaved ? (
+                <Text style={styles.successText}>WALLET PIN SAVED</Text>
+              ) : (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="wallet-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>WALLET PIN</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
+                    REQUIRES THIS PIN TO OPEN THE WALLET, ON TOP OF YOUR MAIN APP LOCK
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={walletPin}
+                    onChangeText={(t) => { setWalletPinInput(t); setWalletPinError(""); }}
+                    placeholder="WALLET PIN (4–8 DIGITS)"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="wallet-pin-set-input"
+                  />
+                  <PinStrengthIndicator
+                    pin={walletPin}
+                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    mutedColor={colors.border}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={walletPinConfirm}
+                    onChangeText={(t) => { setWalletPinConfirm(t); setWalletPinError(""); }}
+                    placeholder="CONFIRM WALLET PIN"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="wallet-pin-confirm-input"
+                  />
+                  {walletPinError ? (
+                    <Text style={styles.errorText}>{walletPinError}</Text>
+                  ) : null}
+                  <Pressable
+                    style={[
+                      styles.modalBtnGold,
+                      walletPin.length < 4 && { opacity: 0.4 },
+                    ]}
+                    onPress={handleWalletPinSave}
+                    disabled={walletPin.length < 4}
+                    testID="wallet-pin-save-btn"
+                  >
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>SET WALLET PIN</Text>
+                    </GoldGradient>
+                  </Pressable>
+                  {hasWalletPin && (
+                    <Pressable
+                      style={[styles.modalBtn, { backgroundColor: colors.muted, marginBottom: 4 }]}
+                      onPress={handleClearWalletPin}
+                      testID="wallet-pin-clear-btn"
+                    >
+                      <Text style={[styles.modalBtnText, { color: colors.destructive }]}>REMOVE WALLET PIN</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={styles.cancelBtn}
+                    onPress={() => setShowWalletPin(false)}
                   >
                     <Text style={styles.cancelText}>CANCEL</Text>
                   </Pressable>
