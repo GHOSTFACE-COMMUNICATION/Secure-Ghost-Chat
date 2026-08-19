@@ -180,6 +180,44 @@ function clearActiveCall(a: string, b: string, callId?: string): void {
   }
 }
 
+// ── Deferred hangups for offline callees ────────────────────────────────────
+// A call-hangup addressed to a callee who isn't connected used to be silently
+// dropped: unlike call-ring it had no push, no queue, no bounce. That is
+// exactly the window where the callee's phone is already ringing via a
+// CallKit VoIP push — the one moment a hangup matters most. Nothing can stop
+// CallKit ringing on a device whose app isn't running (there is no "cancel"
+// VoIP push), so the earliest possible delivery is the moment the callee's
+// socket authenticates; the client's no-listener call-hangup handler then
+// dismisses the banner and tells CallKit "unanswered". Held per-alias with a
+// short TTL — after the ring has long timed out on its own, a hangup is
+// just noise.
+const PENDING_HANGUP_TTL_MS = 60_000;
+const pendingCallHangups = new Map<string, { from: string; callId?: string; queuedAt: number }[]>();
+
+function queueCallHangup(toAlias: string, from: string, callId?: string): void {
+  const now = Date.now();
+  const list = (pendingCallHangups.get(toAlias) ?? []).filter(
+    (h) => now - h.queuedAt < PENDING_HANGUP_TTL_MS,
+  );
+  // One pending hangup per callId is enough; duplicates add nothing.
+  if (!list.some((h) => h.callId === callId)) {
+    list.push({ from, callId, queuedAt: now });
+  }
+  pendingCallHangups.set(toAlias, list);
+}
+
+function deliverPendingCallHangups(alias: string, ws: WebSocket): void {
+  const list = pendingCallHangups.get(alias);
+  if (!list?.length) return;
+  pendingCallHangups.delete(alias);
+  const now = Date.now();
+  for (const h of list) {
+    if (now - h.queuedAt >= PENDING_HANGUP_TTL_MS) continue;
+    ws.send(JSON.stringify({ type: "call-hangup", from: h.from, callId: h.callId }));
+    logger.debug({ alias, from: h.from, callId: h.callId }, "Deferred call-hangup delivered on reconnect");
+  }
+}
+
 async function waitForReconnect(alias: string, timeoutMs: number): Promise<AuthedSocket | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -450,6 +488,7 @@ export function createWsServer(wss: WebSocketServer): void {
 
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
+        deliverPendingCallHangups(authedAlias, ws);
         return;
       }
 
@@ -604,9 +643,48 @@ export function createWsServer(wss: WebSocketServer): void {
           }
         }
 
+        // A parked call-ring can outlive its own call: while waitForReconnect
+        // above was polling, the caller may have hung up — that hangup is
+        // processed concurrently on this same socket and clears the
+        // activeCallsByPair entry. Relaying the ring anyway resurrects a call
+        // that is already over: the callee gets a fresh incoming-call banner
+        // for a dead call and their answer signals bounce back at a caller
+        // who left. The pair entry doubles as the cancellation flag — gone,
+        // or repopulated with a different callId, means THIS ring is stale:
+        // don't relay it, don't bounce "offline" at the caller (they ended
+        // the call; that's not an error), and if the callee did connect,
+        // send them the hangup their CallKit UI is waiting on (harmless
+        // duplicate if the deferred-hangup queue already delivered one —
+        // notifyCallEnded is idempotent client-side).
+        if (msg.type === "call-ring") {
+          const parked = activeCallsByPair.get(callPairKey(authedAlias, toAlias));
+          if (!parked || parked.callId !== (msg.callId ?? "")) {
+            if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
+              recipient.ws.send(
+                JSON.stringify({ type: "call-hangup", from: authedAlias, callId: msg.callId }),
+              );
+            }
+            logger.debug(
+              { from: authedAlias, to: toAlias, callId: msg.callId },
+              "Stale call-ring dropped: call ended while waiting for callee wake",
+            );
+            return;
+          }
+        }
+
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           recipient.ws.send(JSON.stringify({ ...msg, from: authedAlias }));
           logger.debug({ type: msg.type, from: authedAlias, to: toAlias }, "Call signal relayed");
+        } else if (msg.type === "call-hangup") {
+          // Callee offline — hold it for their next connect instead of
+          // dropping it (see pendingCallHangups above). This is the caller
+          // hanging up while the callee's phone is still ringing from the
+          // VoIP push: the hangup must survive until that device connects.
+          queueCallHangup(toAlias, authedAlias, msg.callId);
+          logger.debug(
+            { from: authedAlias, to: toAlias, callId: msg.callId },
+            "call-hangup queued for offline callee",
+          );
         } else if (msg.type === "call-ring") {
           // Callee is offline (and either has no push token, or didn't
           // reconnect within the wake grace period) — bounce hangup back to
