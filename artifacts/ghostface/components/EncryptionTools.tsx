@@ -1,10 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { managedNonce } from "@noble/ciphers/utils.js";
-import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { blake2b } from "@noble/hashes/blake2.js";
-import { md5 } from "@noble/hashes/legacy.js";
-import { sha256 } from "@noble/hashes/sha2.js";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
@@ -20,8 +16,6 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { GoldGradient } from "@/components/GoldGradient";
 import { deriveKeyFromPin, generateSalt } from "@/lib/crypto";
-
-type EncToolTab = "cipher" | "hash" | "keygen" | "stealth";
 
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -50,10 +44,6 @@ function base64ToBytes(str: string): Uint8Array {
   return new Uint8Array(out);
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 function concatBytes(...arrs: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
   let offset = 0;
@@ -61,7 +51,7 @@ function concatBytes(...arrs: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations) — same KDF the app uses for PIN-derived keys. */
+/** ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations) — same construction the app uses for PIN-derived keys. */
 function ghostEncrypt(plaintext: string, passphrase: string): string {
   const salt = generateSalt();
   const key = deriveKeyFromPin(passphrase || "GHOSTFACE", salt);
@@ -70,8 +60,8 @@ function ghostEncrypt(plaintext: string, passphrase: string): string {
   return "GHX2::" + bytesToBase64(concatBytes(salt, ciphertext));
 }
 
-function ghostDecrypt(payload: string, passphrase: string): string {
-  if (!payload.startsWith("GHX2::")) return "INVALID FORMAT — NOT GHOSTFACE ENCRYPTED";
+function ghostDecrypt(payload: string, passphrase: string): string | null {
+  if (!payload.startsWith("GHX2::")) return null;
   try {
     const combined = base64ToBytes(payload.slice(6));
     const salt = combined.slice(0, 32);
@@ -80,69 +70,37 @@ function ghostDecrypt(payload: string, passphrase: string): string {
     const chacha = managedNonce(chacha20poly1305);
     return new TextDecoder().decode(chacha(key).decrypt(ciphertext));
   } catch {
-    return "DECRYPTION FAILED — wrong key or corrupted data";
+    return null;
   }
 }
 
-function simHash(input: string, algo: "SHA-256" | "MD5" | "BLAKE2"): string {
-  const bytes = new TextEncoder().encode(input);
-  const digest = algo === "SHA-256" ? sha256(bytes) : algo === "MD5" ? md5(bytes) : blake2b(bytes);
-  return bytesToHex(digest);
+/** Zero-width character steganography — hides a string (here, always ciphertext) inside an innocent-looking word. */
+function stealthEncode(payload: string): string {
+  const bits = Array.from(payload).map((c) => c.charCodeAt(0).toString(2).padStart(8, "0")).join("");
+  return "GHOSTFACE" + bits.split("").map((b) => (b === "0" ? "​" : "‌")).join("");
 }
 
-function genKeyPair() {
-  const priv = secp256k1.utils.randomSecretKey();
-  const pub = secp256k1.getPublicKey(priv, false);
-  return { pub: bytesToHex(pub), priv: bytesToHex(priv) };
-}
-
-function stealthEncode(msg: string): string {
-  const bits = Array.from(msg).map((c) => c.charCodeAt(0).toString(2).padStart(8, "0")).join("");
-  return "GHOSTFACE" + bits.split("").map((b) => (b === "0" ? "\u200B" : "\u200C")).join("");
-}
-
-function stealthDecode(carrier: string): string {
-  const bits = Array.from(carrier).filter((c) => c === "\u200B" || c === "\u200C")
-    .map((c) => (c === "\u200B" ? "0" : "1")).join("");
+function stealthDecode(carrier: string): string | null {
+  const bits = Array.from(carrier).filter((c) => c === "​" || c === "‌")
+    .map((c) => (c === "​" ? "0" : "1")).join("");
   let out = "";
   for (let i = 0; i < bits.length; i += 8) {
     const byte = bits.slice(i, i + 8);
     if (byte.length === 8) out += String.fromCharCode(parseInt(byte, 2));
   }
-  return out || "NO HIDDEN MESSAGE FOUND";
+  return out || null;
 }
-
-const TOOL_TABS: { id: EncToolTab; icon: React.ComponentProps<typeof Ionicons>["name"]; label: string }[] = [
-  { id: "cipher", icon: "lock-closed-outline", label: "CIPHER" },
-  { id: "hash", icon: "finger-print", label: "HASH" },
-  { id: "keygen", icon: "key-outline", label: "KEYGEN" },
-  { id: "stealth", icon: "eye-off-outline", label: "STEALTH" },
-];
 
 const MONO = Platform.OS === "ios" ? "Courier" : "monospace";
 
 export default function EncryptionTools() {
   const colors = useColors();
 
-  const [tool, setTool] = useState<EncToolTab>("cipher");
-
-  const [encInput, setEncInput] = useState("");
-  const [encKey, setEncKey] = useState("");
-  const [encOutput, setEncOutput] = useState("");
-  const [encMode, setEncMode] = useState<"encrypt" | "decrypt">("encrypt");
-  const [encCopied, setEncCopied] = useState(false);
-
-  const [hashInput, setHashInput] = useState("");
-  const [hashAlgo, setHashAlgo] = useState<"SHA-256" | "MD5" | "BLAKE2">("SHA-256");
-  const [hashOutput, setHashOutput] = useState("");
-  const [hashCopied, setHashCopied] = useState(false);
-
-  const [keys, setKeys] = useState<{ pub: string; priv: string } | null>(null);
-  const [keyCopied, setKeyCopied] = useState<"pub" | "priv" | null>(null);
-
   const [stealthMsg, setStealthMsg] = useState("");
+  const [stealthKey, setStealthKey] = useState("");
   const [stealthCarrier, setStealthCarrier] = useState("");
   const [stealthOut, setStealthOut] = useState("");
+  const [stealthError, setStealthError] = useState("");
   const [stealthMode, setStealthMode] = useState<"hide" | "reveal">("hide");
   const [stealthCopied, setStealthCopied] = useState(false);
 
@@ -154,23 +112,6 @@ export default function EncryptionTools() {
   };
 
   const s = StyleSheet.create({
-    pill: {
-      flexDirection: "row",
-      gap: 8,
-      padding: 16,
-      paddingBottom: 0,
-    },
-    pillBtn: {
-      flex: 1,
-      paddingVertical: 9,
-      alignItems: "center",
-      borderRadius: colors.radius,
-      borderWidth: 1,
-      flexDirection: "row",
-      justifyContent: "center",
-      gap: 5,
-    },
-    pillTxt: { fontSize: 10, fontWeight: "700", letterSpacing: 2 },
     body: { padding: 16, gap: 14 },
     lbl: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 3, fontWeight: "700" },
     input: {
@@ -193,14 +134,6 @@ export default function EncryptionTools() {
     outTxt: { color: colors.primary, fontSize: 11, fontFamily: MONO },
     copyRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, alignSelf: "flex-end" },
     copyTxt: { fontSize: 10, letterSpacing: 2 },
-    algoRow: { flexDirection: "row", gap: 8 },
-    algoBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: colors.radius, borderWidth: 1 },
-    algoTxt: { fontSize: 10, letterSpacing: 2, fontWeight: "700" },
-    keyBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: colors.radius, padding: 12, gap: 8 },
-    keyLbl: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 3 },
-    keyPub: { color: colors.success, fontSize: 11, fontFamily: MONO },
-    keyPriv: { color: colors.destructive, fontSize: 11, fontFamily: MONO },
-    hr: { height: 1, backgroundColor: colors.border },
     info: { flexDirection: "row", gap: 8, backgroundColor: `${colors.primary}12`, borderRadius: colors.radius, padding: 10, borderWidth: 1, borderColor: `${colors.primary}28` },
     infoTxt: { color: colors.mutedForeground, fontSize: 11, flex: 1, lineHeight: 16 },
   });
@@ -212,235 +145,117 @@ export default function EncryptionTools() {
     </Pressable>
   );
 
+  const runHide = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setStealthError("");
+    const ciphertext = ghostEncrypt(stealthMsg, stealthKey);
+    setStealthOut(stealthEncode(ciphertext));
+  };
+
+  const runReveal = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const hidden = stealthDecode(stealthCarrier);
+    if (!hidden) {
+      setStealthOut("");
+      setStealthError("NO HIDDEN MESSAGE FOUND");
+      return;
+    }
+    const plaintext = ghostDecrypt(hidden, stealthKey);
+    if (plaintext === null) {
+      setStealthOut("");
+      setStealthError("DECRYPTION FAILED — wrong key or corrupted data");
+      return;
+    }
+    setStealthError("");
+    setStealthOut(plaintext);
+  };
+
   return (
     <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-      {/* Tool selector pills */}
-      <View style={s.pill}>
-        {TOOL_TABS.map((t) => {
-          const active = tool === t.id;
-          return (
-            <Pressable
-              key={t.id}
-              style={[s.pillBtn, { borderColor: active ? colors.primary : colors.border, overflow: "hidden" }]}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setTool(t.id); }}
-            >
-              {active && <GoldGradient style={StyleSheet.absoluteFill} />}
-              <Ionicons name={t.icon} size={13} color={active ? "#FFFFFF" : colors.mutedForeground} />
-              <Text style={[s.pillTxt, { color: active ? "#FFFFFF" : colors.mutedForeground }]}>{t.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
       <View style={s.body}>
-        {/* ── CIPHER ─────────────────────────────── */}
-        {tool === "cipher" && (
+        <View style={s.info}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
+          <Text style={s.infoTxt}>
+            ChaCha20-Poly1305 AEAD (key via PBKDF2-SHA256, 600k iterations), then hidden inside an
+            innocent-looking word with zero-width character steganography. A passive scan finds
+            nothing to read — and even if the hidden bits are extracted, it's still ciphertext
+            without the key.
+          </Text>
+        </View>
+
+        <Text style={s.lbl}>MODE</Text>
+        <View style={s.modeRow}>
+          {(["hide", "reveal"] as const).map((m) => (
+            <Pressable
+              key={m}
+              style={[s.modeBtn, { borderColor: stealthMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
+              onPress={() => { setStealthMode(m); setStealthOut(""); setStealthError(""); }}
+            >
+              {stealthMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
+              <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
+                {m === "hide" ? "HIDE MESSAGE" : "REVEAL MESSAGE"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {stealthMode === "hide" ? (
           <>
-            <View style={s.info}>
-              <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
-              <Text style={s.infoTxt}>ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations). Output is prefixed GHX2::.</Text>
-            </View>
-
-            <Text style={s.lbl}>MODE</Text>
-            <View style={s.modeRow}>
-              {(["encrypt", "decrypt"] as const).map((m) => (
-                <Pressable
-                  key={m}
-                  style={[s.modeBtn, { borderColor: encMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
-                  onPress={() => { setEncMode(m); setEncOutput(""); }}
-                >
-                  {encMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
-                  <Text style={[s.modeTxt, { color: encMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
-                    {m === "encrypt" ? "ENCRYPT" : "DECRYPT"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={s.lbl}>{encMode === "encrypt" ? "PLAINTEXT" : "CIPHERTEXT"}</Text>
+            <Text style={s.lbl}>SECRET MESSAGE</Text>
             <TextInput
-              style={[s.input, { minHeight: 72, textAlignVertical: "top" }]}
-              value={encInput} onChangeText={setEncInput}
-              placeholder={encMode === "encrypt" ? "Enter message..." : "Paste GHX2:: ciphertext..."}
-              placeholderTextColor={colors.mutedForeground}
-              multiline autoCorrect={false}
+              style={s.input} value={stealthMsg} onChangeText={setStealthMsg}
+              placeholder="Message to hide..." placeholderTextColor={colors.mutedForeground} autoCorrect={false}
             />
-
             <Text style={s.lbl}>SECRET KEY (OPTIONAL)</Text>
             <TextInput
-              style={s.input} value={encKey} onChangeText={setEncKey}
+              style={s.input} value={stealthKey} onChangeText={setStealthKey}
               placeholder="Blank = default key" placeholderTextColor={colors.mutedForeground} autoCorrect={false}
             />
-
             <Pressable
-              style={[s.btn, !encInput && { opacity: 0.38 }]} disabled={!encInput}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setEncOutput(encMode === "encrypt" ? ghostEncrypt(encInput, encKey) : ghostDecrypt(encInput, encKey)); }}
+              style={[s.btn, !stealthMsg && { opacity: 0.38 }]} disabled={!stealthMsg}
+              onPress={runHide}
             >
               <GoldGradient style={s.btnGold}>
-                <Text style={s.btnTxt}>{encMode === "encrypt" ? "🔒  ENCRYPT" : "🔓  DECRYPT"}</Text>
+                <Text style={s.btnTxt}>👻  ENCRYPT &amp; HIDE</Text>
               </GoldGradient>
             </Pressable>
-
-            {!!encOutput && (
-              <View style={s.out}>
-                <Text style={s.outTxt}>{encOutput}</Text>
-                {renderCopy(encOutput, encCopied, setEncCopied)}
-              </View>
-            )}
           </>
-        )}
-
-        {/* ── HASH ─────────────────────────────── */}
-        {tool === "hash" && (
+        ) : (
           <>
-            <View style={s.info}>
-              <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
-              <Text style={s.infoTxt}>One-way hash function — verify message integrity without revealing content.</Text>
-            </View>
-
-            <Text style={s.lbl}>ALGORITHM</Text>
-            <View style={s.algoRow}>
-              {(["SHA-256", "MD5", "BLAKE2"] as const).map((a) => (
-                <Pressable
-                  key={a}
-                  style={[s.algoBtn, { borderColor: hashAlgo === a ? colors.primary : colors.border, overflow: "hidden" }]}
-                  onPress={() => { setHashAlgo(a); setHashOutput(""); }}
-                >
-                  {hashAlgo === a && <GoldGradient style={StyleSheet.absoluteFill} />}
-                  <Text style={[s.algoTxt, { color: hashAlgo === a ? "#FFFFFF" : colors.mutedForeground }]}>{a}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={s.lbl}>INPUT</Text>
+            <Text style={s.lbl}>PASTE TEXT TO SCAN</Text>
             <TextInput
               style={[s.input, { minHeight: 72, textAlignVertical: "top" }]}
-              value={hashInput} onChangeText={setHashInput}
-              placeholder="Enter text to hash..." placeholderTextColor={colors.mutedForeground} multiline autoCorrect={false}
+              value={stealthCarrier} onChangeText={setStealthCarrier}
+              placeholder="Paste carrier text to scan..." placeholderTextColor={colors.mutedForeground} multiline autoCorrect={false}
             />
-
+            <Text style={s.lbl}>SECRET KEY (OPTIONAL)</Text>
+            <TextInput
+              style={s.input} value={stealthKey} onChangeText={setStealthKey}
+              placeholder="Blank = default key" placeholderTextColor={colors.mutedForeground} autoCorrect={false}
+            />
             <Pressable
-              style={[s.btn, !hashInput && { opacity: 0.38 }]} disabled={!hashInput}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setHashOutput(simHash(hashInput, hashAlgo)); }}
+              style={[s.btn, !stealthCarrier && { opacity: 0.38 }]} disabled={!stealthCarrier}
+              onPress={runReveal}
             >
               <GoldGradient style={s.btnGold}>
-                <Text style={s.btnTxt}>GENERATE HASH</Text>
+                <Text style={s.btnTxt}>🔍  SCAN &amp; DECRYPT</Text>
               </GoldGradient>
             </Pressable>
-
-            {!!hashOutput && (
-              <View style={s.out}>
-                <Text style={[s.lbl, { marginBottom: 6 }]}>{hashAlgo} DIGEST</Text>
-                <Text style={s.outTxt}>{hashOutput}</Text>
-                {renderCopy(hashOutput, hashCopied, setHashCopied)}
-              </View>
-            )}
           </>
         )}
 
-        {/* ── KEYGEN ─────────────────────────────── */}
-        {tool === "keygen" && (
-          <>
-            <View style={s.info}>
-              <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
-              <Text style={s.infoTxt}>Real secp256k1 EC key pair, generated on-device with a CSPRNG. Share public key freely — NEVER share the private key.</Text>
-            </View>
-
-            <Pressable
-              style={s.btn}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); setKeys(genKeyPair()); setKeyCopied(null); }}
-            >
-              <GoldGradient style={s.btnGold}>
-                <Text style={s.btnTxt}>⚡  GENERATE KEY PAIR</Text>
-              </GoldGradient>
-            </Pressable>
-
-            {keys ? (
-              <View style={s.keyBox}>
-                <Text style={s.keyLbl}>PUBLIC KEY (secp256k1)</Text>
-                <Text style={s.keyPub}>{keys.pub}</Text>
-                {renderCopy(keys.pub, keyCopied === "pub", (v) => setKeyCopied(v ? "pub" : null))}
-                <View style={s.hr} />
-                <Text style={s.keyLbl}>PRIVATE KEY — KEEP SECRET</Text>
-                <Text style={s.keyPriv}>{keys.priv}</Text>
-                {renderCopy(keys.priv, keyCopied === "priv", (v) => setKeyCopied(v ? "priv" : null))}
-              </View>
-            ) : (
-              <View style={[s.keyBox, { alignItems: "center", paddingVertical: 32 }]}>
-                <Ionicons name="key-outline" size={40} color={colors.border} />
-                <Text style={[s.lbl, { marginTop: 12 }]}>NO KEY GENERATED YET</Text>
-              </View>
-            )}
-          </>
+        {!!stealthOut && (
+          <View style={s.out}>
+            <Text style={[s.lbl, { marginBottom: 6 }]}>{stealthMode === "hide" ? "OUTPUT (copy & send)" : "DECRYPTED MESSAGE"}</Text>
+            <Text style={s.outTxt}>{stealthMode === "hide" ? "GHOSTFACE [encrypted data embedded — copy to share]" : stealthOut}</Text>
+            {renderCopy(stealthOut, stealthCopied, setStealthCopied)}
+          </View>
         )}
 
-        {/* ── STEALTH ─────────────────────────────── */}
-        {tool === "stealth" && (
-          <>
-            <View style={s.info}>
-              <Ionicons name="information-circle-outline" size={13} color={colors.primary} />
-              <Text style={s.infoTxt}>Zero-width character steganography — hide secret messages inside innocent-looking text.</Text>
-            </View>
-
-            <Text style={s.lbl}>MODE</Text>
-            <View style={s.modeRow}>
-              {(["hide", "reveal"] as const).map((m) => (
-                <Pressable
-                  key={m}
-                  style={[s.modeBtn, { borderColor: stealthMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
-                  onPress={() => { setStealthMode(m); setStealthOut(""); }}
-                >
-                  {stealthMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
-                  <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
-                    {m === "hide" ? "HIDE MESSAGE" : "REVEAL MESSAGE"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {stealthMode === "hide" ? (
-              <>
-                <Text style={s.lbl}>SECRET MESSAGE</Text>
-                <TextInput
-                  style={s.input} value={stealthMsg} onChangeText={setStealthMsg}
-                  placeholder="Message to hide..." placeholderTextColor={colors.mutedForeground} autoCorrect={false}
-                />
-                <Pressable
-                  style={[s.btn, !stealthMsg && { opacity: 0.38 }]} disabled={!stealthMsg}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setStealthOut(stealthEncode(stealthMsg)); }}
-                >
-                  <GoldGradient style={s.btnGold}>
-                    <Text style={s.btnTxt}>👻  HIDE IN TEXT</Text>
-                  </GoldGradient>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Text style={s.lbl}>PASTE TEXT TO SCAN</Text>
-                <TextInput
-                  style={[s.input, { minHeight: 72, textAlignVertical: "top" }]}
-                  value={stealthCarrier} onChangeText={setStealthCarrier}
-                  placeholder="Paste carrier text to scan..." placeholderTextColor={colors.mutedForeground} multiline autoCorrect={false}
-                />
-                <Pressable
-                  style={[s.btn, !stealthCarrier && { opacity: 0.38 }]} disabled={!stealthCarrier}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setStealthOut(stealthDecode(stealthCarrier)); }}
-                >
-                  <GoldGradient style={s.btnGold}>
-                    <Text style={s.btnTxt}>🔍  SCAN FOR MESSAGE</Text>
-                  </GoldGradient>
-                </Pressable>
-              </>
-            )}
-
-            {!!stealthOut && (
-              <View style={s.out}>
-                <Text style={[s.lbl, { marginBottom: 6 }]}>{stealthMode === "hide" ? "OUTPUT (copy & send)" : "DECODED MESSAGE"}</Text>
-                <Text style={s.outTxt}>{stealthMode === "hide" ? "GHOSTFACE [hidden data embedded — copy to share]" : stealthOut}</Text>
-                {renderCopy(stealthOut, stealthCopied, setStealthCopied)}
-              </View>
-            )}
-          </>
+        {!!stealthError && (
+          <View style={s.out}>
+            <Text style={[s.outTxt, { color: colors.destructive }]}>{stealthError}</Text>
+          </View>
         )}
       </View>
 

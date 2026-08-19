@@ -16,24 +16,29 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { GOLD_GLASS_TINT } from "@/components/GoldGradient";
+import { GOLD_OUTLINE_COLOR, SpecularHighlight } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
 import { boxShadow } from "@/lib/shadow";
 
 const BG = "#000";
-const GOLD = "#bf9b30";
+const GOLD = "#F5D26B";
 // Real native Liquid Glass (iOS 26+, via expo-glass-effect) for the radial
 // menu nodes where available; older iOS/Android keep the BlurView +
-// gradient approximation below. Same shared tint as every other gold-glass
-// surface in the app (GOLD_GLASS_TINT) regardless of active state — a
-// dimmer tint for "inactive" was tried and made the menu page read as
-// visibly more transparent than every other screen. Active/inactive is
-// distinguished by the rim border and icon brightness instead, below.
+// gradient approximation below. Black tint (same as every other gold-glass
+// surface in the app) regardless of active state — gold lives in the rim
+// border, not the fill. Active/inactive is distinguished by the rim border
+// color and icon brightness instead, below.
 const USE_NATIVE_GLASS = isLiquidGlassAvailable();
-const NODE_GLASS_TINT_ACTIVE = GOLD_GLASS_TINT;
-const NODE_GLASS_TINT_INACTIVE = GOLD_GLASS_TINT;
+// Deliberately its own constant, not the shared GLASS_TINT_BLACK — this
+// menu's look was confirmed as the reference/"perfect" one, so it's frozen
+// here and doesn't drift if the shared tint used by the rest of the app's
+// buttons gets tuned later.
+const NODE_GLASS_TINT = "rgba(10,10,12,0.55)";
+const NODE_GLASS_TINT_ACTIVE = NODE_GLASS_TINT;
+const NODE_GLASS_TINT_INACTIVE = NODE_GLASS_TINT;
+const NODE_GLASS_METALLIC_FALLBACK = ["#2a2a2c", "#141416", "#050505", "#000000"] as const;
 
 const FONT_SERIF = Platform.select({
   ios: "Georgia",
@@ -498,11 +503,16 @@ export default function HomeScreen() {
                     <View style={styles.nodeCircleShadow}>
                       {USE_NATIVE_GLASS ? (
                         <GlassView
-                          style={styles.nodeCircleGlass}
+                          style={[
+                            styles.nodeCircleGlass,
+                            styles.nodeCircleGlassBorder,
+                            active && styles.nodeCircleGlassBorderActive,
+                          ]}
                           glassEffectStyle="clear"
                           tintColor={active ? NODE_GLASS_TINT_ACTIVE : NODE_GLASS_TINT_INACTIVE}
                           isInteractive
                         >
+                          <SpecularHighlight intensity={0.35} />
                           <Ionicons
                             name={node.icon}
                             size={20}
@@ -520,12 +530,12 @@ export default function HomeScreen() {
                             pointerEvents="none"
                             // Same gradient regardless of active state — see the
                             // NODE_GLASS_TINT comment above for why.
-                            colors={["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]}
-                            locations={[0, 0.55, 1]}
+                            colors={NODE_GLASS_METALLIC_FALLBACK}
                             start={{ x: 0.15, y: 0 }}
                             end={{ x: 0.85, y: 1 }}
                             style={StyleSheet.absoluteFill}
                           />
+                          <SpecularHighlight intensity={0.35} />
                           <View
                             pointerEvents="none"
                             style={[styles.nodeCircleRim, active && styles.nodeCircleRimActive]}
@@ -582,19 +592,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     letterSpacing: 8,
     fontWeight: "400" as const,
-    color: "rgba(191,155,48,0.78)",
+    color: "rgba(245,210,107,0.78)",
   },
   aliasDivider: {
     width: 32,
     height: 1,
     marginVertical: 12,
-    backgroundColor: "rgba(191,155,48,0.3)",
+    backgroundColor: "rgba(245,210,107,0.3)",
   },
   aliasTagline: {
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 5,
-    color: "rgba(191,155,48,0.5)",
+    color: "rgba(245,210,107,0.5)",
   },
 
   // Radial dial
@@ -617,7 +627,7 @@ const styles = StyleSheet.create({
     width: 2,
     height: 10,
     borderRadius: 1,
-    backgroundColor: "rgba(191,155,48,0.4)",
+    backgroundColor: "rgba(245,210,107,0.4)",
   },
 
   // Central coin
@@ -643,7 +653,7 @@ const styles = StyleSheet.create({
     top: (196 - 260) / 2,
     left: (196 - 260) / 2,
     borderRadius: 130,
-    backgroundColor: "rgba(191,155,48,0.06)",
+    backgroundColor: "rgba(245,210,107,0.06)",
     boxShadow: boxShadow(GOLD, 0.55, 50),
   },
   // Metallic coin rim — conic-gradient-style gold ring
@@ -653,7 +663,7 @@ const styles = StyleSheet.create({
     borderRadius: 95,
     padding: 5,
     borderWidth: 4,
-    borderColor: "rgba(191,155,48,0.0)", // transparent — visual ring comes from backgroundColor
+    borderColor: "rgba(245,210,107,0.0)", // transparent — visual ring comes from backgroundColor
     backgroundColor: "#c9971c",
     alignItems: "center",
     justifyContent: "center",
@@ -717,7 +727,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 4,
-    color: "rgba(191,155,48,0.6)",
+    color: "rgba(245,210,107,0.6)",
   },
 
   panicWrap: {
@@ -758,11 +768,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  nodeCircleGlassBorder: {
+    borderWidth: 1,
+    borderColor: GOLD_OUTLINE_COLOR,
+  },
+  nodeCircleGlassBorderActive: {
+    borderColor: "#FFFFFF",
+  },
   nodeCircleRim: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "rgba(217,184,74,0.3)",
+    borderColor: GOLD_OUTLINE_COLOR,
   },
   nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",
@@ -774,7 +791,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: "#bf9b30",
+    backgroundColor: "#F5D26B",
     borderWidth: 1.5,
     borderColor: "#000000",
     alignItems: "center",

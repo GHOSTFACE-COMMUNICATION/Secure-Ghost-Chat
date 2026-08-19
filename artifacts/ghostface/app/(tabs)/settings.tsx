@@ -1279,7 +1279,7 @@ export default function SettingsScreen() {
                     mutedColor={colors.border}
                   />
                   {pinSimilar && (
-                    <Text style={{ color: "#bf9b30", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginTop: -8, marginBottom: 10 }}>
+                    <Text style={{ color: "#F5D26B", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginTop: -8, marginBottom: 10 }}>
                       TOO SIMILAR TO CURRENT PIN
                     </Text>
                   )}
