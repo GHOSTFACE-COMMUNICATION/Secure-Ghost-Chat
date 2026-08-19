@@ -698,7 +698,7 @@ export default function WalletScreen() {
               <Ionicons
                 name={copiedConnected ? "checkmark" : "copy-outline"}
                 size={14}
-                color={copiedConnected ? colors.success : colors.mutedForeground}
+                color={copiedConnected ? colors.foreground : colors.mutedForeground}
               />
             </Pressable>
             <Pressable style={styles.disconnectBtn} onPress={handleDisconnect} disabled={disconnecting}>
@@ -733,17 +733,18 @@ export default function WalletScreen() {
           <Pressable
             style={[
               styles.tokenTab,
-              activeToken === "FD" ? styles.tokenTabActive : styles.tokenTabInactive,
+              activeToken === "FD" ? { borderColor: colors.primary, overflow: "hidden" } : styles.tokenTabInactive,
             ]}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setActiveToken("FD");
             }}
           >
+            {activeToken === "FD" && <GoldGradient style={StyleSheet.absoluteFill} />}
             <Text
               style={[
                 styles.tokenTabText,
-                { color: activeToken === "FD" ? colors.primaryForeground : colors.mutedForeground },
+                { color: activeToken === "FD" ? "#FFFFFF" : colors.mutedForeground },
               ]}
             >
               {secondTokenSymbol}
@@ -752,17 +753,18 @@ export default function WalletScreen() {
           <Pressable
             style={[
               styles.tokenTab,
-              activeToken === "CASPER" ? styles.tokenTabActive : styles.tokenTabInactive,
+              activeToken === "CASPER" ? { borderColor: colors.primary, overflow: "hidden" } : styles.tokenTabInactive,
             ]}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setActiveToken("CASPER");
             }}
           >
+            {activeToken === "CASPER" && <GoldGradient style={StyleSheet.absoluteFill} />}
             <Text
               style={[
                 styles.tokenTabText,
-                { color: activeToken === "CASPER" ? colors.primaryForeground : colors.mutedForeground },
+                { color: activeToken === "CASPER" ? "#FFFFFF" : colors.mutedForeground },
               ]}
             >
               {casperSymbol}
@@ -791,7 +793,7 @@ export default function WalletScreen() {
           <Ionicons
             name={copied ? "checkmark" : "copy-outline"}
             size={16}
-            color={copied ? colors.success : colors.mutedForeground}
+            color={copied ? colors.foreground : colors.mutedForeground}
           />
         </Pressable>
 
@@ -1006,7 +1008,7 @@ export default function WalletScreen() {
                 <Ionicons
                   name={copied ? "checkmark" : "copy-outline"}
                   size={16}
-                  color={copied ? colors.success : colors.mutedForeground}
+                  color={copied ? colors.foreground : colors.mutedForeground}
                 />
               </Pressable>
               <Pressable style={[styles.cancelBtn, { marginTop: 8 }]} onPress={() => setShowReceive(false)}>

@@ -73,6 +73,7 @@
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@noble/post-quantum": "^0.6.1",
+    "@scure/bip39": "^2.3.0",
     "@shopify/react-native-skia": "2.2.12",
     "expo": "~54.0.35",
     "expo-av": "~16.0.8",

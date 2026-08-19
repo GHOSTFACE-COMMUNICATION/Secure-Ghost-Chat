@@ -120,6 +120,7 @@ export default function SettingsScreen() {
     clearDecoyPin,
     setWalletPin,
     clearWalletPin,
+    getRecoveryPhrase,
     setLocked,
     panicWipe,
     setAutoLockTimeout,
@@ -276,6 +277,11 @@ export default function SettingsScreen() {
   const [walletPinConfirm, setWalletPinConfirm] = useState("");
   const [walletPinError, setWalletPinError] = useState("");
   const [walletPinSaved, setWalletPinSaved] = useState(false);
+  const [showRecoveryPhrase, setShowRecoveryPhrase] = useState(false);
+  const [recoveryPhraseStage, setRecoveryPhraseStage] = useState<"pin" | "phrase">("pin");
+  const [recoveryPinInput, setRecoveryPinInput] = useState("");
+  const [recoveryPinError, setRecoveryPinError] = useState("");
+  const [recoveryPhraseValue, setRecoveryPhraseValue] = useState("");
 
   // ── Satellite SMS fallback (Task #113) ───────────────────────────────────
   const [showSmsFallback, setShowSmsFallback] = useState(false);
@@ -536,6 +542,23 @@ export default function SettingsScreen() {
     setWalletPinInput("");
     setWalletPinConfirm("");
     setWalletPinError("");
+  };
+
+  const handleRecoveryPinSubmit = async () => {
+    const correct = await checkPin(recoveryPinInput);
+    if (!correct) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setRecoveryPinError("INCORRECT PIN");
+      setRecoveryPinInput("");
+      return;
+    }
+    const phrase = await getRecoveryPhrase();
+    if (!phrase) {
+      setRecoveryPinError("NO IDENTITY KEY FOUND ON THIS DEVICE");
+      return;
+    }
+    setRecoveryPhraseValue(phrase);
+    setRecoveryPhraseStage("phrase");
   };
 
   const styles = StyleSheet.create({
@@ -976,9 +999,9 @@ export default function SettingsScreen() {
               </Text>
             </View>
             {hasDecoyPin ? (
-              <View style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                <Text style={{ color: colors.primaryForeground, fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
-              </View>
+              <GoldGradient style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, overflow: "hidden" }}>
+                <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
+              </GoldGradient>
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
@@ -1005,12 +1028,35 @@ export default function SettingsScreen() {
               </Text>
             </View>
             {hasWalletPin ? (
-              <View style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                <Text style={{ color: colors.primaryForeground, fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
-              </View>
+              <GoldGradient style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, overflow: "hidden" }}>
+                <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
+              </GoldGradient>
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
+          </Pressable>
+          <View style={styles.settingDivider} />
+          <Pressable
+            style={styles.settingRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setRecoveryPinInput("");
+              setRecoveryPinError("");
+              setRecoveryPhraseStage("pin");
+              setShowRecoveryPhrase(true);
+            }}
+            testID="recovery-phrase-row"
+          >
+            <View style={styles.settingIcon}>
+              <Ionicons name="key-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingLabel}>RECOVERY PHRASE</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                VIEW YOUR IDENTITY BACKUP PHRASE
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
           </Pressable>
           <View style={styles.settingDivider} />
           <Pressable
@@ -1229,7 +1275,7 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={newPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   {pinSimilar && (
@@ -1317,7 +1363,7 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={duressPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   <TextInput
@@ -1401,7 +1447,7 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={decoyPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   <TextInput
@@ -1486,7 +1532,7 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={walletPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   <TextInput
@@ -1530,6 +1576,86 @@ export default function SettingsScreen() {
                     onPress={() => setShowWalletPin(false)}
                   >
                     <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Recovery Phrase modal */}
+      <Modal
+        visible={showRecoveryPhrase}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRecoveryPhrase(false)}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRecoveryPhrase(false)} />
+            <View style={styles.modalContent}>
+              {recoveryPhraseStage === "pin" ? (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="key-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>CONFIRM YOUR PIN</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
+                    ANYONE WHO SEES YOUR RECOVERY PHRASE CAN TAKE OVER YOUR IDENTITY — CONFIRM IT'S YOU
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={recoveryPinInput}
+                    onChangeText={(t) => { setRecoveryPinInput(t); setRecoveryPinError(""); }}
+                    placeholder="MAIN PIN"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="recovery-pin-input"
+                    autoFocus
+                  />
+                  {recoveryPinError ? <Text style={styles.errorText}>{recoveryPinError}</Text> : null}
+                  <Pressable
+                    style={[styles.modalBtnGold, recoveryPinInput.length < 4 && { opacity: 0.4 }]}
+                    onPress={handleRecoveryPinSubmit}
+                    disabled={recoveryPinInput.length < 4}
+                    testID="recovery-pin-submit"
+                  >
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>REVEAL PHRASE</Text>
+                    </GoldGradient>
+                  </Pressable>
+                  <Pressable style={styles.cancelBtn} onPress={() => setShowRecoveryPhrase(false)}>
+                    <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="key-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>RECOVERY PHRASE</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 16, lineHeight: 16 }}>
+                    KEEP THIS PRIVATE. ANYONE WITH THESE WORDS CAN TAKE OVER YOUR IDENTITY.
+                  </Text>
+                  <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: colors.radius, padding: 12, marginBottom: 16 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {recoveryPhraseValue.split(" ").map((word, i) => (
+                        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.muted, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, minWidth: "30%" }}>
+                          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontWeight: "700" as const, width: 14 }}>{i + 1}</Text>
+                          <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.5 }}>{word}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                  <Pressable
+                    style={styles.modalBtnGold}
+                    onPress={() => setShowRecoveryPhrase(false)}
+                    testID="recovery-phrase-done"
+                  >
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>DONE</Text>
+                    </GoldGradient>
                   </Pressable>
                 </>
               )}

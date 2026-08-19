@@ -321,11 +321,11 @@ export default function GhostInvite() {
       fontFamily: "monospace",
     },
     copyBtn: {
-      backgroundColor: copied ? colors.success : colors.muted,
+      backgroundColor: copied ? colors.card : colors.muted,
       borderRadius: 8,
       padding: 8,
       borderWidth: 1,
-      borderColor: copied ? colors.success : colors.border,
+      borderColor: copied ? colors.foreground : colors.border,
     },
     countdownRow: {
       flexDirection: "row",
@@ -620,7 +620,7 @@ export default function GhostInvite() {
                   <Ionicons
                     name={copied ? "checkmark" : "copy-outline"}
                     size={18}
-                    color={copied ? colors.success : colors.mutedForeground}
+                    color={copied ? colors.foreground : colors.mutedForeground}
                   />
                 </Pressable>
               )}

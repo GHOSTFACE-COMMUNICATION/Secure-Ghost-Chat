@@ -640,9 +640,9 @@ export default function GhostNumberScreen() {
                       <Ionicons
                         name={copied === n.id ? "checkmark" : "copy-outline"}
                         size={12}
-                        color={copied === n.id ? colors.success : colors.foreground}
+                        color={colors.foreground}
                       />
-                      <Text style={[styles.copyBtnText, copied === n.id && { color: colors.success }]}>
+                      <Text style={styles.copyBtnText}>
                         {copied === n.id ? "COPIED" : "COPY"}
                       </Text>
                     </Pressable>

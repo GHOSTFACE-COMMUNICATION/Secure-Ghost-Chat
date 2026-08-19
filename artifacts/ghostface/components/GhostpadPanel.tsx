@@ -347,7 +347,7 @@ export default function GhostpadScreen({
                   <Ionicons
                     name={copied ? "checkmark" : "copy-outline"}
                     size={14}
-                    color={copied ? colors.success : colors.mutedForeground}
+                    color={copied ? colors.foreground : colors.mutedForeground}
                   />
                   <Text style={styles.footerBtnText}>{copied ? "COPIED" : "COPY"}</Text>
                 </Pressable>

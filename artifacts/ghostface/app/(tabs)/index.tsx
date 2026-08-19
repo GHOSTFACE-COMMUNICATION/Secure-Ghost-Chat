@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GOLD_GLASS_TINT } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -25,12 +26,14 @@ const BG = "#000";
 const GOLD = "#bf9b30";
 // Real native Liquid Glass (iOS 26+, via expo-glass-effect) for the radial
 // menu nodes where available; older iOS/Android keep the BlurView +
-// gradient approximation below. Both states are the app's standard gold —
-// active/inactive is distinguished by brightness, not by switching color,
-// so every glass surface in the app reads as the same gold liquid glass.
+// gradient approximation below. Same shared tint as every other gold-glass
+// surface in the app (GOLD_GLASS_TINT) regardless of active state — a
+// dimmer tint for "inactive" was tried and made the menu page read as
+// visibly more transparent than every other screen. Active/inactive is
+// distinguished by the rim border and icon brightness instead, below.
 const USE_NATIVE_GLASS = isLiquidGlassAvailable();
-const NODE_GLASS_TINT_ACTIVE = "rgba(245,200,80,0.4)";
-const NODE_GLASS_TINT_INACTIVE = "rgba(191,155,48,0.22)";
+const NODE_GLASS_TINT_ACTIVE = GOLD_GLASS_TINT;
+const NODE_GLASS_TINT_INACTIVE = GOLD_GLASS_TINT;
 
 const FONT_SERIF = Platform.select({
   ios: "Georgia",
@@ -515,11 +518,9 @@ export default function HomeScreen() {
                           />
                           <LinearGradient
                             pointerEvents="none"
-                            colors={
-                              active
-                                ? ["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]
-                                : ["rgba(191,155,48,0.32)", "rgba(154,122,36,0.10)", "rgba(154,122,36,0.03)"]
-                            }
+                            // Same gradient regardless of active state — see the
+                            // NODE_GLASS_TINT comment above for why.
+                            colors={["rgba(245,200,80,0.55)", "rgba(191,155,48,0.12)", "rgba(191,155,48,0.04)"]}
                             locations={[0, 0.55, 1]}
                             start={{ x: 0.15, y: 0 }}
                             end={{ x: 0.85, y: 1 }}

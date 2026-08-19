@@ -17,11 +17,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
+  ViewStyle,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -190,6 +192,24 @@ function EncryptedImageView({
       accessibilityLabel="Encrypted photo attachment"
     />
   );
+}
+
+// Sent-message bubbles use the app's standard gold liquid glass; received
+// bubbles stay a plain card surface. A shared wrapper here avoids
+// duplicating the (fairly large) bubble children JSX per branch.
+function MsgBubbleSurface({
+  fromMe,
+  style,
+  children,
+}: {
+  fromMe: boolean;
+  style: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  if (fromMe) {
+    return <GoldGradient style={style}>{children}</GoldGradient>;
+  }
+  return <View style={style}>{children}</View>;
 }
 
 function formatTime(ts: number): string {
@@ -1244,16 +1264,16 @@ export default function ChatScreen() {
             onLongPress={() => handleLongPress(item)}
             delayLongPress={400}
           >
-            <View style={[
-              styles.msgBubble,
-              {
-                backgroundColor: item.fromMe ? colors.primary : colors.card,
-                borderWidth: item.fromMe ? 0 : 1,
-                borderColor: colors.border,
-              },
-              (item.attachment?.kind === "image" || item.attachment?.kind === "image-ref") &&
-                styles.msgBubbleWithImage,
-            ]}>
+            <MsgBubbleSurface
+              fromMe={item.fromMe}
+              style={[
+                styles.msgBubble,
+                item.fromMe
+                  ? { borderWidth: 0 }
+                  : { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+                (item.attachment?.kind === "image" || item.attachment?.kind === "image-ref") &&
+                  styles.msgBubbleWithImage,
+              ]}>
               {(item.attachment?.kind === "image" || item.attachment?.kind === "image-ref") && (
                 <EncryptedImageView attachment={item.attachment} style={styles.msgImage} />
               )}
@@ -1274,7 +1294,7 @@ export default function ChatScreen() {
                   <Ionicons
                     name={playingId === item.id ? "pause" : "play"}
                     size={16}
-                    color={item.fromMe ? colors.primaryForeground : colors.primary}
+                    color={item.fromMe ? "#FFFFFF" : colors.primary}
                   />
                   <View style={styles.audioBars}>
                     {[6, 12, 9, 14, 8, 11, 7].map((h, i) => (
@@ -1284,7 +1304,7 @@ export default function ChatScreen() {
                           styles.audioBar,
                           {
                             height: h,
-                            backgroundColor: item.fromMe ? colors.primaryForeground : colors.primary,
+                            backgroundColor: item.fromMe ? "#FFFFFF" : colors.primary,
                           },
                         ]}
                       />
@@ -1293,7 +1313,7 @@ export default function ChatScreen() {
                   <Text
                     style={[
                       styles.audioDuration,
-                      { color: item.fromMe ? colors.primaryForeground : colors.foreground },
+                      { color: item.fromMe ? "#FFFFFF" : colors.foreground },
                     ]}
                   >
                     {formatDuration(item.attachment.durationMs)}
@@ -1324,14 +1344,14 @@ export default function ChatScreen() {
                     <Ionicons
                       name="document"
                       size={18}
-                      color={item.fromMe ? colors.primaryForeground : colors.primary}
+                      color={item.fromMe ? "#FFFFFF" : colors.primary}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
                       style={[
                         styles.fileName,
-                        { color: item.fromMe ? colors.primaryForeground : colors.foreground },
+                        { color: item.fromMe ? "#FFFFFF" : colors.foreground },
                       ]}
                       numberOfLines={1}
                     >
@@ -1354,14 +1374,14 @@ export default function ChatScreen() {
                 <Text
                   style={[
                     styles.msgText,
-                    { color: item.fromMe ? colors.primaryForeground : colors.foreground },
+                    { color: item.fromMe ? "#FFFFFF" : colors.foreground },
                     item.attachment?.kind === "image" && styles.msgTextWithImage,
                   ]}
                 >
                   {item.text}
                 </Text>
               )}
-            </View>
+            </MsgBubbleSurface>
             <View style={[styles.msgMeta, item.fromMe ? { justifyContent: "flex-end" } : {}]}>
               <Text style={[styles.msgTime, { color: colors.mutedForeground }]}>
                 {formatTime(item.timestamp)}
@@ -2002,7 +2022,7 @@ export default function ChatScreen() {
                         key={opt.label}
                         style={[
                           styles.disappearOpt,
-                          active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                          active && { borderColor: colors.primary, overflow: "hidden" },
                         ]}
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2010,9 +2030,10 @@ export default function ChatScreen() {
                           setShowDisappear(false);
                         }}
                       >
+                        {active && <GoldGradient style={StyleSheet.absoluteFill} />}
                         <Text style={[
                           styles.disappearOptTxt,
-                          { color: active ? colors.primaryForeground : colors.mutedForeground },
+                          { color: active ? "#FFFFFF" : colors.mutedForeground },
                         ]}>
                           {opt.label}
                         </Text>

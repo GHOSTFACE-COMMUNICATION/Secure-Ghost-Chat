@@ -18,6 +18,7 @@ import { GoldGradient } from "@/components/GoldGradient";
 import { getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { normalizeAlias } from "@/utils/alias";
+import { recoveryPhraseToKey } from "@/lib/recoveryPhrase";
 
 // Larger pool than we ever show at once — the suggestion row rotates through
 // a random slice of this every few seconds so returning users don't see the
@@ -60,12 +61,18 @@ async function checkAliasTaken(alias: string): Promise<boolean | null> {
 export default function OnboardingScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { setAlias, setPin } = useApp();
+  const { setAlias, setPin, recoverIdentity, getRecoveryPhrase } = useApp();
   const [alias, setAliasText] = useState("");
-  const [step, setStep] = useState<"alias" | "pin">("alias");
+  const [step, setStep] = useState<"alias" | "pin" | "recovery" | "restore">("alias");
   const [pin, setPinText] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
   const [pinError, setPinError] = useState("");
+  const [recoveryPhrase, setRecoveryPhrase] = useState("");
+  const [recoverySaved, setRecoverySaved] = useState(false);
+  const [restoreAlias, setRestoreAlias] = useState("");
+  const [restorePhrase, setRestorePhrase] = useState("");
+  const [restoreError, setRestoreError] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(() => sampleAliases(SUGGESTIONS_SHOWN));
   const [aliasStatus, setAliasStatus] = useState<
     "idle" | "checking" | "available" | "taken" | "unknown"
@@ -108,10 +115,19 @@ export default function OnboardingScreen() {
     setStep("pin");
   };
 
+  // Both paths land on the recovery-phrase step before finishing onboarding
+  // — the identity key was just generated inside setAlias, and this is the
+  // one and only time it's ever shown.
+  const goToRecoveryStep = async () => {
+    const phrase = await getRecoveryPhrase();
+    setRecoveryPhrase(phrase ?? "");
+    setStep("recovery");
+  };
+
   const handleSkipPin = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await setAlias(normalizeAlias(alias));
-    router.replace("/(tabs)");
+    await goToRecoveryStep();
   };
 
   const handlePinConfirm = async () => {
@@ -127,6 +143,41 @@ export default function OnboardingScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await setAlias(normalizeAlias(alias));
     await setPin(pin);
+    await goToRecoveryStep();
+  };
+
+  const handleRecoveryContinue = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.replace("/(tabs)");
+  };
+
+  const handleRestoreSubmit = async () => {
+    if (restoreAlias.trim().length < 3) {
+      setRestoreError("Enter the alias you originally registered");
+      return;
+    }
+    if (!recoveryPhraseToKey(restorePhrase)) {
+      setRestoreError("That doesn't look like a valid 24-word recovery phrase");
+      return;
+    }
+    setRestoreError("");
+    setRestoring(true);
+    const result = await recoverIdentity(normalizeAlias(restoreAlias), restorePhrase);
+    setRestoring(false);
+    if (!result.ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setRestoreError(
+        result.error === "not_found"
+          ? "No identity found for that alias"
+          : result.error === "proof_failed"
+          ? "That phrase doesn't match this alias"
+          : result.error === "invalid_phrase"
+          ? "That doesn't look like a valid 24-word recovery phrase"
+          : "Couldn't reach the server — check your connection and try again",
+      );
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.replace("/(tabs)");
   };
 
@@ -259,6 +310,70 @@ export default function OnboardingScreen() {
       fontSize: 12,
       letterSpacing: 1,
       marginBottom: 8,
+    },
+    restoreLink: {
+      alignItems: "center",
+      paddingVertical: 14,
+    },
+    restoreLinkText: {
+      color: colors.mutedForeground,
+      fontSize: 10,
+      letterSpacing: 1.5,
+      textAlign: "center",
+    },
+    phraseBox: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: colors.radius,
+      padding: 12,
+      marginBottom: 16,
+    },
+    phraseGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    phraseWordChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      backgroundColor: colors.muted,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      minWidth: "30%",
+    },
+    phraseWordIndex: {
+      color: colors.mutedForeground,
+      fontSize: 9,
+      fontWeight: "700" as const,
+      width: 14,
+    },
+    phraseWordText: {
+      color: colors.foreground,
+      fontSize: 13,
+      fontWeight: "700" as const,
+      letterSpacing: 0.5,
+    },
+    recoveryCheckRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 16,
+    },
+    recoveryCheckText: {
+      color: colors.foreground,
+      fontSize: 12,
+      letterSpacing: 0.5,
+      flex: 1,
+    },
+    phraseInput: {
+      minHeight: 90,
+      textAlignVertical: "top",
+      fontSize: 14,
+      letterSpacing: 1,
+      textTransform: "none" as const,
     },
     backBtn: {
       flexDirection: "row",
@@ -460,8 +575,20 @@ export default function OnboardingScreen() {
                 No phone number or email required
               </Text>
             </View>
+
+            <Pressable
+              style={styles.restoreLink}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setRestoreError("");
+                setStep("restore");
+              }}
+              testID="go-to-restore"
+            >
+              <Text style={styles.restoreLinkText}>ALREADY HAVE AN IDENTITY? RESTORE FROM RECOVERY PHRASE</Text>
+            </Pressable>
           </>
-        ) : (
+        ) : step === "pin" ? (
           <>
             <Pressable style={styles.backBtn} onPress={() => setStep("alias")}>
               <Ionicons
@@ -537,6 +664,100 @@ export default function OnboardingScreen() {
                 PIN stored locally, never transmitted
               </Text>
             </View>
+          </>
+        ) : step === "recovery" ? (
+          <>
+            <Text style={styles.sectionTitle}>YOUR RECOVERY PHRASE</Text>
+            <Text style={styles.pinOptionalLabel}>
+              WRITE THIS DOWN — IT'S THE ONLY WAY TO RECOVER YOUR IDENTITY IF YOU LOSE THIS DEVICE. WE NEVER STORE IT AND CANNOT SHOW IT TO YOU AGAIN.
+            </Text>
+
+            <View style={styles.phraseBox}>
+              <View style={styles.phraseGrid}>
+                {recoveryPhrase.split(" ").map((word, i) => (
+                  <View key={i} style={styles.phraseWordChip}>
+                    <Text style={styles.phraseWordIndex}>{i + 1}</Text>
+                    <Text style={styles.phraseWordText}>{word}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <Pressable
+              style={styles.recoveryCheckRow}
+              onPress={() => setRecoverySaved((s) => !s)}
+              testID="recovery-saved-checkbox"
+            >
+              <Ionicons
+                name={recoverySaved ? "checkbox" : "square-outline"}
+                size={20}
+                color={recoverySaved ? colors.primary : colors.mutedForeground}
+              />
+              <Text style={styles.recoveryCheckText}>I've written down my recovery phrase</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.confirmBtn, !recoverySaved && styles.confirmBtnDisabled]}
+              onPress={handleRecoveryContinue}
+              disabled={!recoverySaved}
+              testID="recovery-continue"
+            >
+              <GoldGradient style={styles.confirmBtnInner}>
+                <Text style={styles.confirmBtnText}>ENTER GHOSTFACE</Text>
+              </GoldGradient>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable style={styles.backBtn} onPress={() => { setRestoreError(""); setStep("alias"); }}>
+              <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} />
+              <Text style={styles.backText}>BACK</Text>
+            </Pressable>
+
+            <Text style={styles.sectionTitle}>RESTORE YOUR IDENTITY</Text>
+            <Text style={styles.pinOptionalLabel}>
+              ENTER THE ALIAS YOU ORIGINALLY REGISTERED AND YOUR 24-WORD RECOVERY PHRASE
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              value={restoreAlias}
+              onChangeText={(t) => setRestoreAlias(t.toUpperCase())}
+              placeholder="YOUR ORIGINAL ALIAS"
+              placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="characters"
+              maxLength={16}
+              autoCorrect={false}
+              testID="restore-alias-input"
+            />
+
+            <TextInput
+              style={[styles.input, styles.phraseInput]}
+              value={restorePhrase}
+              onChangeText={(t) => { setRestorePhrase(t); setRestoreError(""); }}
+              placeholder="24-word recovery phrase, separated by spaces"
+              placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="none"
+              autoCorrect={false}
+              multiline
+              testID="restore-phrase-input"
+            />
+
+            {restoreError ? <Text style={styles.errorText}>{restoreError}</Text> : null}
+
+            <Pressable
+              style={[
+                styles.confirmBtn,
+                (restoring || restoreAlias.trim().length < 3 || !restorePhrase.trim()) && styles.confirmBtnDisabled,
+              ]}
+              onPress={handleRestoreSubmit}
+              disabled={restoring || restoreAlias.trim().length < 3 || !restorePhrase.trim()}
+              testID="restore-submit"
+            >
+              <GoldGradient style={styles.confirmBtnInner}>
+                <Text style={styles.confirmBtnText}>{restoring ? "RESTORING…" : "RESTORE IDENTITY"}</Text>
+              </GoldGradient>
+            </Pressable>
           </>
         )}
       </ScrollView>

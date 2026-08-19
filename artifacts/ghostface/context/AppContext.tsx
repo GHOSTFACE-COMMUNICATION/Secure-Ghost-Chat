@@ -57,9 +57,13 @@ import {
   type RatchetMessage,
 } from "@/lib/doubleRatchet";
 import { x25519, ed25519 } from "@noble/curves/ed25519.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { randomBytes } from "@noble/hashes/utils.js";
+import { keyToRecoveryPhrase, recoveryPhraseToKey } from "@/lib/recoveryPhrase";
 
 const toHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join("");
+const fromHex = (h: string) => Uint8Array.from(h.match(/.{2}/g)!.map(b => parseInt(b, 16)));
 
 function generateHexKeypair(): { pub: string; priv: string } {
   const priv = randomBytes(32);
@@ -621,6 +625,9 @@ interface AppContextType extends AppState {
   decoyMode: boolean;
   loadError: string | null;
   setAlias: (alias: string) => Promise<void>;
+  recoverIdentity: (alias: string, phrase: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Re-derives the recovery phrase for the currently-stored identity key. Null if none. */
+  getRecoveryPhrase: () => Promise<string | null>;
   setPin: (pin: string) => Promise<void>;
   checkPin: (input: string) => Promise<boolean>;
   checkDuressPin: (input: string) => Promise<boolean>;
@@ -959,6 +966,92 @@ async function rekeyWithServer(
   } catch (e) {
     console.warn("[REKEY] Failed:", e);
     return null;
+  }
+}
+
+/**
+ * Reclaim an alias using an IK private key recovered from a recovery phrase
+ * — the full-device-loss case rekeyWithServer doesn't cover (that needs a
+ * still-valid Bearer token; this needs none). Two round trips:
+ *   1. /reclaim/challenge — server hands back an ephemeral X25519 public key
+ *      + nonce.
+ *   2. Compute ss = X25519(recoveredIkPriv, serverEphPub), send back
+ *      HMAC-SHA256(ss, nonce) as proof, along with fresh SPK/ikSign/PQKEM
+ *      (the recovered device has none of its own — same as a rekey).
+ * See lib/db's reclaim.ts schema comment for why this proves ownership
+ * without the private key ever crossing the wire.
+ */
+async function reclaimWithServer(
+  userId: string,
+  recoveredIkPrivHex: string,
+): Promise<{
+  ok: true;
+  token: string; deliveryId: string | null;
+  ikPriv: string; ikPub: string;
+  spkPriv: string; spkPub: string;
+  ikSignPriv: string; ikSignPub: string;
+  spkSignature: string;
+  pqkemPriv: string; pqkemPub: string;
+} | { ok: false; error: string }> {
+  const apiBase = getApiBase();
+  if (!apiBase) return { ok: false, error: "server_unreachable" };
+  try {
+    const ikPub = toHex(x25519.getPublicKey(fromHex(recoveredIkPrivHex)));
+
+    const challengeRes = await fetch(
+      `${apiBase}/prekeys/${encodeURIComponent(userId)}/reclaim/challenge`,
+      { method: "POST" },
+    );
+    if (!challengeRes.ok) {
+      return { ok: false, error: challengeRes.status === 404 ? "not_found" : "server_unreachable" };
+    }
+    const challenge = (await challengeRes.json()) as {
+      challengeId: string; serverEphPub: string; nonce: string;
+    };
+
+    const sharedSecret = x25519.getSharedSecret(fromHex(recoveredIkPrivHex), fromHex(challenge.serverEphPub));
+    const proof = toHex(hmac(sha256, sharedSecret, fromHex(challenge.nonce)));
+
+    const spk      = generateHexKeypair();
+    const ikSign   = generateEd25519Keypair();
+    const spkSig   = signSPKLocal(spk.pub, ikSign.priv);
+    const pqkem    = generateKemKeyPair();
+    const pqkemSig = signKemPreKey(pqkem.pub, ikSign.priv);
+
+    const verifyRes = await fetch(
+      `${apiBase}/prekeys/${encodeURIComponent(userId)}/reclaim/verify`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          proof,
+          spkPublicKey:    spk.pub,
+          ikSignPublicKey: ikSign.pub,
+          spkSignature:    spkSig,
+          pqkemPublicKey:  pqkem.pub,
+          pqkemSignature:  pqkemSig,
+        }),
+      },
+    );
+    if (!verifyRes.ok) {
+      return { ok: false, error: verifyRes.status === 403 ? "proof_failed" : "server_unreachable" };
+    }
+    const result = (await verifyRes.json()) as { token: string; deliveryId: string | null };
+
+    return {
+      ok: true,
+      token: result.token,
+      deliveryId: result.deliveryId,
+      ikPriv: recoveredIkPrivHex, ikPub,
+      spkPriv: spk.priv, spkPub: spk.pub,
+      ikSignPriv: ikSign.priv, ikSignPub: ikSign.pub,
+      spkSignature: spkSig,
+      pqkemPriv: pqkem.priv, pqkemPub: pqkem.pub,
+    };
+  } catch (e) {
+    console.warn("[RECLAIM] Failed:", e);
+    return { ok: false, error: "server_unreachable" };
   }
 }
 
@@ -1829,6 +1922,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn("[AppContext] Background registration failed:", e);
     }
+  }, []);
+
+  /**
+   * Recover an identity from its alias + a 24-word recovery phrase — for a
+   * device with no local keys and no device token (the case setAlias's
+   * fresh-registration path and rekeyWithServer's still-has-a-token path
+   * both miss). Unlike setAlias, this returns a real result: recovery is an
+   * explicit, one-shot user action that needs synchronous success/failure
+   * feedback, not fire-and-forget background registration.
+   */
+  const recoverIdentity = useCallback(async (
+    alias: string,
+    phrase: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const recoveredIkPriv = recoveryPhraseToKey(phrase);
+    if (!recoveredIkPriv) {
+      return { ok: false, error: "invalid_phrase" };
+    }
+
+    // Same defensive clear as setAlias — any local SecureStore identity
+    // material at this point belongs to whatever was previously on this
+    // device, not the identity about to be recovered.
+    await Promise.all([
+      secureDelete(DEVICE_TOKEN_KEY),
+      secureDelete(MY_IK_PRIV_KEY),
+      secureDelete(MY_IK_PUB_KEY),
+      secureDelete(MY_SPK_PRIV_KEY),
+      secureDelete(MY_SPK_PUB_KEY),
+      secureDelete(MY_PQKEM_PRIV_KEY),
+      secureDelete(MY_PQKEM_PUB_KEY),
+    ]);
+
+    const result = await reclaimWithServer(alias, recoveredIkPriv);
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+
+    await secureSet(DEVICE_TOKEN_KEY, result.token);
+    await secureSet(MY_IK_PRIV_KEY, result.ikPriv);
+    await secureSet(MY_IK_PUB_KEY, result.ikPub);
+    await secureSet(MY_SPK_PRIV_KEY, result.spkPriv);
+    await secureSet(MY_SPK_PUB_KEY, result.spkPub);
+    await secureSet(MY_PQKEM_PRIV_KEY, result.pqkemPriv);
+    await secureSet(MY_PQKEM_PUB_KEY, result.pqkemPub);
+
+    await AsyncStorage.setItem("alias", alias);
+    await AsyncStorage.setItem("isOnboarded", "true");
+    setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false, deviceToken: result.token }));
+
+    await generateAndUploadOPKs(alias, result.token);
+    return { ok: true };
+  }, []);
+
+  const getRecoveryPhrase = useCallback(async (): Promise<string | null> => {
+    const ikPriv = await secureGet(MY_IK_PRIV_KEY);
+    if (!ikPriv) return null;
+    return keyToRecoveryPhrase(ikPriv);
   }, []);
 
   const setPin = useCallback(async (pin: string) => {
@@ -4234,6 +4384,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         decoyMode,
         loadError,
         setAlias,
+        recoverIdentity,
+        getRecoveryPhrase,
         setPin,
         checkPin,
         checkDuressPin,

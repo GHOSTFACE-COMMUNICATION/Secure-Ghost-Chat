@@ -207,8 +207,8 @@ export default function EncryptionTools() {
 
   const renderCopy = (text: string, copied: boolean, done: (v: boolean) => void) => (
     <Pressable style={s.copyRow} onPress={() => copy(text, done)}>
-      <Ionicons name={copied ? "checkmark" : "copy-outline"} size={13} color={copied ? colors.success : colors.primary} />
-      <Text style={[s.copyTxt, { color: copied ? colors.success : colors.primary }]}>{copied ? "COPIED" : "COPY"}</Text>
+      <Ionicons name={copied ? "checkmark" : "copy-outline"} size={13} color={colors.foreground} />
+      <Text style={[s.copyTxt, { color: colors.foreground }]}>{copied ? "COPIED" : "COPY"}</Text>
     </Pressable>
   );
 
@@ -221,11 +221,12 @@ export default function EncryptionTools() {
           return (
             <Pressable
               key={t.id}
-              style={[s.pillBtn, { backgroundColor: active ? colors.primary : "transparent", borderColor: active ? colors.primary : colors.border }]}
+              style={[s.pillBtn, { borderColor: active ? colors.primary : colors.border, overflow: "hidden" }]}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setTool(t.id); }}
             >
-              <Ionicons name={t.icon} size={13} color={active ? colors.primaryForeground : colors.mutedForeground} />
-              <Text style={[s.pillTxt, { color: active ? colors.primaryForeground : colors.mutedForeground }]}>{t.label}</Text>
+              {active && <GoldGradient style={StyleSheet.absoluteFill} />}
+              <Ionicons name={t.icon} size={13} color={active ? "#FFFFFF" : colors.mutedForeground} />
+              <Text style={[s.pillTxt, { color: active ? "#FFFFFF" : colors.mutedForeground }]}>{t.label}</Text>
             </Pressable>
           );
         })}
@@ -245,10 +246,11 @@ export default function EncryptionTools() {
               {(["encrypt", "decrypt"] as const).map((m) => (
                 <Pressable
                   key={m}
-                  style={[s.modeBtn, { backgroundColor: encMode === m ? colors.primary : "transparent", borderColor: encMode === m ? colors.primary : colors.border }]}
+                  style={[s.modeBtn, { borderColor: encMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
                   onPress={() => { setEncMode(m); setEncOutput(""); }}
                 >
-                  <Text style={[s.modeTxt, { color: encMode === m ? colors.primaryForeground : colors.mutedForeground }]}>
+                  {encMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
+                  <Text style={[s.modeTxt, { color: encMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
                     {m === "encrypt" ? "ENCRYPT" : "DECRYPT"}
                   </Text>
                 </Pressable>
@@ -301,10 +303,11 @@ export default function EncryptionTools() {
               {(["SHA-256", "MD5", "BLAKE2"] as const).map((a) => (
                 <Pressable
                   key={a}
-                  style={[s.algoBtn, { backgroundColor: hashAlgo === a ? colors.primary : "transparent", borderColor: hashAlgo === a ? colors.primary : colors.border }]}
+                  style={[s.algoBtn, { borderColor: hashAlgo === a ? colors.primary : colors.border, overflow: "hidden" }]}
                   onPress={() => { setHashAlgo(a); setHashOutput(""); }}
                 >
-                  <Text style={[s.algoTxt, { color: hashAlgo === a ? colors.primaryForeground : colors.mutedForeground }]}>{a}</Text>
+                  {hashAlgo === a && <GoldGradient style={StyleSheet.absoluteFill} />}
+                  <Text style={[s.algoTxt, { color: hashAlgo === a ? "#FFFFFF" : colors.mutedForeground }]}>{a}</Text>
                 </Pressable>
               ))}
             </View>
@@ -384,10 +387,11 @@ export default function EncryptionTools() {
               {(["hide", "reveal"] as const).map((m) => (
                 <Pressable
                   key={m}
-                  style={[s.modeBtn, { backgroundColor: stealthMode === m ? colors.primary : "transparent", borderColor: stealthMode === m ? colors.primary : colors.border }]}
+                  style={[s.modeBtn, { borderColor: stealthMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
                   onPress={() => { setStealthMode(m); setStealthOut(""); }}
                 >
-                  <Text style={[s.modeTxt, { color: stealthMode === m ? colors.primaryForeground : colors.mutedForeground }]}>
+                  {stealthMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
+                  <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
                     {m === "hide" ? "HIDE MESSAGE" : "REVEAL MESSAGE"}
                   </Text>
                 </Pressable>
