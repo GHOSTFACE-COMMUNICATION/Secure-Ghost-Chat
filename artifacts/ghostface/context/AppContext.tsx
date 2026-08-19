@@ -2,6 +2,7 @@ import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
 import { notifyCallEnded } from "@/hooks/usePushNotifications";
+import { markCallEnded } from "@/lib/endedCalls";
 export { getApiBase } from "@/lib/apiBase";
 import {
   classifyLinkQuality,
@@ -677,6 +678,8 @@ interface AppContextType extends AppState {
   registerCallListener: (fn: ((s: CallSignal) => void) | null) => void;
   logCall: (entry: Omit<CallLogEntry, "id" | "seen">) => void;
   markCallsSeen: () => void;
+  /** Wipe the call log — state and the encrypted at-rest copy. */
+  clearCallHistory: () => void;
   /**
    * Forces an immediate WS reconnect attempt, bypassing the backgrounded
    * gate and any pending reconnect backoff. Used by the CallKeep "answerCall"
@@ -1778,6 +1781,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const callHistory = prev.callHistory.map((c) => (c.seen ? c : { ...c, seen: true }));
       persistCallHistory(callHistory);
       return { ...prev, callHistory };
+    });
+  }, [persistCallHistory]);
+
+  const clearCallHistory = useCallback(() => {
+    setState((prev) => {
+      if (prev.callHistory.length === 0) return prev;
+      // Persist the empty list (encrypted, same path as every other write)
+      // rather than deleting the storage key — an empty encrypted blob and
+      // an absent key are indistinguishable to an observer of AsyncStorage,
+      // and this keeps exactly one code path for how call history reaches
+      // disk.
+      persistCallHistory([]);
+      return { ...prev, callHistory: [] };
     });
   }, [persistCallHistory]);
 
@@ -3761,6 +3777,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // what clears this ref). Clear the incoming-call banner if it's still
         // showing this call, and tell CallKit — it may have a CXCall pending
         // from a VoIP push for the same callId.
+        markCallEnded(wsMsg.callId);
         const pendingIncoming =
           latestStateRef.current.incomingCall?.callId === wsMsg.callId
             ? latestStateRef.current.incomingCall
@@ -3769,14 +3786,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setState((prev) => ({ ...prev, incomingCall: null }));
         }
         if (wsMsg.callId) notifyCallEnded(wsMsg.callId, "unanswered");
-        logCall({
-          alias: (pendingIncoming?.from ?? wsMsg.from).toUpperCase(),
-          direction: "incoming",
-          mode: pendingIncoming?.mode ?? "voice",
-          outcome: "missed",
-          timestamp: Date.now(),
-        });
+        // Only log "missed" when this device was actually being rung (a
+        // pending incoming banner existed for this callId). A hangup with
+        // no matching incoming call is dead-call cleanup — e.g. a callee's
+        // zombie-join timing out and hanging up at a caller who already
+        // ended the call — and logging that as a missed incoming call is
+        // exactly the phantom "missed call" bug.
+        if (pendingIncoming) {
+          logCall({
+            alias: pendingIncoming.from.toUpperCase(),
+            direction: "incoming",
+            mode: pendingIncoming.mode ?? "voice",
+            outcome: "missed",
+            timestamp: Date.now(),
+          });
+        }
       } else {
+        // Hangups are marked ended even when call.tsx is mounted to handle
+        // them — a later CallKit answer tap for the same callId must find it.
+        if (wsMsg.type === "call-hangup") markCallEnded(wsMsg.callId);
         callSignalListenerRef.current?.({ type: wsMsg.type, from: wsMsg.from.toUpperCase(), payload: wsMsg.payload, callId: wsMsg.callId, callMode: wsMsg.callMode });
       }
       return;
@@ -4438,6 +4466,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         registerCallListener,
         logCall,
         markCallsSeen,
+        clearCallHistory,
         forceReconnect,
         sendGhostpadSignal,
         registerGhostpadListener,

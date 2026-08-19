@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { wasCallEnded } from "@/lib/endedCalls";
 import { GoldGradient } from "@/components/GoldGradient";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
@@ -204,6 +205,24 @@ export default function CallScreen() {
   // caller's 30s ring-timeout) so it isn't ALSO logged again if that effect
   // somehow ran twice in dev/fast-refresh.
   const loggedCallRef = useRef(false);
+
+  // ── Dead-call mount guard ─────────────────────────────────────────────────
+  // A callee can reach this screen for a call whose hangup already arrived
+  // (zombie join): CallKit keeps ringing on a device the hangup couldn't
+  // reach, and the answer tap navigates here through paths that don't all
+  // check endedCalls (and can race the WS delivering the hangup during
+  // cold-launch). Without this, the screen sits in "JOINING…" against a
+  // caller who left, until the 30s connecting-timeout fires a call-hangup
+  // back at them. Callers are exempt: their callId is freshly generated.
+  useEffect(() => {
+    if (!isCaller && wasCallEnded(effectiveCallId)) {
+      notifyCallEnded(effectiveCallId, "unanswered");
+      setCallState("ended");
+      const t = setTimeout(() => { if (mountedRef.current) router.back(); }, 600);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Start call duration timer when call goes active ──────────────────────
   useEffect(() => {

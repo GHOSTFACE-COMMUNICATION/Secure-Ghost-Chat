@@ -3,7 +3,7 @@ import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassCallButton } from "@/components/GlassCallButton";
 import { GoldGradient } from "@/components/GoldGradient";
@@ -32,7 +32,19 @@ function formatDuration(secs: number): string {
 export default function CallScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { callHistory, markCallsSeen } = useApp();
+  const { callHistory, markCallsSeen, clearCallHistory } = useApp();
+
+  const confirmClearHistory = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      "Erase call history?",
+      "All call log entries on this device will be permanently removed.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Erase", style: "destructive", onPress: () => clearCallHistory() },
+      ],
+    );
+  };
 
   // Clear the missed-call badge whenever this tab is actually viewed.
   useFocusEffect(
@@ -64,6 +76,7 @@ export default function CallScreen() {
       paddingBottom: 12,
     },
     headerTitle: { color: colors.foreground, fontSize: 16, fontWeight: "800", letterSpacing: 4 },
+    headerRight: { flexDirection: "row", alignItems: "center", gap: 14 },
     item: {
       flexDirection: "row",
       alignItems: "center",
@@ -105,7 +118,19 @@ export default function CallScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>CALL</Text>
-          <SecureBadge type="e2ee" />
+          <View style={styles.headerRight}>
+            {callHistory.length > 0 && (
+              <Pressable
+                onPress={confirmClearHistory}
+                hitSlop={10}
+                testID="clear-call-history"
+                accessibilityLabel="Erase call history"
+              >
+                <Ionicons name="trash-outline" size={18} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+            <SecureBadge type="e2ee" />
+          </View>
         </View>
 
         <FlatList

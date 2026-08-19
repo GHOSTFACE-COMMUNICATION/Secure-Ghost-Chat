@@ -4,6 +4,7 @@ import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { Platform } from "react-native";
+import { wasCallEnded } from "@/lib/endedCalls";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- native-module interop: react-native-callkeep
    and react-native-voip-push-notification are optional native modules that only exist in a custom
@@ -254,6 +255,13 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as IncomingCallPayload & { type?: string };
       if (data?.type === "incoming-call" && data.callId) {
+        // Stale notification tap: the caller may have hung up long before
+        // this tap (the hangup was marked when it arrived over WS). Joining
+        // would put this device in "JOINING…" against nobody for 30s.
+        if (wasCallEnded(data.callId)) {
+          notifyCallEnded(data.callId, "unanswered");
+          return;
+        }
         navigateToCall(data.callId, data);
       }
     });
@@ -271,6 +279,17 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
           onForceReconnect?.();
           const payload = pendingCalls.get(callUUID);
           pendingCalls.delete(callUUID);
+          // Zombie-join guard: the caller may have hung up while this phone
+          // was still ringing (CallKit can't be cancelled on a dead app —
+          // the hangup arrives over WS only once the app connects, which may
+          // already have happened by the time the human taps Answer, e.g.
+          // app woken earlier by the same call's push). If this callId was
+          // already ended, don't navigate into a dead call: end the CXCall
+          // and stay put.
+          if (wasCallEnded(callUUID)) {
+            notifyCallEnded(callUUID, "unanswered");
+            return;
+          }
           navigateToCall(callUUID, payload ?? {});
         });
       } catch (e) {
