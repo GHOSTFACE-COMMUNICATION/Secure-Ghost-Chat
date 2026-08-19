@@ -184,11 +184,17 @@ tiers in order — current AD-bound format, legacy no-AD format, legacy
 pre-encryption-at-rest plaintext — and on a successful legacy-tier decrypt,
 immediately re-encrypts and re-writes in the current format (not deferred
 to the next natural write), logging a `console.warn` marker per migration.
-**Follow-up**: once real-world telemetry (those `console.warn` markers)
-shows the legacy tiers are no longer hit, delete
-`decryptFromStorageLegacyNoAD` and the plaintext-tier fallback from
-`readEncryptedString`. `crypto.ts`'s functions had zero existing callers,
-so no migration was needed there — hard cutover.
+**Follow-up**: delete `decryptFromStorageLegacyNoAD` *and* the
+unconditional plaintext-tier fallback from `readEncryptedString` together —
+once the no-AD tier is gone, an unrecognized value should be a hard error,
+not silently treated as legacy plaintext. The `console.warn` markers are
+device-local logs only, not aggregated telemetry — nothing collects them
+off-device — so there's no way to observe "no installs are hitting this
+tier anymore." The real removal criterion is time-based: after a release
+or two past this fix shipping, once any device that had pre-#6 local data
+has almost certainly already read (and thus migrated) it. `crypto.ts`'s
+functions had zero existing callers, so no migration was needed there —
+hard cutover.
 
 **Tests**: `lib/secureStorage.test.ts` (known-answer AD, keyId-sensitivity,
 round-trip, cross-keyId rejection, both legacy-tier migrations including

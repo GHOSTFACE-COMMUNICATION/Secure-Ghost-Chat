@@ -179,10 +179,15 @@ from before finding #6). A successful decrypt on either legacy tier
 (not deferred to the next natural write), and logs a `console.warn` marker
 naming the key and tier hit.
 
-**Follow-up, tracked in `docs/AUDIT_FINDINGS.md`**: once real-world
-migration telemetry (the `console.warn` markers) shows the legacy tiers are
-no longer being hit, delete `decryptFromStorageLegacyNoAD` and the
-plaintext-tier fallback from `readEncryptedString`.
+**Follow-up, tracked in `docs/AUDIT_FINDINGS.md`**: delete
+`decryptFromStorageLegacyNoAD` *and* the unconditional plaintext-tier
+fallback from `readEncryptedString` together — once the no-AD tier is gone,
+an unrecognized value should be a hard error, not silently treated as
+legacy plaintext. The `console.warn` markers are device-local only (nothing
+aggregates them off-device), so removal isn't gated on observed telemetry —
+it's time-based: after a release or two past this fix shipping, once any
+device that had pre-#6 local data has almost certainly already read (and
+thus migrated) it.
 
 ## Message encryption (`lib/crypto.ts`)
 
