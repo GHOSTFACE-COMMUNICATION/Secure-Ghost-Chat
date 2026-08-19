@@ -14,21 +14,25 @@ template `railwayapp-templates/postgres-ha`) is **paused mid-credential-
 rotation**. Rotation was triggered after a password fragment leaked into a
 session's tool output.
 
-State at last update:
-- `ALTER ROLE postgres` done — DB has the NEW password; verified live.
-- PgBouncer + api-server: updated, app traffic healthy throughout.
-- Cluster is `patronictl pause`d; fresh `pg_dumpall` backup taken.
-- **Patroni leader lock is on postgres-2 (wrong node)** — the real primary
-  (Postgres HA service) still serves writes but its Patroni lost local
-  auth after the rotation and lost the lock. postgres-2 and postgres-3
-  are both NOT streaming (zero live replicas).
-- **TRAP: do not update the primary's Railway variables until the lock is
-  back on the primary** — doing so triggers demotion + promotion of a
-  stale replica = data loss.
-- A 6-phase recovery plan (auth fix → in-container primary config reload →
-  lock handback via postgres-2 scale-down/TTL expiry → replicas one at a
-  time → primary vars last → resume) was handed to the Claude Code
-  session. Check with it / `patronictl list` for current phase.
+State at last update (post-Phase-0 ground truth via patronictl from
+inside the cluster — earlier "lock on postgres-2" reading was transient
+or misattributed):
+- Topology: members are postgres-1 ("Postgres" service), postgres-2,
+  postgres-3. **"Postgres HA" is the HAProxy/router, not a DB node.**
+- `ALTER ROLE postgres` done — live DB has the NEW password.
+- **The new password value lives in Railway vars**: Postgres-2's
+  POSTGRES_PASSWORD/PGPASSWORD, api-server's DATABASE_URL, PgBouncer's
+  vars. Recover from there; never printed anywhere.
+- patronictl list: postgres-1 = Leader/running (TL4, lock is home),
+  postgres-2 + postgres-3 = Replica "in archive recovery" (TL3) — WAL
+  replay from the pgBackRest S3 archive, the fallback when streaming
+  auth fails. Degraded but self-feeding; not data loss.
+- Cluster paused (maintenance mode on); fresh pg_dumpall backup taken.
+- Remaining work = revised plan Phases A–F handed to Claude Code:
+  recover+verify password from vars → postgres-2 streaming → postgres-3
+  vars+redeploy → postgres-1 vars (safe now, just a restart blip) →
+  resume → cleanup (delete artifacts/api-server/_*-tmp scripts, restrict
+  postgres-1's PUBLIC Patroni API domain, close this section).
 - Seven `artifacts/api-server/_*-tmp.*` scripts are incident tooling from
   that session — untracked on purpose; delete after the incident closes.
 
