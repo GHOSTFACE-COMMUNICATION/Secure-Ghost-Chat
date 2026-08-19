@@ -7,32 +7,39 @@ sessions re-derive context wrong.
 Last updated: 2026-08-19 (Cowork session — repo cleanup, crypto-audit
 verification loop, Postgres incident oversight)
 
-## 🔴 ACTIVE INCIDENT — Postgres password rotation, mid-recovery
+## ✅ CLOSED INCIDENT — Postgres password rotation (2026-08-19)
 
-The production Postgres HA cluster (Railway, Patroni + etcd + PgBouncer,
-template `railwayapp-templates/postgres-ha`) is **paused mid-credential-
-rotation**. Rotation was triggered after a password fragment leaked into a
-session's tool output.
+Trigger: a password fragment leaked into a session's tool output. First
+rotation attempt caused a degraded window (replicas fell back to
+pgBackRest archive recovery; a transient wrong-node leader-lock reading
+caused a pause + staged recovery). Cluster was fully recovered, then a
+**second, clean rotation** was executed end-to-end with zero outage:
+secrets-store write + read-back verify first, ALTER ROLE, PgBouncer
++13s / api-server +15s, then hand-edit patroni.yml + patronictl reload
+on all three nodes (local trust auth means no restart needed — the
+primary redeploy was never required). Final state verified: postgres-1
+Leader/running TL4, postgres-2/3 streaming lag 0, live write test via
+PgBouncer passed, api-server clean.
 
-State at last update (post-Phase-0 ground truth via patronictl from
-inside the cluster — earlier "lock on postgres-2" reading was transient
-or misattributed):
-- Topology: members are postgres-1 ("Postgres" service), postgres-2,
-  postgres-3. **"Postgres HA" is the HAProxy/router, not a DB node.**
-- `ALTER ROLE postgres` done — live DB has the NEW password.
-- **The new password value lives in Railway vars**: Postgres-2's
-  POSTGRES_PASSWORD/PGPASSWORD, api-server's DATABASE_URL, PgBouncer's
-  vars. Recover from there; never printed anywhere.
-- patronictl list: postgres-1 = Leader/running (TL4, lock is home),
-  postgres-2 + postgres-3 = Replica "in archive recovery" (TL3) — WAL
-  replay from the pgBackRest S3 archive, the fallback when streaming
-  auth fails. Degraded but self-feeding; not data loss.
-- Cluster paused (maintenance mode on); fresh pg_dumpall backup taken.
-- Remaining work = revised plan Phases A–F handed to Claude Code:
-  recover+verify password from vars → postgres-2 streaming → postgres-3
-  vars+redeploy → postgres-1 vars (safe now, just a restart blip) →
-  resume → cleanup (delete artifacts/api-server/_*-tmp scripts, restrict
-  postgres-1's PUBLIC Patroni API domain, close this section).
+Durable facts:
+- **Canonical credential location: secrets-store key
+  `postgres-ha-cluster-password` (v1)** — with audit trail. Railway vars
+  hold copies; the store is the source of truth.
+- Topology: Patroni members are postgres-1 ("Postgres" service),
+  postgres-2, postgres-3; **"Postgres HA" is the HAProxy/router, not a
+  DB node**. Scope `postgres-ha`, 3× etcd, PgBouncer in front.
+- Rotation runbook that works, zero-outage: secrets store first →
+  ALTER ROLE → PgBouncer/api-server vars immediately (pre-staged) →
+  per-node patroni.yml hand-edit + patronictl reload (NO redeploys, NO
+  pause). Pause mode disables Patroni's own recovery — don't use it for
+  rotations.
+- Incident tmp scripts (artifacts/api-server/_*-tmp.*) deleted after
+  close. The "public Patroni API domain" from an early readout could not
+  be found on re-check — treat as misread, nothing to restrict.
+- ⚠ Two local pg_dumpall backup files were taken during the incident
+  (one per rotation). They contain full data AND role password hashes.
+  Delete them or move them into encrypted storage — still pending, ask
+  Benji where they were saved.
 - Seven `artifacts/api-server/_*-tmp.*` scripts are incident tooling from
   that session — untracked on purpose; delete after the incident closes.
 
