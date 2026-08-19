@@ -249,18 +249,41 @@ prefix, legacy GHX2 payloads still decrypt, GHX2 and GHX3 ciphertexts for
 identical input differ and each only decodes via its own branch, and a
 full encrypt→hide→reveal→decrypt pipeline test.
 
-## #8 — Stealth tool's blank-passphrase fallback is a well-known default key — **OPEN**
+## #8 — Stealth tool's blank-passphrase fallback is a well-known default key — **RESOLVED**
 
 **Finding**: `ghostEncrypt`/`ghostDecrypt` (`lib/stealthCrypto.ts`, formerly
-in `components/EncryptionTools.tsx`) derive the key from
-`passphrase || "GHOSTFACE"` — if the user leaves the optional "SECRET KEY"
-field blank, every such message is encrypted under the same fixed
+in `components/EncryptionTools.tsx`) derived the key from
+`passphrase || "GHOSTFACE"` — if the user left the optional "SECRET KEY"
+field blank, every such message was encrypted under the same fixed
 passphrase, `"GHOSTFACE"`, visible to anyone who reads the source (or just
-guesses it, given the UI's own placeholder text says "Blank = default
+guesses it, given the UI's own placeholder text said "Blank = default
 key"). Against an attacker who tries that literal string, confidentiality
-for a blank-key message reduces to whatever the zero-width steganography
+for a blank-key message reduced to whatever the zero-width steganography
 layer alone provides — none, once the hidden bits are found. Noticed while
 implementing finding #7's AD fix; not an AD/associated-data problem so left
 out of that fix's scope.
 
-**Status**: open, no design proposed yet.
+**Fix**: `ghostEncrypt` now requires a non-empty, trimmed passphrase —
+throws if given `""` or whitespace-only, as a backstop, and the Stealth
+UI's "HIDE MESSAGE" button is disabled with inline validation
+("A passphrase is required to encrypt.") until one is entered, so this
+should never actually reach the throw in normal use. Decrypt-side key
+derivation is **unchanged** — `passphrase || "GHOSTFACE"` still tries the
+old default forever, same reasoning as #7's permanent GHX2 branch: messages
+already hidden under the old blank-key behavior can't be un-hidden or
+rewritten, so revealing them has to keep working. `ghostDecrypt`'s return
+shape changed from `string | null` to `{ plaintext, usedDefaultPassphrase } | null`
+so the UI can tell the two cases apart; on a successful reveal where
+`usedDefaultPassphrase` is true, the Stealth screen now shows **"HIDDEN
+WITH THE DEFAULT KEY — anyone with this app can reveal it"** under the
+decrypted message — it was genuinely encrypted, just under a key anyone
+running this app already knows, so the warning names who can read it
+rather than implying no encryption happened.
+
+**Tests**: `lib/stealthCrypto.test.ts` — `ghostEncrypt` throws on empty and
+whitespace-only passphrases; a real passphrase (including the literal
+string `"GHOSTFACE"` typed deliberately) round-trips with
+`usedDefaultPassphrase: false`; a payload encrypted under the default key
+(constructed directly in the test, since `ghostEncrypt` itself now refuses
+to produce one) decrypts with `usedDefaultPassphrase: true`, for both the
+current AD-bound format and the legacy GHX2 format.

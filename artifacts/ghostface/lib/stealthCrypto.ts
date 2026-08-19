@@ -71,10 +71,24 @@ export function encodeStealthAD(): Uint8Array {
 const GHX_PREFIX_CURRENT = "GHX3::";
 const GHX_PREFIX_LEGACY = "GHX2::";
 
-/** ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations) — same construction the app uses for PIN-derived keys. */
+/**
+ * ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations) —
+ * same construction the app uses for PIN-derived keys.
+ *
+ * Audit #8: this used to fall back to a fixed literal ("GHOSTFACE") when
+ * passphrase was blank — every such message shared one publicly-known key,
+ * so confidentiality reduced to whatever the steganography layer alone
+ * provided. Encryption now requires a real passphrase; the UI disables the
+ * hide button until one is entered, and this throw is the backstop for any
+ * other caller. Decrypt (below) still tries that default forever, since
+ * messages already hidden that way can't be un-hidden or rewritten.
+ */
 export function ghostEncrypt(plaintext: string, passphrase: string): string {
+  if (!passphrase.trim()) {
+    throw new Error("[stealthCrypto] a non-empty passphrase is required to encrypt");
+  }
   const salt = generateSalt();
-  const key = deriveKeyFromPin(passphrase || "GHOSTFACE", salt);
+  const key = deriveKeyFromPin(passphrase, salt);
   const chacha = managedNonce(chacha20poly1305);
   const ad = encodeStealthAD();
   const ciphertext = chacha(key, ad).encrypt(new TextEncoder().encode(plaintext));
@@ -109,13 +123,29 @@ function ghostDecryptLegacyNoAD(combined: Uint8Array, passphrase: string): strin
   return new TextDecoder().decode(chacha(key).decrypt(ciphertext));
 }
 
-export function ghostDecrypt(payload: string, passphrase: string): string | null {
+export interface StealthDecryptResult {
+  plaintext: string;
+  /**
+   * True when `passphrase` was the empty string and decryption succeeded
+   * via the "GHOSTFACE" default (audit #8) — i.e. the message was hidden
+   * without a real passphrase, so anyone with this app can reveal it.
+   * Reflects whether the caller supplied a passphrase, not whether the
+   * resulting key happens to match a known one — typing the literal word
+   * "GHOSTFACE" as a real passphrase is `false` here, deliberately.
+   */
+  usedDefaultPassphrase: boolean;
+}
+
+export function ghostDecrypt(payload: string, passphrase: string): StealthDecryptResult | null {
+  const usedDefaultPassphrase = passphrase === "";
   try {
     if (payload.startsWith(GHX_PREFIX_CURRENT)) {
-      return ghostDecryptCurrent(base64ToBytes(payload.slice(GHX_PREFIX_CURRENT.length)), passphrase);
+      const plaintext = ghostDecryptCurrent(base64ToBytes(payload.slice(GHX_PREFIX_CURRENT.length)), passphrase);
+      return { plaintext, usedDefaultPassphrase };
     }
     if (payload.startsWith(GHX_PREFIX_LEGACY)) {
-      return ghostDecryptLegacyNoAD(base64ToBytes(payload.slice(GHX_PREFIX_LEGACY.length)), passphrase);
+      const plaintext = ghostDecryptLegacyNoAD(base64ToBytes(payload.slice(GHX_PREFIX_LEGACY.length)), passphrase);
+      return { plaintext, usedDefaultPassphrase };
     }
     return null;
   } catch {

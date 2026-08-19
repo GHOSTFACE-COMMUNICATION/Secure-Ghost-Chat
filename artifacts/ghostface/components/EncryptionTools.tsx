@@ -27,6 +27,9 @@ export default function EncryptionTools() {
   const [stealthError, setStealthError] = useState("");
   const [stealthMode, setStealthMode] = useState<"hide" | "reveal">("hide");
   const [stealthCopied, setStealthCopied] = useState(false);
+  const [stealthUsedDefaultKey, setStealthUsedDefaultKey] = useState(false);
+
+  const stealthKeyMissing = !stealthKey.trim();
 
   const copy = async (text: string, done: (v: boolean) => void) => {
     await Clipboard.setStringAsync(text);
@@ -72,26 +75,36 @@ export default function EncryptionTools() {
   const runHide = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setStealthError("");
-    const ciphertext = ghostEncrypt(stealthMsg, stealthKey);
-    setStealthOut(stealthEncode(ciphertext));
+    // Button is disabled while stealthKeyMissing, so this should be
+    // unreachable — ghostEncrypt's own throw is the backstop, this catch
+    // just keeps a race (or a future caller) from crashing the screen.
+    try {
+      const ciphertext = ghostEncrypt(stealthMsg, stealthKey);
+      setStealthOut(stealthEncode(ciphertext));
+    } catch {
+      setStealthOut("");
+      setStealthError("A passphrase is required to encrypt.");
+    }
   };
 
   const runReveal = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setStealthUsedDefaultKey(false);
     const hidden = stealthDecode(stealthCarrier);
     if (!hidden) {
       setStealthOut("");
       setStealthError("NO HIDDEN MESSAGE FOUND");
       return;
     }
-    const plaintext = ghostDecrypt(hidden, stealthKey);
-    if (plaintext === null) {
+    const result = ghostDecrypt(hidden, stealthKey);
+    if (result === null) {
       setStealthOut("");
       setStealthError("DECRYPTION FAILED — wrong key or corrupted data");
       return;
     }
     setStealthError("");
-    setStealthOut(plaintext);
+    setStealthOut(result.plaintext);
+    setStealthUsedDefaultKey(result.usedDefaultPassphrase);
   };
 
   return (
@@ -113,7 +126,7 @@ export default function EncryptionTools() {
             <Pressable
               key={m}
               style={[s.modeBtn, { borderColor: stealthMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
-              onPress={() => { setStealthMode(m); setStealthOut(""); setStealthError(""); }}
+              onPress={() => { setStealthMode(m); setStealthOut(""); setStealthError(""); setStealthUsedDefaultKey(false); }}
             >
               {stealthMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
               <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
@@ -130,13 +143,18 @@ export default function EncryptionTools() {
               style={s.input} value={stealthMsg} onChangeText={setStealthMsg}
               placeholder="Message to hide..." placeholderTextColor={colors.mutedForeground} autoCorrect={false}
             />
-            <Text style={s.lbl}>SECRET KEY (OPTIONAL)</Text>
+            <Text style={s.lbl}>SECRET KEY (REQUIRED)</Text>
             <TextInput
               style={s.input} value={stealthKey} onChangeText={setStealthKey}
-              placeholder="Blank = default key" placeholderTextColor={colors.mutedForeground} autoCorrect={false}
+              placeholder="Required — choose a passphrase to share with the recipient"
+              placeholderTextColor={colors.mutedForeground} autoCorrect={false}
             />
+            {!!stealthMsg && stealthKeyMissing && (
+              <Text style={[s.infoTxt, { color: colors.destructive }]}>A passphrase is required to encrypt.</Text>
+            )}
             <Pressable
-              style={[s.btn, !stealthMsg && { opacity: 0.38 }]} disabled={!stealthMsg}
+              style={[s.btn, (!stealthMsg || stealthKeyMissing) && { opacity: 0.38 }]}
+              disabled={!stealthMsg || stealthKeyMissing}
               onPress={runHide}
             >
               <GoldGradient style={s.btnGold}>
@@ -172,6 +190,11 @@ export default function EncryptionTools() {
           <View style={s.out}>
             <Text style={[s.lbl, { marginBottom: 6 }]}>{stealthMode === "hide" ? "OUTPUT (copy & send)" : "DECRYPTED MESSAGE"}</Text>
             <Text style={s.outTxt}>{stealthMode === "hide" ? "GHOSTFACE [encrypted data embedded — copy to share]" : stealthOut}</Text>
+            {stealthMode === "reveal" && stealthUsedDefaultKey && (
+              <Text style={[s.infoTxt, { color: colors.destructive, marginTop: 6 }]}>
+                HIDDEN WITH THE DEFAULT KEY — anyone with this app can reveal it
+              </Text>
+            )}
             {renderCopy(stealthOut, stealthCopied, setStealthCopied)}
           </View>
         )}
