@@ -461,6 +461,16 @@ export interface Conversation {
    * is never serialized onto the wire anywhere in this codebase.
    */
   bgColor?: string;
+  /**
+   * Custom chat wallpaper photo — a file:// URI under the app's own
+   * documentDirectory (chat-bg/), copied there at pick time so the image
+   * picker's cache URI can't dangle. Mutually exclusive with bgColor.
+   * Device-local like bgColor and never transmitted — but note: the image
+   * FILE itself lives app-sandboxed yet UNENCRYPTED, unlike the
+   * conversation blob. Acceptable for a wallpaper; never reuse this
+   * pattern for message content.
+   */
+  bgImageUri?: string;
   safetyNumber?: string;
   drSession?: DRSession;
   pendingX3DHHeader?: string;
@@ -660,6 +670,8 @@ interface AppContextType extends AppState {
   markConversationRead: (conversationId: string) => void;
   setDisappearTimer: (conversationId: string, seconds: number) => void;
   setConversationBgColor: (conversationId: string, color: string | undefined) => void;
+  /** Set/clear a custom photo wallpaper (file:// URI). Clears bgColor. */
+  setConversationBgImage: (conversationId: string, uri: string | undefined) => void;
   markMessagesViewed: (conversationId: string, messageIds: string[]) => void;
   verifyConversation: (conversationId: string) => void;
   panicWipe: () => Promise<void>;
@@ -2466,7 +2478,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setConversationBgColor = useCallback((conversationId: string, color: string | undefined) => {
     setState((prev) => {
       const updated = prev.conversations.map((c) =>
-        c.id === conversationId ? { ...c, bgColor: color } : c
+        // Picking a colour (or DEFAULT = undefined) always clears a custom
+        // photo — the two wallpaper kinds are mutually exclusive.
+        c.id === conversationId ? { ...c, bgColor: color, bgImageUri: undefined } : c
+      );
+      persistConversations(updated);
+      return { ...prev, conversations: updated };
+    });
+  }, [persistConversations]);
+
+  const setConversationBgImage = useCallback((conversationId: string, uri: string | undefined) => {
+    setState((prev) => {
+      const updated = prev.conversations.map((c) =>
+        c.id === conversationId ? { ...c, bgImageUri: uri, bgColor: undefined } : c
       );
       persistConversations(updated);
       return { ...prev, conversations: updated };
@@ -4492,6 +4516,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         markConversationRead,
         setDisappearTimer,
         setConversationBgColor,
+        setConversationBgImage,
         markMessagesViewed,
         verifyConversation,
         sendCallSignal,

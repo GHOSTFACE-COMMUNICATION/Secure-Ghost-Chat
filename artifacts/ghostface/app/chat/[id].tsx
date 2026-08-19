@@ -255,6 +255,7 @@ export default function ChatScreen() {
     clearConversation,
     setDisappearTimer,
     setConversationBgColor,
+    setConversationBgImage,
     markMessagesViewed,
     verifyConversation,
     deleteConversation,
@@ -723,6 +724,46 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Custom photo wallpaper ────────────────────────────────────────────────
+  // The picked image is COPIED into the app's own documentDirectory
+  // (chat-bg/) — the picker returns a cache URI the OS may clean at any
+  // time, which would silently blank the wallpaper. Old file is deleted
+  // best-effort whenever the wallpaper changes; the file itself is
+  // app-sandboxed but not encrypted (see Conversation.bgImageUri doc).
+  const removeBgImageFile = (uri: string | undefined) => {
+    if (!uri) return;
+    FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+  };
+
+  const pickBgImage = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "PHOTOS ACCESS DENIED",
+          "Enable photo library access in your device settings to set a wallpaper.",
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.85,
+        exif: false,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const dir = `${FileSystem.documentDirectory}chat-bg/`;
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+      const dest = `${dir}${conv.id}-${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: result.assets[0].uri, to: dest });
+      removeBgImageFile(conv.bgImageUri);
+      setConversationBgImage(conv.id, dest);
+    } catch (e) {
+      console.warn("[Chat] Wallpaper pick failed:", e);
+      Alert.alert("WALLPAPER FAILED", "Could not set that photo. Try another image.");
+    }
+  };
+
   // Fall back to the 1h default entry — a conversation can hold a clamped
   // non-preset value (e.g. synced from a peer build with different presets);
   // label the nearest sensible thing rather than crashing on find().
@@ -1112,6 +1153,19 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding" keyboardVerticalOffset={0}>
+      {conv.bgImageUri && (
+        <>
+          <Image
+            source={{ uri: conv.bgImageUri }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+          />
+          {/* Scrim: the app's text/timestamps are calibrated against
+              near-black — an arbitrary photo isn't. This keeps any photo
+              usable as a wallpaper without per-photo contrast logic. */}
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)" }]} />
+        </>
+      )}
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={{ padding: 4 }} onPress={() => router.back()}>
@@ -1942,15 +1996,32 @@ export default function ChatScreen() {
                       style={[
                         styles.bgSwatch,
                         { backgroundColor: colors.background },
-                        !conv.bgColor && styles.bgSwatchActive,
+                        !conv.bgColor && !conv.bgImageUri && styles.bgSwatchActive,
                       ]}
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        removeBgImageFile(conv.bgImageUri);
                         setConversationBgColor(conv.id, undefined);
                       }}
                       testID="bg-swatch-default"
                     >
-                      {!conv.bgColor && <Ionicons name="checkmark" size={14} color={colors.foreground} />}
+                      {!conv.bgColor && !conv.bgImageUri && <Ionicons name="checkmark" size={14} color={colors.foreground} />}
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.bgSwatch,
+                        { backgroundColor: colors.background },
+                        !!conv.bgImageUri && styles.bgSwatchActive,
+                      ]}
+                      onPress={pickBgImage}
+                      testID="bg-swatch-photo"
+                      accessibilityLabel="Choose a photo as chat wallpaper"
+                    >
+                      <Ionicons
+                        name="image-outline"
+                        size={14}
+                        color={conv.bgImageUri ? colors.primary : colors.mutedForeground}
+                      />
                     </Pressable>
                     {CHAT_COLOR_PALETTE.map((swatch) => (
                       <Pressable
@@ -1962,6 +2033,7 @@ export default function ChatScreen() {
                         ]}
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          removeBgImageFile(conv.bgImageUri);
                           setConversationBgColor(conv.id, swatch);
                         }}
                         testID={`bg-swatch-${swatch}`}
