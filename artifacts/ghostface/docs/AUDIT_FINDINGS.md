@@ -207,7 +207,7 @@ test stubs for `@react-native-async-storage/async-storage` and
 `scripts/rn-test-loader.mjs`) — `secureStorage.ts`'s native dependencies
 couldn't otherwise be imported under `node --test`.
 
-## #7 — No associated data on `EncryptionTools.tsx`'s Stealth encryption — **OPEN**
+## #7 — No associated data on `EncryptionTools.tsx`'s Stealth encryption — **RESOLVED**
 
 **Finding**: `components/EncryptionTools.tsx`'s own `ghostEncrypt`/
 `ghostDecrypt` (the Stealth tool's encrypt-then-hide implementation) use
@@ -215,6 +215,52 @@ the same `managedNonce(chacha20poly1305)` pattern as `secureStorage.ts`/
 `crypto.ts` had, with no AD — and unlike `crypto.ts`'s functions, this one
 **is** live (wired into the Tools page). Found while tracing every AEAD
 call site during finding #6's diagnosis; explicitly out of scope for that
-finding, not touched.
+finding, not touched there.
+
+**Why this needed a different shape of fix than #6**: #6's storage blobs
+are written and read by the app itself — a format change can self-heal in
+place on next read. Stealth's output is a string the user copies out of the
+app and shares elsewhere (a message, a screenshot, a notes app) — the app
+never controls where it ends up and can't rewrite it later. So unlike #6's
+temporary, self-healing migration tiers, this fix keeps a **permanent**
+decode-side branch for the old format, with no removal criterion at all
+(there's no telemetry, device-local or otherwise, that could ever show a
+pre-fix payload won't be pasted in tomorrow) — dropping it later would be a
+deliberate product decision, not something inferred from usage.
+
+**Fix**: `encodeStealthAD()` in the new `lib/stealthCrypto.ts` (magic
+`"GFST"`, version — no header fields to bind, this format has none beyond
+the salt, which tampering-detection already covers since it's KDF input).
+The payload's own version prefix now doubles as the decode dispatch key:
+`ghostEncrypt` always produces `"GHX3::"` (new, AD-bound) going forward;
+`ghostDecrypt` decodes `"GHX3::"` via the new AD-bound path, `"GHX2::"` via
+the untouched legacy no-AD path, and returns `null` cleanly (no throw) for
+any other or missing prefix. `ghostEncrypt`/`ghostDecrypt`/`stealthEncode`/
+`stealthDecode` were extracted out of `components/EncryptionTools.tsx` into
+`lib/stealthCrypto.ts` (pure logic move, no behavior change beyond the AD
+fix) so they're unit-testable under `node:test` — the component file pulls
+in React Native/Expo UI modules unrelated to this logic. Full layout and
+rationale in `docs/PROTOCOL.md`.
+
+**Tests**: `lib/stealthCrypto.test.ts` — known-answer AD, GHX3 prefix on
+new output, round-trip (including blank/default passphrase), wrong-
+passphrase rejection, tamper detection, clean-null on unrecognized/missing
+prefix, legacy GHX2 payloads still decrypt, GHX2 and GHX3 ciphertexts for
+identical input differ and each only decodes via its own branch, and a
+full encrypt→hide→reveal→decrypt pipeline test.
+
+## #8 — Stealth tool's blank-passphrase fallback is a well-known default key — **OPEN**
+
+**Finding**: `ghostEncrypt`/`ghostDecrypt` (`lib/stealthCrypto.ts`, formerly
+in `components/EncryptionTools.tsx`) derive the key from
+`passphrase || "GHOSTFACE"` — if the user leaves the optional "SECRET KEY"
+field blank, every such message is encrypted under the same fixed
+passphrase, `"GHOSTFACE"`, visible to anyone who reads the source (or just
+guesses it, given the UI's own placeholder text says "Blank = default
+key"). Against an attacker who tries that literal string, confidentiality
+for a blank-key message reduces to whatever the zero-width steganography
+layer alone provides — none, once the hidden bits are found. Noticed while
+implementing finding #7's AD fix; not an AD/associated-data problem so left
+out of that fix's scope.
 
 **Status**: open, no design proposed yet.

@@ -217,13 +217,67 @@ garbage or — worse — something plausible-looking.
 Hard cutover, no migration path needed: zero callers today means zero data
 encrypted in the old (no-AD) format to migrate.
 
+## Stealth tool (`lib/stealthCrypto.ts`)
+
+`ghostEncrypt`/`ghostDecrypt` — the Stealth tab's encrypt-then-hide
+implementation, extracted from `components/EncryptionTools.tsx` (pure logic
+move, no behavior change beyond this fix). Implemented as
+`encodeStealthAD()`. This is audit finding #7.
+
+### Why this is shaped differently from #6 and #1
+
+Every other AD fix in this doc covers a construction the app fully
+controls end to end — a wire message received by our own decode path
+(#1), or a blob we wrote to and read from our own storage (#6). Stealth's
+output is different: `runHide()` produces a string the user copies out of
+the app and shares wherever they like — a text message, a screenshot, a
+notes app. The app never sees where it lands and can't rewrite it later.
+That rules out #6's approach (temporary tiers, self-healing rewrite,
+removal once local telemetry goes quiet) — there's nothing to rewrite and
+no telemetry signal, ever, that could show an old-format payload won't be
+pasted in tomorrow.
+
+### Layout
+
+```
+offset  size  content
+0       4     magic = "GFST" (0x47 0x46 0x53 0x54)
+4       1     protocol_version = 0x01
+```
+
+No header fields beyond magic + version — this format carries nothing
+analogous to the Double Ratchet's header or secureStorage's key id. The
+salt is KDF input, not a header field; tampering with it already changes
+the derived key without any help from AD. The AD's job here is purely
+domain separation (self-describing this construction the same way the
+other two are) rather than binding any real per-message context.
+
+### Versioning via the existing payload prefix, not a migration tier
+
+The payload already self-describes its format via a literal string prefix
+(`"GHX2::"` before this fix). Reused that mechanism directly instead of
+inventing a second one: `ghostEncrypt` always produces `"GHX3::"` (new,
+AD-bound) going forward — hard cutover on the write side. `ghostDecrypt`
+dispatches on the prefix: `"GHX3::"` decrypts via the new AD-bound path,
+`"GHX2::"` via the original no-AD path (kept byte-for-byte, unremoved), and
+anything else — an unrecognized prefix, a missing one, garbage — returns
+`null` without attempting a decrypt at all, cleanly, no throw.
+
+The `"GHX3::"`/`"GHX2::"` prefix itself is unauthenticated (necessarily —
+it's read before a decrypt is even attempted, so it can't be inside the
+AEAD envelope it selects). That's fine: it only selects which *fixed*
+constant AD to try, never contributes to the AD's authenticated content
+itself, so an attacker flipping the prefix in transit just produces a
+tag-mismatch decrypt failure, not a forged plaintext.
+
+**This is not a temporary tier — there is no removal criterion.** Unlike
+`secureStorage.ts`'s legacy fallbacks (#6), the `"GHX2::"` branch stays
+until a deliberate future product decision drops support for pre-#7
+Stealth messages; nothing in the app can ever observe that it's safe to
+remove.
+
 ## Out of scope
 
-- `components/EncryptionTools.tsx`'s own `ghostEncrypt`/`ghostDecrypt` (the
-  Stealth tool) use the same `managedNonce(chacha20poly1305)` pattern with
-  no AD, and this one **is** live. Not part of finding #6 — logged
-  separately as audit finding #7 in `docs/AUDIT_FINDINGS.md`, no design
-  proposed yet.
 - The general-purpose `fromHex()`/`toHex()` helpers used throughout
   `lib/doubleRatchet.ts` and `lib/secureStorage.ts` remain lenient (silently
   produce `NaN` on invalid hex via `parseInt`). Only the AD-specific strict

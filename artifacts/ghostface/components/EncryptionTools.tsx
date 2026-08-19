@@ -1,6 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { managedNonce } from "@noble/ciphers/utils.js";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
@@ -15,81 +13,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { GoldGradient } from "@/components/GoldGradient";
-import { deriveKeyFromPin, generateSalt } from "@/lib/crypto";
-
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i], b1 = bytes[i + 1] ?? 0, b2 = bytes[i + 2] ?? 0;
-    out += B64[b0 >> 2] + B64[((b0 & 3) << 4) | (b1 >> 4)];
-    out += i + 1 < bytes.length ? B64[((b1 & 15) << 2) | (b2 >> 6)] : "=";
-    out += i + 2 < bytes.length ? B64[b2 & 63] : "=";
-  }
-  return out;
-}
-
-function base64ToBytes(str: string): Uint8Array {
-  const s = str.replace(/=+$/, "");
-  const out: number[] = [];
-  for (let i = 0; i < s.length; i += 4) {
-    const a = B64.indexOf(s[i] ?? ""), b = B64.indexOf(s[i + 1] ?? "");
-    const c = s[i + 2] ? B64.indexOf(s[i + 2]) : -1;
-    const d = s[i + 3] ? B64.indexOf(s[i + 3]) : -1;
-    out.push((a << 2) | (b >> 4));
-    if (c >= 0) out.push(((b & 15) << 4) | (c >> 2));
-    if (d >= 0) out.push(((c & 3) << 6) | d);
-  }
-  return new Uint8Array(out);
-}
-
-function concatBytes(...arrs: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
-  let offset = 0;
-  for (const a of arrs) { out.set(a, offset); offset += a.length; }
-  return out;
-}
-
-/** ChaCha20-Poly1305 AEAD, key derived via PBKDF2-SHA256 (600k iterations) — same construction the app uses for PIN-derived keys. */
-function ghostEncrypt(plaintext: string, passphrase: string): string {
-  const salt = generateSalt();
-  const key = deriveKeyFromPin(passphrase || "GHOSTFACE", salt);
-  const chacha = managedNonce(chacha20poly1305);
-  const ciphertext = chacha(key).encrypt(new TextEncoder().encode(plaintext));
-  return "GHX2::" + bytesToBase64(concatBytes(salt, ciphertext));
-}
-
-function ghostDecrypt(payload: string, passphrase: string): string | null {
-  if (!payload.startsWith("GHX2::")) return null;
-  try {
-    const combined = base64ToBytes(payload.slice(6));
-    const salt = combined.slice(0, 32);
-    const ciphertext = combined.slice(32);
-    const key = deriveKeyFromPin(passphrase || "GHOSTFACE", salt);
-    const chacha = managedNonce(chacha20poly1305);
-    return new TextDecoder().decode(chacha(key).decrypt(ciphertext));
-  } catch {
-    return null;
-  }
-}
-
-/** Zero-width character steganography — hides a string (here, always ciphertext) inside an innocent-looking word. */
-function stealthEncode(payload: string): string {
-  const bits = Array.from(payload).map((c) => c.charCodeAt(0).toString(2).padStart(8, "0")).join("");
-  return "GHOSTFACE" + bits.split("").map((b) => (b === "0" ? "​" : "‌")).join("");
-}
-
-function stealthDecode(carrier: string): string | null {
-  const bits = Array.from(carrier).filter((c) => c === "​" || c === "‌")
-    .map((c) => (c === "​" ? "0" : "1")).join("");
-  let out = "";
-  for (let i = 0; i < bits.length; i += 8) {
-    const byte = bits.slice(i, i + 8);
-    if (byte.length === 8) out += String.fromCharCode(parseInt(byte, 2));
-  }
-  return out || null;
-}
+import { ghostDecrypt, ghostEncrypt, stealthDecode, stealthEncode } from "@/lib/stealthCrypto";
 
 const MONO = Platform.OS === "ios" ? "Courier" : "monospace";
 
