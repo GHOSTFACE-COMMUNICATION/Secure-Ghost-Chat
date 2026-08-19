@@ -22,8 +22,10 @@ const testFiles = readdirSync("lib")
   .map((f) => `lib/${f}`)
   .sort();
 
+const rnLoaderRegister = new URL("./register-rn-loader.mjs", import.meta.url).href;
+
 const [cmd, args] = supportsStripTypes
-  ? ["node", ["--experimental-strip-types", "--test", ...testFiles]]
+  ? ["node", ["--experimental-strip-types", "--import", rnLoaderRegister, "--test", ...testFiles]]
   : ["npx", ["tsx", "--test", ...testFiles]];
 
 console.log(`[run-tests] Node ${process.version} — using: ${cmd} ${args.join(" ")}`);
