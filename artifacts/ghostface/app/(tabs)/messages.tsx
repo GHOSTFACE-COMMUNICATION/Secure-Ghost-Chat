@@ -43,6 +43,8 @@ function addConvErrorTitle(error?: string): string {
       return "User Not Found";
     case "server_unreachable":
       return "Network Unavailable";
+    case "pq_downgrade":
+      return "Post-Quantum Keys Missing";
     default:
       return "Could Not Start Chat";
   }
@@ -58,6 +60,8 @@ function addConvErrorMessage(alias: string, error?: string): string {
       return `${alias} has no encryption keys available right now. Ask them to reopen GHOSTFACE, then try again.`;
     case "no_own_keys":
       return "Your own encryption keys could not be prepared. Try again in a moment.";
+    case "pq_downgrade":
+      return `${alias}'s encryption keys are missing required post-quantum material. GHOSTFACE refuses to start a classical-only session — ask them to reopen GHOSTFACE to refresh their keys, then try again.`;
     case "x3dh_failed":
       return "The secure key exchange failed. Please try again.";
     default:

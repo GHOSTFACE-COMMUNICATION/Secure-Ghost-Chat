@@ -1123,9 +1123,9 @@ export default function ChatScreen() {
             <Text style={styles.headerSubText} numberOfLines={1}>
               {presence[conv.alias] === undefined ? "" : presence[conv.alias] ? "ONLINE · " : "OFFLINE · "}
               {conv.drSession
-                ? conv.drSession.alice.pq
+                ? (conv.drSession.pqEstablished ?? false)
                   ? "POST-QUANTUM · DOUBLE RATCHET · CHACHA20"
-                  : "DOUBLE RATCHET · X3DH · CHACHA20"
+                  : "⚠ CLASSICAL ONLY · DOUBLE RATCHET · X3DH · CHACHA20"
                 : "SECURE · CHACHA20-POLY1305"}
             </Text>
             {lowBandwidthActive && (
@@ -1866,9 +1866,20 @@ export default function ChatScreen() {
                 </View>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>KEY AGREEMENT</Text>
-                  <Text style={[styles.infoValue, { color: colors.success }]}>
+                  <Text
+                    style={[
+                      styles.infoValue,
+                      {
+                        color: conv.drSession
+                          ? (conv.drSession.pqEstablished ?? false)
+                            ? colors.success
+                            : colors.warning
+                          : colors.success,
+                      },
+                    ]}
+                  >
                     {conv.drSession
-                      ? conv.drSession.alice.pq
+                      ? (conv.drSession.pqEstablished ?? false)
                         ? "PQXDH · X25519 + ML-KEM-768"
                         : "X3DH · X25519"
                       : "ECDH"}
@@ -1880,10 +1891,10 @@ export default function ChatScreen() {
                     <Text
                       style={[
                         styles.infoValue,
-                        { color: conv.drSession.alice.pq ? colors.success : colors.mutedForeground },
+                        { color: (conv.drSession.pqEstablished ?? false) ? colors.success : colors.warning },
                       ]}
                     >
-                      {conv.drSession.alice.pq ? "HYBRID PQ (ML-KEM-768)" : "CLASSICAL ONLY"}
+                      {(conv.drSession.pqEstablished ?? false) ? "HYBRID PQ (ML-KEM-768)" : "⚠ CLASSICAL ONLY"}
                     </Text>
                   </View>
                 )}

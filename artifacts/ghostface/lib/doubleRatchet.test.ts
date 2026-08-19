@@ -8,6 +8,7 @@ import {
   generateSigningKeyPair,
   initSessionAliceWithHeader,
   initSessionBobFromHeader,
+  PqDowngradeError,
   ratchetDecrypt,
   ratchetEncrypt,
   signKemPreKey,
@@ -15,6 +16,7 @@ import {
   toHex,
   type PreKeyBundle,
   type RatchetHeader,
+  type X3DHHeader,
 } from "./doubleRatchet.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -23,7 +25,20 @@ const DH_HEX = "aa".repeat(32); // 32 bytes of 0xaa
 const PQPUB_HEX = "bb".repeat(1184);
 const PQCT_HEX = "cc".repeat(1088);
 
-/** Build a full Alice/Bob session pair via a real X3DH handshake, so encrypt/decrypt exercise the actual wire path (not hand-built state). PQ enabled when both KEM args are supplied. */
+/**
+ * Build a full Alice/Bob session pair via a real X3DH/PQXDH handshake, so
+ * encrypt/decrypt exercise the actual wire path (not hand-built state).
+ *
+ * pq=false does NOT construct a classical bundle — REQUIRE_PQ (audit finding
+ * #3) makes initSessionAliceWithHeader/initSessionBobFromHeader refuse that
+ * outright, correctly, since no new session can be classical-only anymore.
+ * Instead it runs a real PQ handshake for genuine, correctly-derived RK/CK/DH
+ * key material, then strips the PQ bookkeeping fields off the already-derived
+ * state. This simulates the one classical scenario that's still real: a
+ * session persisted before this policy existed (see deserializeState's own
+ * `pq: s.pq ?? false` legacy default) — not a session that could be newly
+ * created classical today.
+ */
 function setupSessionPair(pq: boolean) {
   const aliceIK = generateOneTimePreKeys(1)[0];
   const bobIK = generateOneTimePreKeys(1)[0];
@@ -38,12 +53,9 @@ function setupSessionPair(pq: boolean) {
     ikSignPublicKey: bobIkSign.pub,
   };
 
-  let bobKem: { pub: string; priv: string } | undefined;
-  if (pq) {
-    bobKem = generateKemKeyPair();
-    bundle.pqkemPublicKey = bobKem.pub;
-    bundle.pqkemSignature = signKemPreKey(bobKem.pub, bobIkSign.priv);
-  }
+  const bobKem = generateKemKeyPair();
+  bundle.pqkemPublicKey = bobKem.pub;
+  bundle.pqkemSignature = signKemPreKey(bobKem.pub, bobIkSign.priv);
 
   const { session: aliceSession, x3dhHeader } = initSessionAliceWithHeader(bundle, aliceIK.priv, aliceIK.pub);
   const bobSession = initSessionBobFromHeader(
@@ -53,12 +65,20 @@ function setupSessionPair(pq: boolean) {
     bobSPK.priv,
     bobSPK.pub,
     undefined,
-    bobKem?.priv,
+    bobKem.priv,
   );
 
   // Convention (see doubleRatchet.ts): `.alice` always holds the CURRENT
   // DEVICE's real ratchet state, on both sides.
-  return { aliceState: aliceSession.alice, bobState: bobSession.alice };
+  let aliceState = aliceSession.alice;
+  let bobState = bobSession.alice;
+  if (!pq) {
+    const downgrade = (s: typeof aliceState) => ({ ...s, pq: false, PQs: null, PQr: null, pendingPqCt: null });
+    aliceState = downgrade(aliceState);
+    bobState = downgrade(bobState);
+  }
+
+  return { aliceState, bobState };
 }
 
 // ── Test 1: known-answer test ──────────────────────────────────────────────────
@@ -193,4 +213,132 @@ test("encodeHeaderAD: rejects malformed hex — wrong length, non-hex chars, and
   assert.throws(() => encodeHeaderAD({ dh: "AA".repeat(32), n: 0, pn: 0 }), /lowercase/);
   assert.throws(() => encodeHeaderAD({ dh: DH_HEX, n: 0, pn: 0, pqPub: PQPUB_HEX.slice(0, -2) }));
   assert.throws(() => encodeHeaderAD({ dh: DH_HEX, n: 0, pn: 0, pqCt: "AA" + PQCT_HEX.slice(2) }));
+});
+
+// ── PQXDH downgrade policy (audit finding #3) ────────────────────────────────
+// REQUIRE_PQ=true must reject a peer whose bundle/header has no PQ material
+// at all, rather than silently proceeding classical-only. The existing
+// present-but-invalid signature checks (tampered/unsigned pubkey) are
+// unchanged by this and are re-verified here too, so a downgrade can't be
+// achieved either by omission or by tampering.
+
+/** Bob's non-PQ identity material: IK, SPK (signed), IK signing keypair. */
+function makePartnerIdentity() {
+  const bobIK = generateOneTimePreKeys(1)[0];
+  const bobSPK = generateOneTimePreKeys(1)[0];
+  const bobIkSign = generateSigningKeyPair();
+  const baseBundle: PreKeyBundle = {
+    ikPublicKey: bobIK.pub,
+    spkPublicKey: bobSPK.pub,
+    opkPublicKey: null,
+    spkSignature: signSPK(bobSPK.pub, bobIkSign.priv),
+    ikSignPublicKey: bobIkSign.pub,
+  };
+  return { bobIK, bobSPK, bobIkSign, baseBundle };
+}
+
+test("initSessionAliceWithHeader: PQ-present, validly-signed bundle succeeds and reports pqEstablished", () => {
+  const { bobIkSign, baseBundle } = makePartnerIdentity();
+  const aliceIK = generateOneTimePreKeys(1)[0];
+  const bobKem = generateKemKeyPair();
+  const bundle: PreKeyBundle = {
+    ...baseBundle,
+    pqkemPublicKey: bobKem.pub,
+    pqkemSignature: signKemPreKey(bobKem.pub, bobIkSign.priv),
+  };
+
+  const { session, x3dhHeader } = initSessionAliceWithHeader(bundle, aliceIK.priv, aliceIK.pub);
+
+  assert.equal(session.pqEstablished, true);
+  assert.ok(x3dhHeader.pqkemCt, "x3dhHeader must carry the KEM ciphertext for Bob to decapsulate");
+});
+
+test("initSessionAliceWithHeader: REQUIRE_PQ rejects a bundle with pqkemPublicKey entirely absent", () => {
+  const { baseBundle } = makePartnerIdentity();
+  const aliceIK = generateOneTimePreKeys(1)[0];
+
+  assert.throws(
+    () => initSessionAliceWithHeader(baseBundle, aliceIK.priv, aliceIK.pub),
+    PqDowngradeError,
+  );
+});
+
+test("initSessionAliceWithHeader: stripping only pqkemPublicKey (leaving pqkemSignature) is still rejected — can't downgrade by partial strip", () => {
+  const { bobIkSign, baseBundle } = makePartnerIdentity();
+  const aliceIK = generateOneTimePreKeys(1)[0];
+  const bobKem = generateKemKeyPair();
+  const bundle: PreKeyBundle = {
+    ...baseBundle,
+    // pqkemPublicKey intentionally omitted — simulates a MITM/malicious
+    // server that stripped only the pubkey and left the signature field
+    // untouched. The signature is over the pubkey bytes, so leaving it in
+    // place with no pubkey to check it against gives an attacker nothing:
+    // this must still be rejected as missing PQ material, not accepted.
+    pqkemSignature: signKemPreKey(bobKem.pub, bobIkSign.priv),
+  };
+
+  assert.throws(
+    () => initSessionAliceWithHeader(bundle, aliceIK.priv, aliceIK.pub),
+    PqDowngradeError,
+  );
+});
+
+test("initSessionAliceWithHeader: tampered PQ pubkey fails signature verification — stripping-with-signature-intact is impossible", () => {
+  const { bobIkSign, baseBundle } = makePartnerIdentity();
+  const aliceIK = generateOneTimePreKeys(1)[0];
+  const bobKem = generateKemKeyPair();
+  const substitutedKem = generateKemKeyPair();
+  const bundle: PreKeyBundle = {
+    ...baseBundle,
+    // The signature is valid for bobKem.pub, but the pubkey actually shipped
+    // in the bundle has been swapped for a different (unsigned-for) key —
+    // e.g. a server substituting its own KEM key. The signature covers the
+    // pubkey bytes themselves, so this must fail verification outright
+    // rather than being accepted or silently treated as classical.
+    pqkemPublicKey: substitutedKem.pub,
+    pqkemSignature: signKemPreKey(bobKem.pub, bobIkSign.priv),
+  };
+
+  assert.throws(
+    () => initSessionAliceWithHeader(bundle, aliceIK.priv, aliceIK.pub),
+    /signature verification FAILED/,
+  );
+});
+
+test("initSessionBobFromHeader: PQ-present header succeeds and reports pqEstablished", () => {
+  const { bobIK, bobSPK, bobIkSign, baseBundle } = makePartnerIdentity();
+  const aliceIK = generateOneTimePreKeys(1)[0];
+  const bobKem = generateKemKeyPair();
+  const bundle: PreKeyBundle = {
+    ...baseBundle,
+    pqkemPublicKey: bobKem.pub,
+    pqkemSignature: signKemPreKey(bobKem.pub, bobIkSign.priv),
+  };
+  const { x3dhHeader } = initSessionAliceWithHeader(bundle, aliceIK.priv, aliceIK.pub);
+
+  const bobSession = initSessionBobFromHeader(
+    x3dhHeader,
+    bobIK.priv,
+    bobIK.pub,
+    bobSPK.priv,
+    bobSPK.pub,
+    undefined,
+    bobKem.priv,
+  );
+
+  assert.equal(bobSession.pqEstablished, true);
+});
+
+test("initSessionBobFromHeader: REQUIRE_PQ rejects a header with pqkemCt entirely absent", () => {
+  const { bobIK, bobSPK } = makePartnerIdentity();
+  const aliceIK = generateOneTimePreKeys(1)[0];
+  const aliceEK = generateOneTimePreKeys(1)[0];
+  // A well-formed X3DH header (as a stripped-in-transit or legacy-classical
+  // peer's would look) with no pqkemCt field at all.
+  const header: X3DHHeader = { ikA: aliceIK.pub, ekA: aliceEK.pub };
+
+  assert.throws(
+    () => initSessionBobFromHeader(header, bobIK.priv, bobIK.pub, bobSPK.priv, bobSPK.pub, undefined, undefined),
+    PqDowngradeError,
+  );
 });

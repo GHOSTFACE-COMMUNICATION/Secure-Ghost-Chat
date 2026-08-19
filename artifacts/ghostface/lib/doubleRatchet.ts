@@ -216,6 +216,26 @@ export function verifyKemPreKey(
   }
 }
 
+/**
+ * Audit finding #3: a bundle/header with no PQ material at all used to make
+ * the handshake silently proceed classical-only — no error, no signal. With
+ * this true (the only supported value: this app has no legitimate classical
+ * peers, so there's no env override), initSessionAliceWithHeader and
+ * initSessionBobFromHeader both reject a peer's missing PQ material outright
+ * instead of downgrading. This is orthogonal to the existing present-but-invalid
+ * signature checks below, which already reject unconditionally and are
+ * unchanged by this flag.
+ */
+export const REQUIRE_PQ = true;
+
+/** Thrown when REQUIRE_PQ is true and a peer's bundle/header has no PQ material. */
+export class PqDowngradeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PqDowngradeError";
+  }
+}
+
 const X3DH_PQ_INFO = strToBytes("GHOSTFACE_X3DH_PQ_v1");
 const ROOT_INFO_PQ = strToBytes("GHOSTFACE_RATCHET_ROOT_PQ_v1");
 
@@ -466,6 +486,17 @@ export interface DRSession {
   lastAliceHeader: RatchetHeader | null;
   /** True if the session was established with a one-time prekey (4-DH X3DH). */
   usedOPK?:        boolean;
+  /**
+   * True if this session's handshake completed the PQXDH hybrid exchange
+   * (peer's bundle/header carried valid, signature-verified ML-KEM material).
+   * Set once at session-init time on both the initiator and responder side —
+   * read this instead of reaching into `.alice.pq`/`.bob.pq` (those are
+   * internal per-side ratchet-state fields, not a documented session-level
+   * API). With REQUIRE_PQ true this is always true for any session that was
+   * allowed to be created at all; it only reads false for a session created
+   * before REQUIRE_PQ existed, or if REQUIRE_PQ is ever relaxed.
+   */
+  pqEstablished:   boolean;
 }
 
 /** A one-time prekey: public key (hex) and private key (hex). */
@@ -968,6 +999,17 @@ export function initSessionAliceWithHeader(
   );
 
   // ── PQXDH: hybrid post-quantum handshake ──────────────────────────────────
+  // Audit finding #3: a bundle with no PQ material at all used to fall through
+  // this whole block silently and proceed classical-only — distinct from (and
+  // previously indistinguishable at the call site from) a peer that genuinely
+  // has no PQ support. With REQUIRE_PQ true, absence itself is rejected before
+  // any of the present-but-invalid checks below even run.
+  if (REQUIRE_PQ && !bundle.pqkemPublicKey) {
+    throw new PqDowngradeError(
+      "peer bundle missing post-quantum material — refusing classical-only session",
+    );
+  }
+
   // If Bob published a signed ML-KEM prekey, verify it with the SAME Ed25519 IK
   // signing key that signs the SPK, encapsulate to it, and fold the KEM secret
   // into SK. Strict: a KEM prekey WITHOUT a valid signature is rejected (never
@@ -1028,6 +1070,7 @@ export function initSessionAliceWithHeader(
     bob:             serializeState(bobStub),
     lastAliceHeader: null,
     usedOPK:         !!opkBPub,
+    pqEstablished:   pqEnabled,
   };
 
   const x3dhHeader: X3DHHeader = {
@@ -1080,6 +1123,16 @@ export function initSessionBobFromHeader(
   );
 
   // ── PQXDH: decapsulate Alice's ML-KEM ciphertext (if present) ──────────────
+  // Audit finding #3: symmetric with the Alice-side check — a header with no
+  // PQ ciphertext at all used to fall through silently and derive a
+  // classical-only SK, indistinguishable from a peer that genuinely has no
+  // PQ support (or a header stripped in transit).
+  if (REQUIRE_PQ && !x3dhHeader.pqkemCt) {
+    throw new PqDowngradeError(
+      "peer handshake missing post-quantum material — refusing classical-only session",
+    );
+  }
+
   // Bob folds the same KEM secret into SK. If the handshake carried a KEM
   // ciphertext but Bob has no stored KEM private key, fail loudly rather than
   // silently deriving a mismatched (classical-only) key.
@@ -1130,5 +1183,6 @@ export function initSessionBobFromHeader(
     bob:             serializeState(aliceStub),
     lastAliceHeader: null,
     usedOPK:         !!opkPub,
+    pqEstablished:   pqEnabled,
   };
 }

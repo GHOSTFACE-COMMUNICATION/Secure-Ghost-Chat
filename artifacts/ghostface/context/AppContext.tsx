@@ -51,6 +51,7 @@ import {
   ratchetEncrypt,
   ratchetDecrypt,
   isValidDRSession,
+  PqDowngradeError,
   type DRSession,
   type PreKeyBundle,
   type X3DHHeader,
@@ -2928,6 +2929,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         usedOPK = !!bundle.opkPublicKey;
         pendingX3DHHeader = JSON.stringify(x3dhHeader);
       } catch (e) {
+        if (e instanceof PqDowngradeError) {
+          console.error("[X3DH] Refusing classical-only session for", aliasUpper, e);
+          return { ok: false, error: "pq_downgrade" };
+        }
         console.error("[X3DH] Real session init failed for", aliasUpper, e);
         return { ok: false, error: "x3dh_failed" };
       }
@@ -4103,11 +4108,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       console.error("[X3DH] Failed to init Bob session or decrypt first message", e);
       // Under sealed-sender we may fail before recovering the sender; with no
       // alias there is nothing to attribute a failure bubble to, so drop.
+      // NOTE: PqDowngradeError is thrown by initSessionBobFromHeader BEFORE
+      // ratchetDecrypt runs, i.e. before senderAlias is ever recoverable, and
+      // current clients never put `from` on a "msg" send (sealed-sender) — so
+      // for any real current-version peer this still hits the early return
+      // below. The distinct text is kept for the legacy-wire-`from` fallback
+      // and as defense-in-depth; it is not the primary visible signal for
+      // this rejection (that's Alice's side — see addConversation's catch).
       if (!senderAlias) return;
+      const isPqDowngrade = e instanceof PqDowngradeError;
+      const placeholderText = isPqDowngrade
+        ? "⚠ Rejected: contact's keys don't support required post-quantum encryption"
+        : "⚠ Message could not be decrypted";
       setState((prev) => {
         const placeholder: Message = {
           id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
-          text: "⚠ Message could not be decrypted",
+          text: placeholderText,
           fromMe: false,
           timestamp: Date.now(),
           encrypted: true,
@@ -4117,7 +4133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (existingConv) {
           const updated = prev.conversations.map((c) =>
             c.alias === senderAlias
-              ? { ...c, messages: [...c.messages, placeholder], lastMessage: "⚠ Message could not be decrypted", timestamp: Date.now(), unread: c.unread + 1 }
+              ? { ...c, messages: [...c.messages, placeholder], lastMessage: placeholderText, timestamp: Date.now(), unread: c.unread + 1 }
               : c
           );
           persistConversations(updated);
@@ -4127,7 +4143,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const newConv: Conversation = {
           id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
           alias: senderAlias,
-          lastMessage: "⚠ Message could not be decrypted",
+          lastMessage: placeholderText,
           timestamp: Date.now(),
           unread: 1,
           isRealContact: true,
