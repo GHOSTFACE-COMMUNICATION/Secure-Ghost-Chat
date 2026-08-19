@@ -86,6 +86,30 @@ export function hexToKey(hex: string): Uint8Array {
   return hexToBytes(hex);
 }
 
+// ── Canonical AEAD associated data ─────────────────────────────────────────────
+//
+// encryptMessage/decryptMessage and sealedEncryptMessage/sealedDecryptMessage
+// share a ciphertext shape (EncryptedMessage | SealedMessage differ only by
+// the `sealed` flag) and could be encrypted under the same key. Without AD,
+// a plain ciphertext handed to sealedDecryptMessage() (or vice versa) either
+// decrypts into garbage that JSON.parse chokes on, or — worse — parses into
+// something plausible-looking. Binding msg_type into the AD makes a
+// type-mismatch fail cleanly at the AEAD tag check instead.
+//
+//   offset  size  content
+//   0       4     magic = "GFCM"
+//   4       1     protocol_version = 0x01
+//   5       1     msg_type (0x01 = plain, 0x02 = sealed)
+
+const AD_MAGIC = new Uint8Array([0x47, 0x46, 0x43, 0x4d]); // "GFCM"
+const AD_PROTOCOL_VERSION = 0x01;
+const AD_MSGTYPE_PLAIN = 0x01;
+const AD_MSGTYPE_SEALED = 0x02;
+
+export function encodeMessageAD(msgType: number): Uint8Array {
+  return new Uint8Array([AD_MAGIC[0], AD_MAGIC[1], AD_MAGIC[2], AD_MAGIC[3], AD_PROTOCOL_VERSION, msgType]);
+}
+
 // ── Standard encrypted message ────────────────────────────────────────────────
 
 export interface EncryptedMessage {
@@ -97,13 +121,15 @@ export interface EncryptedMessage {
 
 export function encryptMessage(plaintext: string, key: Uint8Array): EncryptedMessage {
   const chacha = managedNonce(chacha20poly1305, randomBytes);
-  const encrypted = chacha(key).encrypt(strToBytes(plaintext));
+  const ad = encodeMessageAD(AD_MSGTYPE_PLAIN);
+  const encrypted = chacha(key, ad).encrypt(strToBytes(plaintext));
   return { ciphertext: bytesToHex(encrypted), algorithm: "ChaCha20-Poly1305", sealed: false, version: 1 };
 }
 
 export function decryptMessage(msg: EncryptedMessage, key: Uint8Array): string {
   const chacha = managedNonce(chacha20poly1305, randomBytes);
-  const decrypted = chacha(key).decrypt(hexToBytes(msg.ciphertext));
+  const ad = encodeMessageAD(AD_MSGTYPE_PLAIN);
+  const decrypted = chacha(key, ad).decrypt(hexToBytes(msg.ciphertext));
   return bytesToStr(decrypted);
 }
 
@@ -149,7 +175,8 @@ export function sealedEncryptMessage(
   const envelope: SealedEnvelope = { from: senderAlias, content, ts: Date.now() };
   const payload = JSON.stringify(envelope);
   const chacha = managedNonce(chacha20poly1305, randomBytes);
-  const encrypted = chacha(key).encrypt(strToBytes(payload));
+  const ad = encodeMessageAD(AD_MSGTYPE_SEALED);
+  const encrypted = chacha(key, ad).encrypt(strToBytes(payload));
   return {
     ciphertext: bytesToHex(encrypted),
     algorithm: "ChaCha20-Poly1305",
@@ -167,7 +194,8 @@ export function sealedDecryptMessage(
   key: Uint8Array
 ): SealedEnvelope {
   const chacha = managedNonce(chacha20poly1305, randomBytes);
-  const decrypted = chacha(key).decrypt(hexToBytes(msg.ciphertext));
+  const ad = encodeMessageAD(AD_MSGTYPE_SEALED);
+  const decrypted = chacha(key, ad).decrypt(hexToBytes(msg.ciphertext));
   return JSON.parse(bytesToStr(decrypted)) as SealedEnvelope;
 }
 

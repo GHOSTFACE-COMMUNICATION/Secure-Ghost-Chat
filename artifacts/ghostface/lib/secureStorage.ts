@@ -37,6 +37,47 @@ function fromHex(hex: string): Uint8Array {
   return arr;
 }
 
+// ── Canonical AEAD associated data ─────────────────────────────────────────────
+//
+// Every blob is encrypted under the same master key regardless of which
+// AsyncStorage slot it's stored under (conversations vs. call history today,
+// more slots possibly later). Without AD, a ciphertext that decrypts validly
+// under one slot also decrypts validly if substituted into another slot —
+// same key, same cipher, nothing to tell them apart. That's a real risk on a
+// jailbroken/rooted device, from a corrupted/malicious backup restore, or
+// from an app bug that writes to the wrong key: the swap succeeds silently
+// (valid tag) instead of failing loudly.
+//
+// AD here binds the AsyncStorage key name itself into the tag, so a blob
+// only decrypts under the slot it was actually encrypted for:
+//
+//   offset  size  content
+//   0       4     magic = "GFSS"
+//   4       1     protocol_version = 0x01
+//   5       1     key_id_len (bytes)
+//   6       len   key_id — UTF-8 bytes of the AsyncStorage key string
+//
+// This does NOT stop replay (an old valid ciphertext for the *same* slot
+// can still be written back by anyone with raw storage write access) or
+// protect against the master key itself being exfiltrated — see
+// docs/PROTOCOL.md for the full writeup.
+
+const AD_MAGIC = new Uint8Array([0x47, 0x46, 0x53, 0x53]); // "GFSS"
+const AD_PROTOCOL_VERSION = 0x01;
+
+export function encodeStorageAD(keyId: string): Uint8Array {
+  const keyIdBytes = new TextEncoder().encode(keyId);
+  if (keyIdBytes.length > 0xff) {
+    throw new Error(`[secureStorage] AD: keyId too long (${keyIdBytes.length} bytes, max 255)`);
+  }
+  const out = new Uint8Array(4 + 1 + 1 + keyIdBytes.length);
+  out.set(AD_MAGIC, 0);
+  out[4] = AD_PROTOCOL_VERSION;
+  out[5] = keyIdBytes.length;
+  out.set(keyIdBytes, 6);
+  return out;
+}
+
 let cachedKey: Uint8Array | null = null;
 
 /**
@@ -69,16 +110,36 @@ async function getOrCreateStorageKey(): Promise<Uint8Array> {
   return cachedKey;
 }
 
-/** Encrypt a plaintext string for storage in AsyncStorage. */
-export async function encryptForStorage(plaintext: string): Promise<string> {
+/** Encrypt a plaintext string for storage in AsyncStorage under `keyId`. */
+export async function encryptForStorage(plaintext: string, keyId: string): Promise<string> {
   const key = await getOrCreateStorageKey();
   const chacha = managedNonce(chacha20poly1305);
-  const ct = chacha(key).encrypt(new TextEncoder().encode(plaintext));
+  const ad = encodeStorageAD(keyId);
+  const ct = chacha(key, ad).encrypt(new TextEncoder().encode(plaintext));
   return toHex(ct);
 }
 
-/** Decrypt a string previously produced by encryptForStorage(). */
-export async function decryptFromStorage(ciphertextHex: string): Promise<string> {
+/**
+ * Decrypt a string previously produced by encryptForStorage() under the
+ * same `keyId`. Throws if the ciphertext was produced under a different
+ * keyId, is legacy (pre-AD) format, or is tampered.
+ */
+export async function decryptFromStorage(ciphertextHex: string, keyId: string): Promise<string> {
+  const key = await getOrCreateStorageKey();
+  const chacha = managedNonce(chacha20poly1305);
+  const ad = encodeStorageAD(keyId);
+  const pt = chacha(key, ad).decrypt(fromHex(ciphertextHex));
+  return new TextDecoder().decode(pt);
+}
+
+/**
+ * Legacy (pre-audit-#6) decrypt: same cipher and key, no AD. Only used as a
+ * migration fallback inside readEncryptedString() for data written by an
+ * already-installed build before AD binding existed — never called on new
+ * writes. Remove once migration telemetry (the console.warn below) shows
+ * this tier is no longer being hit by real installs.
+ */
+async function decryptFromStorageLegacyNoAD(ciphertextHex: string): Promise<string> {
   const key = await getOrCreateStorageKey();
   const chacha = managedNonce(chacha20poly1305);
   const pt = chacha(key).decrypt(fromHex(ciphertextHex));
@@ -87,22 +148,44 @@ export async function decryptFromStorage(ciphertextHex: string): Promise<string>
 
 /**
  * Read a string previously written with writeEncryptedString(), decrypting
- * it transparently. Falls back to treating the raw value as legacy
- * plaintext (pre-encryption-at-rest data) so existing local data isn't
- * silently dropped on upgrade — the next write re-saves it encrypted.
+ * it transparently. Three tiers, oldest data first:
+ *   1. Current AD-bound format.
+ *   2. Legacy no-AD format (data from a build that predates audit #6) —
+ *      decrypts under the same master key, just without AD. On success,
+ *      immediately re-encrypts in the current format so this tier isn't
+ *      hit again for this key.
+ *   3. Pre-encryption-at-rest legacy plaintext (predates this file
+ *      entirely) — same immediate-migration treatment.
+ * Both fallback tiers are temporary; once real-world migration telemetry
+ * shows they're no longer hit, they should be deleted (tracked as a
+ * follow-up in docs/AUDIT_FINDINGS.md).
  */
 export async function readEncryptedString(key: string): Promise<string | null> {
   const raw = await AsyncStorage.getItem(key);
   if (!raw) return null;
+
   try {
-    return await decryptFromStorage(raw);
+    return await decryptFromStorage(raw, key);
   } catch {
-    return raw;
+    // fall through to legacy tiers
   }
+
+  try {
+    const plaintext = await decryptFromStorageLegacyNoAD(raw);
+    console.warn(`[secureStorage] migrated "${key}" from legacy no-AD format`);
+    await writeEncryptedString(key, plaintext).catch(() => {});
+    return plaintext;
+  } catch {
+    // fall through to plaintext tier
+  }
+
+  console.warn(`[secureStorage] migrated "${key}" from legacy plaintext format`);
+  await writeEncryptedString(key, raw).catch(() => {});
+  return raw;
 }
 
 /** Encrypt and write a string to AsyncStorage under `key`. */
 export async function writeEncryptedString(key: string, plaintext: string): Promise<void> {
-  const ciphertext = await encryptForStorage(plaintext);
+  const ciphertext = await encryptForStorage(plaintext, key);
   await AsyncStorage.setItem(key, ciphertext);
 }

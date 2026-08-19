@@ -10,15 +10,24 @@ import { fileURLToPath } from "node:url";
 // testability.
 const projectRoot = new URL("../", import.meta.url);
 
+// Native-module packages redirected to in-memory stubs during test runs —
+// see each stub file for why the real package can't be imported under
+// node --test (Flow syntax, platform-specific native bindings, etc).
+const STUBS = {
+  "react-native": "./rn-test-stub.mjs",
+  "@react-native-async-storage/async-storage": "./asyncstorage-test-stub.mjs",
+  "expo-secure-store": "./securestore-test-stub.mjs",
+};
+
 /**
  * Node module-resolution hook (registered by run-tests.mjs) that redirects
- * any `import ... from "react-native"` to rn-test-stub.mjs during test runs
- * (see rn-test-stub.mjs for why), and resolves the "@/" path alias.
+ * native-module imports to their stubs during test runs, and resolves the
+ * "@/" path alias.
  */
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === "react-native") {
+  if (specifier in STUBS) {
     return {
-      url: new URL("./rn-test-stub.mjs", import.meta.url).href,
+      url: new URL(STUBS[specifier], import.meta.url).href,
       shortCircuit: true,
     };
   }

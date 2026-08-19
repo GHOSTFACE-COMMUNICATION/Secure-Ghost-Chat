@@ -150,7 +150,7 @@ through `react-native-get-random-values`'s native module —
 `java.security.SecureRandom` on Android — never the JS fallback, which is
 unreachable when `__DEV__` is false.
 
-## #6 — No associated data on `secureStorage.ts` / `crypto.ts` sealed envelopes — **OPEN**
+## #6 — No associated data on `secureStorage.ts` / `crypto.ts` sealed envelopes — **RESOLVED**
 
 **Finding**: `lib/secureStorage.ts`'s `encryptForStorage`/`decryptFromStorage`
 (AsyncStorage-at-rest encryption) and `lib/crypto.ts`'s `encryptMessage`/
@@ -160,5 +160,55 @@ all** — zero context/domain binding on those ciphertexts, unlike the
 Double Ratchet's header-bound AD. Logged during finding #1's diagnosis
 (Step 1c/d of that investigation).
 
-**Status**: open, deferred to a separate PR — not touched by the finding #1
-change. No design proposed yet.
+**Trace**: `lib/secureStorage.ts` encrypts two AsyncStorage slots
+(`ghostface_conversations` — including serialized Double Ratchet session
+state — and `ghostface_call_history`) under one shared master key; without
+AD, a ciphertext valid for one slot is also a valid, tag-passing ciphertext
+if substituted into the other. `lib/crypto.ts`'s AEAD functions
+(`encryptMessage`/`decryptMessage`/`sealedEncryptMessage`/
+`sealedDecryptMessage`) turned out to have **zero call sites anywhere in
+the app** — verified by grepping every `.ts`/`.tsx` file — so the fix there
+is prophylactic hygiene, not a patch for a live path.
+
+**Fix**: `encodeStorageAD()` in `lib/secureStorage.ts` binds the specific
+AsyncStorage key name into the AD (magic `"GFSS"`, version, length-prefixed
+key id), so a blob only decrypts under the slot it was encrypted for.
+`encodeMessageAD()` in `lib/crypto.ts` binds a `msg_type` byte (magic
+`"GFCM"`, version, plain-vs-sealed) so a plain ciphertext can't be
+misinterpreted as a sealed envelope (or vice versa) under a shared key.
+Full layouts and rationale in `docs/PROTOCOL.md`.
+
+**Migration**: real TestFlight data exists (builds 70/71), so this was not
+a hard cutover for `secureStorage.ts`. `readEncryptedString` now tries three
+tiers in order — current AD-bound format, legacy no-AD format, legacy
+pre-encryption-at-rest plaintext — and on a successful legacy-tier decrypt,
+immediately re-encrypts and re-writes in the current format (not deferred
+to the next natural write), logging a `console.warn` marker per migration.
+**Follow-up**: once real-world telemetry (those `console.warn` markers)
+shows the legacy tiers are no longer hit, delete
+`decryptFromStorageLegacyNoAD` and the plaintext-tier fallback from
+`readEncryptedString`. `crypto.ts`'s functions had zero existing callers,
+so no migration was needed there — hard cutover.
+
+**Tests**: `lib/secureStorage.test.ts` (known-answer AD, keyId-sensitivity,
+round-trip, cross-keyId rejection, both legacy-tier migrations including
+the immediate-rewrite behavior, missing-key read) and
+`lib/crypto.test.ts` (known-answer AD, round-trip plain and sealed,
+cross-type rejection in both directions, tamper detection). New in-memory
+test stubs for `@react-native-async-storage/async-storage` and
+`expo-secure-store` (`scripts/asyncstorage-test-stub.mjs`,
+`scripts/securestore-test-stub.mjs`, wired into
+`scripts/rn-test-loader.mjs`) — `secureStorage.ts`'s native dependencies
+couldn't otherwise be imported under `node --test`.
+
+## #7 — No associated data on `EncryptionTools.tsx`'s Stealth encryption — **OPEN**
+
+**Finding**: `components/EncryptionTools.tsx`'s own `ghostEncrypt`/
+`ghostDecrypt` (the Stealth tool's encrypt-then-hide implementation) use
+the same `managedNonce(chacha20poly1305)` pattern as `secureStorage.ts`/
+`crypto.ts` had, with no AD — and unlike `crypto.ts`'s functions, this one
+**is** live (wired into the Tools page). Found while tracing every AEAD
+call site during finding #6's diagnosis; explicitly out of scope for that
+finding, not touched.
+
+**Status**: open, no design proposed yet.

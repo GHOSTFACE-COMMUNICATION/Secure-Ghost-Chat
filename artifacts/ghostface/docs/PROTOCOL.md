@@ -1,8 +1,14 @@
-# Double Ratchet AEAD associated data — canonical encoding
+# AEAD associated data — canonical encodings
 
-This document specifies the on-the-wire-equivalent binary layout used as
-AEAD associated data (AD) for every Double Ratchet message, and why it
-exists. Implemented in `lib/doubleRatchet.ts` as `encodeHeaderAD()`.
+This document specifies the AD layouts used across GHOSTFACE's AEAD call
+sites, and why each exists. Three independent schemes, one per module —
+they don't need to interoperate with each other, only be internally
+self-consistent and unambiguous.
+
+## Double Ratchet (`lib/doubleRatchet.ts`)
+
+The on-the-wire-equivalent binary layout used as AEAD associated data for
+every Double Ratchet message. Implemented as `encodeHeaderAD()`.
 
 ## Why
 
@@ -116,14 +122,106 @@ Design choices:
   wire-transmitted copy of those three fields to independently validate
   against in the current protocol.
 
-## Out of scope for this change
+## Storage-at-rest (`lib/secureStorage.ts`)
 
-- `lib/secureStorage.ts` and `lib/crypto.ts`'s `encryptMessage`/
-  `sealedEncryptMessage` use AEAD with **no associated data at all** — a
-  separate, distinct finding (audit finding #6, see
-  `docs/AUDIT_FINDINGS.md`), not touched here.
+`encryptForStorage`/`decryptFromStorage` encrypt the AsyncStorage-persisted
+app-state blobs (conversations — including serialized Double Ratchet
+session state — and call history) under one master key held in
+SecureStore. Implemented as `encodeStorageAD()`.
+
+### Why
+
+Both AsyncStorage slots (`ghostface_conversations`, `ghostface_call_history`,
+more possibly later) share the same master key. Without AD, a ciphertext
+that decrypts validly under one slot also decrypts validly if substituted
+into another — same key, same cipher, nothing structural to tell them
+apart. That's a real risk on a jailbroken/rooted device, from a
+corrupted/malicious backup restore, or from an app bug that writes to the
+wrong AsyncStorage key: the swap succeeds silently (valid Poly1305 tag)
+instead of failing at decrypt time. This is audit finding #6.
+
+### Layout
+
+```
+offset  size  content
+0       4     magic = "GFSS" (0x47 0x46 0x53 0x53)
+4       1     protocol_version = 0x01
+5       1     key_id_len (bytes)
+6       len   key_id — UTF-8 bytes of the AsyncStorage key string
+```
+
+Binds the specific AsyncStorage key name into the tag, so a blob only
+decrypts under the slot it was actually encrypted for.
+
+### What this does not cover
+
+- **Replay.** An attacker with raw AsyncStorage write access can still
+  overwrite a slot's current ciphertext with an *older* valid ciphertext for
+  that same slot (e.g. from a stale local backup) — AD stops cross-slot type
+  confusion, not replay within a slot. Would need a monotonic counter or
+  hash chain to close; out of scope here.
+- **Master-key exfiltration.** If the SecureStore-held master key itself is
+  extracted (e.g. via jailbreak), AD binding doesn't help — it's not a
+  substitute for key secrecy.
+
+### Migration — real TestFlight data exists (builds 70/71)
+
+Existing installs have local data encrypted the old (no-AD) way. Hard
+cutover would make `decryptFromStorage` throw on that data, which — absent
+a fallback — would fall through to `readEncryptedString`'s pre-existing
+"treat raw as legacy plaintext" branch and try to `JSON.parse` a hex
+string, silently wiping conversations/call history on load. Instead,
+`readEncryptedString` tries three tiers in order: current AD-bound format →
+legacy no-AD format (same key, same cipher, no AD — decrypts fine) →
+legacy pre-encryption-at-rest plaintext (predates this file entirely, kept
+from before finding #6). A successful decrypt on either legacy tier
+**immediately** re-encrypts and re-writes the value in the current format
+(not deferred to the next natural write), and logs a `console.warn` marker
+naming the key and tier hit.
+
+**Follow-up, tracked in `docs/AUDIT_FINDINGS.md`**: once real-world
+migration telemetry (the `console.warn` markers) shows the legacy tiers are
+no longer being hit, delete `decryptFromStorageLegacyNoAD` and the
+plaintext-tier fallback from `readEncryptedString`.
+
+## Message encryption (`lib/crypto.ts`)
+
+`encryptMessage`/`decryptMessage` and `sealedEncryptMessage`/
+`sealedDecryptMessage` — currently **unused** anywhere in the app (verified
+by grepping every `.ts`/`.tsx` file; `AppContext.tsx` only imports
+`generateSafetyNumber` from this module, `EncryptionTools.tsx` only imports
+`deriveKeyFromPin`/`generateSalt`). Implemented as `encodeMessageAD()`.
+Fixed here as hygiene ahead of whoever wires these up next, not as a patch
+for a live exploit path — there is none today since nothing calls them.
+
+### Layout
+
+```
+offset  size  content
+0       4     magic = "GFCM" (0x47 0x46 0x43 0x4d)
+4       1     protocol_version = 0x01
+5       1     msg_type (0x01 = plain, 0x02 = sealed)
+```
+
+`EncryptedMessage` and `SealedMessage` share a ciphertext shape and could
+plausibly be encrypted under the same key by a future caller. Binding
+`msg_type` means a plain ciphertext fed to `sealedDecryptMessage` (or vice
+versa) fails cleanly at the AEAD tag check, instead of `JSON.parse`-ing
+garbage or — worse — something plausible-looking.
+
+Hard cutover, no migration path needed: zero callers today means zero data
+encrypted in the old (no-AD) format to migrate.
+
+## Out of scope
+
+- `components/EncryptionTools.tsx`'s own `ghostEncrypt`/`ghostDecrypt` (the
+  Stealth tool) use the same `managedNonce(chacha20poly1305)` pattern with
+  no AD, and this one **is** live. Not part of finding #6 — logged
+  separately as audit finding #7 in `docs/AUDIT_FINDINGS.md`, no design
+  proposed yet.
 - The general-purpose `fromHex()`/`toHex()` helpers used throughout
-  `lib/doubleRatchet.ts` remain lenient (silently produce `NaN` on invalid
-  hex via `parseInt`). Only the new AD-specific `strictHexToBytes()` is
-  strict. Hardening the shared helper is a broader change affecting many
-  call sites and was left out of this fix's scope.
+  `lib/doubleRatchet.ts` and `lib/secureStorage.ts` remain lenient (silently
+  produce `NaN` on invalid hex via `parseInt`). Only the AD-specific strict
+  decoders (`strictHexToBytes()` in `doubleRatchet.ts`) reject malformed
+  hex. Hardening the shared helpers is a broader change affecting many call
+  sites and was left out of scope for both AD fixes.
