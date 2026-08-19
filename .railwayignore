@@ -1,0 +1,13 @@
+# Presence of this file makes Railway CLI stop honoring .gitignore, so
+# everything .gitignore would normally exclude has to be listed here too —
+# most importantly the root node_modules (1.3GB, deeply nested pnpm
+# symlinks), which is what was actually hanging `railway up` at
+# "Indexing..." for hours. Railway rebuilds deps from lockfile anyway.
+node_modules
+**/node_modules
+dist
+**/dist
+.expo
+**/.expo
+.git
+*.tsbuildinfo

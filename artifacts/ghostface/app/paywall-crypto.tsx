@@ -51,7 +51,7 @@ const PLANS: Plan[] = [
     name: "SPECTER",
     badge: "POPULAR",
     priceUsdc: 9.99,
-    color: "#bf9b30",
+    color: "#F5D26B",
     recommended: true,
     features: [
       "Everything in GHOST",
@@ -67,7 +67,7 @@ const PLANS: Plan[] = [
     name: "PHANTOM",
     badge: "ELITE",
     priceUsdc: 19.99,
-    color: "#bf9b30",
+    color: "#F5D26B",
     features: [
       "Everything in SPECTER",
       "Crypto wallet (FD + CASPER)",

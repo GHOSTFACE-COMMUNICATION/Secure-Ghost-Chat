@@ -23,7 +23,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider, getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
-import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { notifyCallEnded, usePushNotifications } from "@/hooks/usePushNotifications";
 import { emitLockTimestamp } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
 import LockScreen from "@/app/lock";
@@ -43,7 +43,7 @@ const blockScreenCapture = Platform.OS !== "web" && !__DEV__;
 
 // ── Incoming call overlay ─────────────────────────────────────────────────────
 function IncomingCallOverlay() {
-  const { incomingCall, dismissIncomingCall, sendCallSignal } = useApp();
+  const { incomingCall, dismissIncomingCall, sendCallSignal, logCall } = useApp();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(-200)).current;
@@ -73,6 +73,14 @@ function IncomingCallOverlay() {
 
   const handleDecline = () => {
     sendCallSignal({ type: "call-hangup", to: incomingCall.from, callId: incomingCall.callId });
+    notifyCallEnded(incomingCall.callId, "decline");
+    logCall({
+      alias: incomingCall.from,
+      direction: "incoming",
+      mode: incomingCall.mode,
+      outcome: "declined",
+      timestamp: Date.now(),
+    });
     dismissIncomingCall();
   };
 
@@ -170,8 +178,18 @@ function PrivacySnapshotCover() {
 
 // ── Root navigator ────────────────────────────────────────────────────────────
 function RootNavigator() {
-  const { isOnboarded, isLocked, loaded, setLocked, autoLockTimeout, incomingCall, decoyMode, alias, deviceToken } =
-    useApp();
+  const {
+    isOnboarded,
+    isLocked,
+    loaded,
+    setLocked,
+    autoLockTimeout,
+    incomingCall,
+    decoyMode,
+    alias,
+    deviceToken,
+    forceReconnect,
+  } = useApp();
   const appState = useRef(AppState.currentState);
   const backgroundedAtRef = useRef<number | null>(null);
   const [privacyCoverVisible, setPrivacyCoverVisible] = useState(false);
@@ -187,17 +205,30 @@ function RootNavigator() {
   // wake for exactly the state the app spends most of its time in. The
   // tokens themselves aren't sent anywhere by the hook; the effect below
   // POSTs them to the server whenever they change.
-  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded);
+  const { expoPushToken, voipPushToken } = usePushNotifications(loaded && isOnboarded, forceReconnect);
 
   useEffect(() => {
     if (!alias || !deviceToken) return;
     if (!expoPushToken && !voipPushToken) return;
     const apiBase = getApiBase();
     if (!apiBase) return;
+    // expoPushToken and voipPushToken resolve independently (separate async
+    // registrations) and this effect re-fires on either one changing — so it
+    // commonly runs once with only one of the two populated. The server
+    // treats an explicit `null` as "clear this field" (vs. `undefined` =
+    // "leave unchanged"), and JSON.stringify keeps `null` keys but drops
+    // `undefined` ones. Sending the still-null token verbatim used to wipe
+    // out whatever was already stored for it server-side — e.g. a fast
+    // VoIP-token registration would clear a previously-registered
+    // expoPushToken, silently killing new-message push wake. Only include a
+    // token in the body once it's actually known.
+    const body: { expoPushToken?: string; voipPushToken?: string } = {};
+    if (expoPushToken) body.expoPushToken = expoPushToken;
+    if (voipPushToken) body.voipPushToken = voipPushToken;
     fetch(`${apiBase}/push/${encodeURIComponent(alias)}/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${deviceToken}` },
-      body: JSON.stringify({ expoPushToken, voipPushToken }),
+      body: JSON.stringify(body),
     }).catch((err) => console.warn("[Push] Failed to register push tokens:", err));
   }, [alias, deviceToken, expoPushToken, voipPushToken]);
 

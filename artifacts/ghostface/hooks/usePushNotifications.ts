@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import * as Crypto from "expo-crypto";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
@@ -9,8 +10,11 @@ import { Platform } from "react-native";
    dev-client/EAS build, never in Expo Go. Same dynamic-require + graceful-fallback pattern as
    react-native-webrtc in app/call.tsx. */
 let CallKeep: any = null;
+let CallKeepConstants: any = null;
 try {
-  CallKeep = require("react-native-callkeep").default;
+  const callKeepModule = require("react-native-callkeep");
+  CallKeep = callKeepModule.default;
+  CallKeepConstants = callKeepModule.CONSTANTS;
 } catch (e) {
   console.warn("[Push] react-native-callkeep not available (needs a custom dev-client build):", e);
 }
@@ -118,10 +122,16 @@ async function registerExpoPushTokenAsync(): Promise<string | null> {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
-  if (finalStatus !== "granted") return null;
+  if (finalStatus !== "granted") {
+    console.warn("[Push] Notification permission not granted — no Expo push token requested", finalStatus);
+    return null;
+  }
 
   const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-  if (!projectId) return null;
+  if (!projectId) {
+    console.warn("[Push] No EAS projectId available — cannot request Expo push token");
+    return null;
+  }
 
   const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
   return data;
@@ -143,6 +153,62 @@ interface IncomingCallPayload {
 // into. Entries are removed once acted on; a stray entry just means a stale
 // call never got answered, which is harmless.
 const pendingCalls = new Map<string, IncomingCallPayload>();
+
+// callIds that currently have a CallKit CXCall outstanding — added the
+// moment displayIncomingCall reports one, removed by notifyCallEnded below.
+// Deliberately separate from pendingCalls above, which only covers the
+// pre-answer window (cleared the instant answerCall fires): this needs to
+// survive the full post-answer call lifecycle too, since call.tsx's
+// local/remote-hangup paths need to know whether THIS call was ever reported
+// to CallKit at all — including a call answered via the in-app overlay
+// (bypassing CallKit's own answerCall event) while a VoIP push had already
+// reported it, which would otherwise leave a CXCall dangling forever.
+const activeCallKitUUIDs = new Set<string>();
+
+export type CallEndOutcome = "local" | "remote" | "decline" | "unanswered";
+
+/**
+ * Tells CallKit a call is over. Only acts on calls actually reported via
+ * displayIncomingCall — self-guarded via activeCallKitUUIDs, so calling this
+ * for a call that never went through CallKit (e.g. answered via the in-app
+ * overlay with no VoIP push involved) is always a safe no-op. Idempotent:
+ * the uuid is removed from tracking before the CallKeep call runs, so a
+ * second invocation for the same uuid — e.g. a local hangup racing an
+ * incoming remote-hangup — finds nothing tracked and no-ops rather than
+ * double-ending.
+ *
+ *   local      -> endCall            this device's user actively ended it
+ *   decline    -> rejectCall         this device's user declined it
+ *   remote     -> reportEndCallWithUUID(REMOTE_ENDED)  the other party ended it
+ *   unanswered -> reportEndCallWithUUID(UNANSWERED)    caller gave up / timed out
+ *
+ * remote/unanswered go through reportEndCallWithUUID rather than endCall so
+ * CallKit records the actual reason instead of "local user ended it" — get
+ * this wrong consistently enough and it can feed into CallKit flagging the
+ * app for misuse (reporting calls it never properly resolves).
+ */
+export function notifyCallEnded(uuid: string, outcome: CallEndOutcome): void {
+  if (!CallKeep || !activeCallKitUUIDs.has(uuid)) return;
+  activeCallKitUUIDs.delete(uuid);
+  try {
+    switch (outcome) {
+      case "local":
+        CallKeep.endCall(uuid);
+        break;
+      case "decline":
+        CallKeep.rejectCall(uuid);
+        break;
+      case "remote":
+        CallKeep.reportEndCallWithUUID(uuid, CallKeepConstants?.END_CALL_REASONS?.REMOTE_ENDED ?? 2);
+        break;
+      case "unanswered":
+        CallKeep.reportEndCallWithUUID(uuid, CallKeepConstants?.END_CALL_REASONS?.UNANSWERED ?? 3);
+        break;
+    }
+  } catch (e) {
+    console.warn("[Push] notifyCallEnded failed:", e);
+  }
+}
 
 function navigateToCall(callId: string, payload: IncomingCallPayload): void {
   router.push({
@@ -170,7 +236,7 @@ function navigateToCall(callId: string, payload: IncomingCallPayload): void {
  * dev-client/EAS build) — they no-op silently in Expo Go or a build that
  * doesn't include them.
  */
-export function usePushNotifications(enabled: boolean): PushTokens {
+export function usePushNotifications(enabled: boolean, onForceReconnect?: () => void): PushTokens {
   const [tokens, setTokens] = useState<PushTokens>({ expoPushToken: null, voipPushToken: null });
 
   useEffect(() => {
@@ -197,6 +263,12 @@ export function usePushNotifications(enabled: boolean): PushTokens {
     if (CallKeep) {
       try {
         CallKeep.addEventListener("answerCall", ({ callUUID }: { callUUID: string }) => {
+          // Answering via CallKit's native UI can happen before RN's JS side
+          // has observed an AppState "active" transition (e.g. answering
+          // from the lock screen on a killed/backgrounded app) — force the
+          // WS reconnect now instead of waiting on that listener, or the
+          // offer/answer/ICE exchange in call.tsx races a closed socket.
+          onForceReconnect?.();
           const payload = pendingCalls.get(callUUID);
           pendingCalls.delete(callUUID);
           navigateToCall(callUUID, payload ?? {});
@@ -233,13 +305,20 @@ export function usePushNotifications(enabled: boolean): PushTokens {
         });
 
         const handleIncomingVoipPayload = async (payload: IncomingCallPayload) => {
-          const callId = payload.callId ?? String(Date.now());
+          // Must be a real UUID, not just unique: this is handed straight to
+          // CallKeep.displayIncomingCall below, which iOS parses with
+          // NSUUID(uuidString:) — a non-UUID string silently fails there.
+          // (payload.callId should always be present in practice — callers
+          // generate a real UUID in app/call.tsx — this is a last-resort
+          // fallback only.)
+          const callId = payload.callId ?? Crypto.randomUUID();
           pendingCalls.set(callId, payload);
           if (CallKeep) {
             // Must not fire before CallKit's native side has finished setup
             // (see ensureCallKeepSetup) — tightest on a cold, killed-app
             // launch, which is exactly when this fires via didLoadWithEvents.
             await ensureCallKeepSetup();
+            activeCallKitUUIDs.add(callId);
             CallKeep.displayIncomingCall(
               callId,
               payload.from ?? "Unknown",
@@ -301,7 +380,7 @@ export function usePushNotifications(enabled: boolean): PushTokens {
         }
       }
     };
-  }, [enabled]);
+  }, [enabled, onForceReconnect]);
 
   return tokens;
 }

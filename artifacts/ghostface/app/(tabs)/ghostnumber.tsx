@@ -292,7 +292,7 @@ export default function GhostNumberScreen() {
       width: 64,
       height: 64,
       borderRadius: 32,
-      backgroundColor: "rgba(191,155,48,0.08)",
+      backgroundColor: "rgba(245,210,107,0.08)",
       alignItems: "center",
       justifyContent: "center",
       marginBottom: 4,
@@ -315,7 +315,7 @@ export default function GhostNumberScreen() {
       backgroundColor: colors.card,
       borderRadius: colors.radius,
       borderWidth: 1,
-      borderColor: "rgba(191,155,48,0.25)",
+      borderColor: "rgba(245,210,107,0.25)",
       padding: 18,
       marginBottom: 14,
     },
@@ -329,7 +329,7 @@ export default function GhostNumberScreen() {
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      backgroundColor: "rgba(191,155,48,0.1)",
+      backgroundColor: "rgba(245,210,107,0.1)",
       borderRadius: 4,
       paddingHorizontal: 10,
       paddingVertical: 4,
@@ -418,7 +418,7 @@ export default function GhostNumberScreen() {
       borderRadius: 8,
       borderWidth: 1,
       borderColor: colors.primary,
-      backgroundColor: "rgba(191,155,48,0.08)",
+      backgroundColor: "rgba(245,210,107,0.08)",
     },
     inboxBtnText: {
       flex: 1,
@@ -454,7 +454,7 @@ export default function GhostNumberScreen() {
       justifyContent: "center",
     },
     rotationChipActive: {
-      backgroundColor: "rgba(191,155,48,0.15)",
+      backgroundColor: "rgba(245,210,107,0.15)",
       borderColor: colors.primary,
     },
     rotationChipInactive: {
@@ -488,7 +488,7 @@ export default function GhostNumberScreen() {
       borderRadius: colors.radius,
     },
     rotateNowBtnText: {
-      color: "#000",
+      color: "#FFFFFF",
       fontSize: 10,
       fontWeight: "800",
       letterSpacing: 2,
@@ -539,7 +539,7 @@ export default function GhostNumberScreen() {
       opacity: 0.5,
     },
     acquireBtnText: {
-      color: "#000",
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,
@@ -640,9 +640,9 @@ export default function GhostNumberScreen() {
                       <Ionicons
                         name={copied === n.id ? "checkmark" : "copy-outline"}
                         size={12}
-                        color={copied === n.id ? colors.success : colors.foreground}
+                        color={colors.foreground}
                       />
-                      <Text style={[styles.copyBtnText, copied === n.id && { color: colors.success }]}>
+                      <Text style={styles.copyBtnText}>
                         {copied === n.id ? "COPIED" : "COPY"}
                       </Text>
                     </Pressable>
@@ -728,10 +728,10 @@ export default function GhostNumberScreen() {
                 >
                   <GoldGradient style={styles.rotateNowBtnInner}>
                     {rotatingNow === n.id ? (
-                      <ActivityIndicator size="small" color="#000" />
+                      <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <>
-                        <Ionicons name="refresh-outline" size={12} color="#000" />
+                        <Ionicons name="refresh-outline" size={12} color="#FFFFFF" />
                         <Text style={styles.rotateNowBtnText}>ROTATE NOW</Text>
                       </>
                     )}
@@ -769,10 +769,10 @@ export default function GhostNumberScreen() {
         >
           <GoldGradient style={styles.acquireBtnInner}>
             {provisioning || !loaded ? (
-              <ActivityIndicator color="#000" />
+              <ActivityIndicator color="#FFFFFF" />
             ) : (
               <>
-                <Ionicons name="add-circle-outline" size={16} color="#000" />
+                <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
                 <Text style={styles.acquireBtnText}>ACQUIRE NUMBER</Text>
               </>
             )}

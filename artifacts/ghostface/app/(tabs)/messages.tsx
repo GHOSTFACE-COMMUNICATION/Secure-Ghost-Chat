@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -93,7 +93,13 @@ export default function MessagesScreen() {
     if (wsConnected && !hadConnection) setHadConnection(true);
   }, [wsConnected, hadConnection]);
 
-  const [pageTab, setPageTab] = useState<PageTab>("messages");
+  // Allows callers (e.g. the Call tab's empty state) to land directly on a
+  // specific segment via router.push({ pathname: "/(tabs)/messages", params: { tab: "invite" } }).
+  // Read once at mount — this screen is always freshly pushed, never updated in place.
+  const { tab: initialTabParam } = useLocalSearchParams<{ tab?: string }>();
+  const [pageTab, setPageTab] = useState<PageTab>(
+    initialTabParam === "invite" || initialTabParam === "tools" ? initialTabParam : "messages",
+  );
   const [showNew, setShowNew] = useState(false);
   const [newAlias, setNewAlias] = useState("");
 
@@ -307,12 +313,11 @@ export default function MessagesScreen() {
       width: 18,
       height: 18,
       borderRadius: 9,
-      backgroundColor: colors.primary,
       alignItems: "center",
       justifyContent: "center",
     },
     badgeTxt: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 10,
       fontWeight: "800",
     },
@@ -372,7 +377,7 @@ export default function MessagesScreen() {
       borderRadius: colors.radius,
     },
     emptyBtnTxt: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,
@@ -426,7 +431,7 @@ export default function MessagesScreen() {
       alignItems: "center",
     },
     sheetBtnTxt: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,
@@ -485,41 +490,44 @@ export default function MessagesScreen() {
       {/* Segment switcher */}
       <View style={styles.segRow}>
         <Pressable
-          style={[styles.segBtn, pageTab === "messages" && styles.segBtnActive]}
+          style={styles.segBtn}
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPageTab("messages"); }}
         >
+          {pageTab === "messages" && <GoldGradient style={StyleSheet.absoluteFill} />}
           <Ionicons
             name="chatbubble-outline"
             size={14}
-            color={pageTab === "messages" ? colors.primaryForeground : colors.mutedForeground}
+            color={pageTab === "messages" ? "#FFFFFF" : colors.mutedForeground}
           />
-          <Text style={[styles.segTxt, { color: pageTab === "messages" ? colors.primaryForeground : colors.mutedForeground }]}>
+          <Text style={[styles.segTxt, { color: pageTab === "messages" ? "#FFFFFF" : colors.mutedForeground }]}>
             MESSAGES
           </Text>
         </Pressable>
         <Pressable
-          style={[styles.segBtn, pageTab === "tools" && styles.segBtnActive]}
+          style={styles.segBtn}
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPageTab("tools"); }}
         >
+          {pageTab === "tools" && <GoldGradient style={StyleSheet.absoluteFill} />}
           <Ionicons
             name="lock-closed-outline"
             size={14}
-            color={pageTab === "tools" ? colors.primaryForeground : colors.mutedForeground}
+            color={pageTab === "tools" ? "#FFFFFF" : colors.mutedForeground}
           />
-          <Text style={[styles.segTxt, { color: pageTab === "tools" ? colors.primaryForeground : colors.mutedForeground }]}>
+          <Text style={[styles.segTxt, { color: pageTab === "tools" ? "#FFFFFF" : colors.mutedForeground }]}>
             TOOLS
           </Text>
         </Pressable>
         <Pressable
-          style={[styles.segBtn, pageTab === "invite" && styles.segBtnActive]}
+          style={styles.segBtn}
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPageTab("invite"); }}
         >
+          {pageTab === "invite" && <GoldGradient style={StyleSheet.absoluteFill} />}
           <Ionicons
             name="qr-code-outline"
             size={14}
-            color={pageTab === "invite" ? colors.primaryForeground : colors.mutedForeground}
+            color={pageTab === "invite" ? "#FFFFFF" : colors.mutedForeground}
           />
-          <Text style={[styles.segTxt, { color: pageTab === "invite" ? colors.primaryForeground : colors.mutedForeground }]}>
+          <Text style={[styles.segTxt, { color: pageTab === "invite" ? "#FFFFFF" : colors.mutedForeground }]}>
             INVITE
           </Text>
         </Pressable>
@@ -569,9 +577,9 @@ export default function MessagesScreen() {
                     <Text style={styles.avatarTxt}>{item.alias.slice(0, 2)}</Text>
                   </View>
                   {item.unread > 0 && (
-                    <View style={styles.badge}>
+                    <GoldGradient style={styles.badge}>
                       <Text style={styles.badgeTxt}>{item.unread}</Text>
-                    </View>
+                    </GoldGradient>
                   )}
                 </View>
                 <View style={[styles.itemBody, item.destroyedAt && { opacity: 0.55 }]}>

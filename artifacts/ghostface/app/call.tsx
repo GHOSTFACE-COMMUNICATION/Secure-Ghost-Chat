@@ -3,9 +3,10 @@
    and are not statically typed uniformly across web/native platforms. */
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
+import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Platform,
@@ -15,9 +16,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GoldGradient } from "@/components/GoldGradient";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { notifyCallEnded } from "@/hooks/usePushNotifications";
 
 // ── Native WebRTC (react-native-webrtc) — loaded only on native platforms ───
 // On web we use the browser's built-in WebRTC APIs instead.
@@ -39,21 +42,41 @@ if (Platform.OS !== "web") {
   }
 }
 
-type VoicePreset = {
-  id: string;
-  label: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  description: string;
-};
+// CallKeep — iOS only needs this here. A callee answering via CallKit's
+// native UI (see usePushNotifications.ts's "answerCall" listener) has its
+// AVAudioSession owned by CallKit: react-native-webrtc's audio stays silent
+// (ICE/DTLS/SRTP connect and negotiate fine — only audio in/out is affected)
+// until CallKit is explicitly told the call is actually live via
+// setCurrentCallActive. Without that call, iOS never activates the session
+// and "didActivateAudioSession" (which is what wires RTCAudioSession up —
+// see usePushNotifications.ts) never fires. The caller side never goes
+// through CallKit in this app (no CallKeep.startCall anywhere), so it isn't
+// affected — this only matters for the callee.
+let CallKeep: any = null;
+if (Platform.OS === "ios") {
+  try {
+    CallKeep = require("react-native-callkeep").default;
+  } catch (e) {
+    console.warn("[WebRTC] react-native-callkeep not available:", e);
+  }
+}
 
-const VOICE_PRESETS: VoicePreset[] = [
-  { id: "natural",  label: "NATURAL",   icon: "person-outline",        description: "Original voice" },
-  { id: "robot",    label: "ROBOT",     icon: "hardware-chip-outline",  description: "Metallic tone" },
-  { id: "deep",     label: "DEEP",      icon: "arrow-down-outline",     description: "Low frequency" },
-  { id: "ghost",    label: "GHOST",     icon: "skull-outline",          description: "Ethereal echo" },
-  { id: "alien",    label: "ALIEN",     icon: "planet-outline",         description: "Warped signal" },
-  { id: "high",     label: "HIGH",      icon: "arrow-up-outline",       description: "High pitched" },
-];
+// Speaker/earpiece output routing. expo-av's Audio.setAudioModeAsync (used
+// elsewhere in this file for the mic/session setup) has no route-forcing
+// API at all, and react-native-webrtc doesn't expose one either — this is
+// the only piece that actually moves audio between the earpiece and the
+// loudspeaker. Use setForceSpeakerphoneOn specifically, not
+// setSpeakerphoneOn: per this library's own README, setSpeakerphoneOn is
+// unsupported on iOS ("but not force"); setForceSpeakerphoneOn is the one
+// method documented to work on both platforms.
+let InCallManager: any = null;
+if (Platform.OS !== "web") {
+  try {
+    InCallManager = require("react-native-incall-manager").default;
+  } catch (e) {
+    console.warn("[Call] react-native-incall-manager not available:", e);
+  }
+}
 
 type IceServer = { urls: string | string[]; username?: string; credential?: string };
 type IceConfig = { iceServers: IceServer[] };
@@ -124,19 +147,22 @@ export default function CallScreen() {
     callId?: string;
   }>();
 
-  const { sendCallSignal, registerCallListener, wsConnected } = useApp();
+  const { sendCallSignal, registerCallListener, wsConnected, logCall } = useApp();
 
   const isCaller = (role ?? "caller") === "caller";
-  // useMemo so Date.now() is only called once on mount even if callId is undefined
-  const effectiveCallId = useMemo(() => callId ?? Date.now().toString(), []);
+  // useMemo so this only runs once on mount even if callId is undefined.
+  // Must be a real UUID, not just any unique string: this value is relayed
+  // through the VoIP push payload and passed straight to CallKit's native
+  // reportNewIncomingCall/displayIncomingCall on the callee's device, which
+  // parses it with NSUUID(uuidString:) — a non-UUID string silently fails
+  // there (nil), so the callee's phone would never actually ring.
+  const effectiveCallId = useMemo(() => callId ?? Crypto.randomUUID(), []);
   const isVideo = mode === "video";
 
   const [callState, setCallState]     = useState<CallState>(isCaller ? "ringing" : "connecting");
   const [duration, setDuration]       = useState(0);
   const [muted, setMuted]             = useState(false);
   const [speakerOn, setSpeakerOn]     = useState(false);
-  const [showVoiceChanger, setShowVoiceChanger] = useState(false);
-  const [activeVoice, setActiveVoice] = useState("natural");
   const [statusNote, setStatusNote]   = useState("");
   // Mirrors localStreamRef/remoteStreamRef in state so video views re-render
   // when a stream becomes available — refs alone don't trigger that.
@@ -144,15 +170,40 @@ export default function CallScreen() {
   const [remoteStream, setRemoteStream] = useState<any>(null);
 
   const pulseAnim      = useRef(new Animated.Value(1)).current;
-  const voiceSlideAnim = useRef(new Animated.Value(0)).current;
   const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
   const pcRef          = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
   const remoteStreamRef = useRef<any>(null);
   const mountedRef     = useRef(true);
+  // WS messages are dispatched to the call-signal listener as they arrive,
+  // without waiting for a prior dispatch's async work to finish (see
+  // AppContext's ws.onmessage / handleIncomingWsMessage) — so a "call-ice"
+  // signal can reach this handler while an in-flight "call-offer"/"call-answer"
+  // invocation is still awaiting makePC()/setRemoteDescription. addIceCandidate
+  // before setRemoteDescription completes throws (or, if pcRef.current isn't
+  // even set yet, there's nothing to call it on) — either way the candidate
+  // would otherwise be silently dropped. Queue it here instead and flush once
+  // the remote description is actually in place.
+  const pendingIceCandidatesRef = useRef<string[]>([]);
+  const remoteDescSetRef = useRef(false);
   // Ref so timeout callbacks always read the latest callState without stale closure
   const callStateRef   = useRef<CallState>(isCaller ? "ringing" : "connecting");
   useEffect(() => { callStateRef.current = callState; }, [callState]);
+  // Set true the moment the peer connection actually reaches "connected" —
+  // used at teardown to decide whether this call was answered (log with
+  // duration) vs missed, independent of what callStateRef reads by then
+  // (it's usually already "ended" via handleEndInternal before unmount).
+  const everConnectedRef = useRef(false);
+  // Mirrors `duration` so the unmount-cleanup effect (a stable closure that
+  // can't re-read state) always logs the actual elapsed seconds, including
+  // a call answered-and-ended within the same second (duration still 0).
+  const durationRef = useRef(0);
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  // Call logging happens exactly once, in the unmount-cleanup effect below —
+  // this guards the one case that doesn't go through unmount at all (the
+  // caller's 30s ring-timeout) so it isn't ALSO logged again if that effect
+  // somehow ran twice in dev/fast-refresh.
+  const loggedCallRef = useRef(false);
 
   // ── Start call duration timer when call goes active ──────────────────────
   useEffect(() => {
@@ -265,12 +316,29 @@ export default function CallScreen() {
     pc.onconnectionstatechange = () => {
       if (!mountedRef.current) return;
       const s = pc.connectionState;
-      if (s === "connected")                       setCallState("active");
-      if (s === "disconnected" || s === "failed")  handleEndInternal();
+      if (s === "connected") {
+        everConnectedRef.current = true;
+        setCallState("active");
+        // Tell CallKit the call is actually live now — see the CallKeep
+        // comment near the top of this file for why this is required for
+        // audio to work at all on the CallKit-answered (callee) side.
+        if (!isCaller && CallKeep) {
+          try { CallKeep.setCurrentCallActive(effectiveCallId); } catch (e) { console.warn("[CallKit] setCurrentCallActive failed:", e); }
+        }
+      }
+      if (s === "disconnected" || s === "failed") {
+        // Connection dropped without an explicit call-hangup signal (network
+        // blip, ICE failure, ...). handleEndInternal() tears down WebRTC and
+        // navigates away, but CallKit doesn't know the call is over unless
+        // told explicitly — without this, the callee's native call UI
+        // (Dynamic Island / lock-screen call screen) stays up indefinitely.
+        notifyCallEnded(effectiveCallId, "remote");
+        handleEndInternal();
+      }
     };
 
     return pc;
-  }, [alias, effectiveCallId, sendCallSignal, isVideo]);
+  }, [alias, effectiveCallId, sendCallSignal, isVideo, isCaller]);
 
   const getMedia = useCallback(async (pc: any) => {
     if (!pc) return;
@@ -303,6 +371,33 @@ export default function CallScreen() {
     }
   }, [isVideo]);
 
+  // Applies one ICE candidate to the peer connection. Only safe to call once
+  // remoteDescSetRef is true (see the ref's comment) — callers are
+  // responsible for that check; this only guards pcRef.current itself being
+  // gone (e.g. the call ended while a candidate was queued).
+  const applyIceCandidate = useCallback(async (payloadJson: string) => {
+    const pc = pcRef.current;
+    if (!pc) return;
+    const ICE = Platform.OS === "web" ? (window as any).RTCIceCandidate : NativeRTCIceCandidate;
+    if (!ICE) return;
+    try {
+      await pc.addIceCandidate(new ICE(JSON.parse(payloadJson)));
+    } catch (e) {
+      console.warn("[WebRTC] addIceCandidate failed:", e);
+    }
+  }, []);
+
+  // Drains candidates queued by the "call-ice" branch below while the remote
+  // description wasn't set yet. Call once right after setRemoteDescription
+  // resolves, on both the offer and answer paths.
+  const flushPendingIce = useCallback(async () => {
+    const queued = pendingIceCandidatesRef.current;
+    pendingIceCandidatesRef.current = [];
+    for (const payload of queued) {
+      await applyIceCandidate(payload);
+    }
+  }, [applyIceCandidate]);
+
   // Closes the peer connection, stops mic capture, clears the duration
   // timer, and restores the non-call audio session. No mountedRef check and
   // no state/navigation — this must also be safe to run from unmount
@@ -320,6 +415,11 @@ export default function CallScreen() {
       Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch((e) => {
         console.warn("[Call] Failed to restore audio session on teardown:", e);
       });
+    }
+    if (InCallManager) {
+      // null = "use default behavior" — don't leave this call's forced route
+      // (speaker on/off) applied to whatever the user does next.
+      try { InCallManager.setForceSpeakerphoneOn(null); } catch { /* best-effort cleanup only */ }
     }
   }, []);
 
@@ -352,6 +452,42 @@ export default function CallScreen() {
     return () => {
       if (callStateRef.current === "active") {
         sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
+        // Same reasoning as the call-hangup signal path in handleEnd(): this
+        // device's call session is ending without going through handleEnd()
+        // (e.g. the app locked/backgrounded mid-call), so CallKit needs to be
+        // told directly or its native call UI stays up after the app has
+        // already torn everything else down.
+        notifyCallEnded(effectiveCallId, "local");
+      }
+      // Call history: this unmount is the one place every real end path
+      // eventually passes through (End button, remote hangup, connection
+      // drop, or the app backgrounding mid-call above), so it's the single
+      // spot that logs "answered"/"missed" for this call.tsx instance. The
+      // caller's 30s ring-timeout is the one end path that DOESN'T reach
+      // "connecting" before giving up, so it logs itself, separately, below.
+      if (!loggedCallRef.current) {
+        loggedCallRef.current = true;
+        if (everConnectedRef.current) {
+          logCall({
+            alias: alias ?? "UNKNOWN",
+            direction: isCaller ? "outgoing" : "incoming",
+            mode: isVideo ? "video" : "voice",
+            outcome: "answered",
+            timestamp: Date.now(),
+            durationSec: durationRef.current,
+          });
+        } else if (callStateRef.current === "connecting") {
+          // Accepted (in-app or via CallKit) but the connection never
+          // completed — from the user's perspective this is a missed call,
+          // not a "declined" or "answered" one.
+          logCall({
+            alias: alias ?? "UNKNOWN",
+            direction: isCaller ? "outgoing" : "incoming",
+            mode: isVideo ? "video" : "voice",
+            outcome: "missed",
+            timestamp: Date.now(),
+          });
+        }
       }
       teardownCallResources();
     };
@@ -373,7 +509,22 @@ export default function CallScreen() {
       const timeout = setTimeout(() => {
         // Use ref so we read the CURRENT callState, not the stale closure value
         if (mountedRef.current && callStateRef.current === "ringing") {
+          // Tell the callee we gave up — without this the callee's incoming-call
+          // UI (CallKit's native banner, or the in-app overlay) has no way to
+          // know and just sits there until CallKit's own native ~60s timeout
+          // silently ends it. Queued if the socket's mid-reconnect rather than
+          // dropped, and exempt from the call-signal queue's TTL (see
+          // flushPendingCallSignals) since a late hangup is still meaningful.
+          sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
           setCallState("no_answer");
+          loggedCallRef.current = true;
+          logCall({
+            alias: alias ?? "UNKNOWN",
+            direction: "outgoing",
+            mode: isVideo ? "video" : "voice",
+            outcome: "missed",
+            timestamp: Date.now(),
+          });
           setTimeout(() => { if (mountedRef.current) router.back(); }, 1500);
         }
       }, 30_000);
@@ -390,14 +541,22 @@ export default function CallScreen() {
   // ── Call signal listener ──────────────────────────────────────────────────
   useEffect(() => {
     registerCallListener(async (signal) => {
-      if (signal.callId && signal.callId !== effectiveCallId) return;
+      // Reject anything not provably from the peer this screen is actually
+      // calling: the server relays call signals to any alias with no
+      // relationship check (by design — this app is metadata-blind), so an
+      // unrelated authenticated user could otherwise forge e.g. a
+      // call-hangup for a victim mid-call by simply omitting callId (the
+      // old check only rejected a *mismatched* callId, not a missing one).
+      // Both callId and from must match this call's actual peer.
+      if (signal.callId !== effectiveCallId) return;
+      if (signal.from?.toUpperCase() !== alias?.toUpperCase()) return;
       if (!mountedRef.current) return;
 
       // ── call-accept (caller receives) ─────────────────────────────────────
       if (signal.type === "call-accept" && isCaller) {
         setCallState("connecting");
         const pc = await makePC();
-        if (!pc) { setCallState("active"); return; }
+        if (!pc) { everConnectedRef.current = true; setCallState("active"); return; }
         pcRef.current = pc;
         await getMedia(pc);
         const offer = await pc.createOffer();
@@ -409,12 +568,14 @@ export default function CallScreen() {
       // ── call-offer (callee receives) ──────────────────────────────────────
       if (signal.type === "call-offer" && !isCaller && signal.payload) {
         const pc = await makePC();
-        if (!pc) { setCallState("active"); return; }
+        if (!pc) { everConnectedRef.current = true; setCallState("active"); return; }
         pcRef.current = pc;
         await getMedia(pc);
         const SDP = Platform.OS === "web" ? (window as any).RTCSessionDescription : NativeRTCSessionDescription;
         if (SDP) {
           await pc.setRemoteDescription(new SDP(JSON.parse(signal.payload)));
+          remoteDescSetRef.current = true;
+          await flushPendingIce();
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sendCallSignal({ type: "call-answer", to: alias, callId: effectiveCallId, payload: JSON.stringify(answer) });
@@ -429,6 +590,8 @@ export default function CallScreen() {
         if (SDP) {
           try {
             await pcRef.current.setRemoteDescription(new SDP(JSON.parse(signal.payload)));
+            remoteDescSetRef.current = true;
+            await flushPendingIce();
           } catch (e) {
             console.warn("[WebRTC] setRemoteDescription:", e);
           }
@@ -437,35 +600,45 @@ export default function CallScreen() {
         return;
       }
 
-      // ── call-ice (either) ─────────────────────────────────────────────────
-      if (signal.type === "call-ice" && signal.payload && pcRef.current) {
-        const ICE = Platform.OS === "web" ? (window as any).RTCIceCandidate : NativeRTCIceCandidate;
-        if (ICE) {
-          try { await pcRef.current.addIceCandidate(new ICE(JSON.parse(signal.payload))); } catch { /* ignore malformed ICE candidate */ }
+      // ── call-ice (either) ───────────────────────────────────────────────────
+      // Queue instead of applying directly if the remote description isn't in
+      // place yet — see pendingIceCandidatesRef's comment up top for why.
+      if (signal.type === "call-ice" && signal.payload) {
+        if (remoteDescSetRef.current && pcRef.current) {
+          await applyIceCandidate(signal.payload);
+        } else {
+          pendingIceCandidatesRef.current.push(signal.payload);
         }
         return;
       }
 
       // ── call-hangup (either receives) ─────────────────────────────────────
       if (signal.type === "call-hangup") {
+        notifyCallEnded(effectiveCallId, "remote");
         handleEndInternal();
       }
     });
 
     return () => registerCallListener(null);
-  }, [alias, effectiveCallId, isCaller, makePC, getMedia, sendCallSignal, handleEndInternal, registerCallListener]);
+  }, [alias, effectiveCallId, isCaller, makePC, getMedia, applyIceCandidate, flushPendingIce, sendCallSignal, handleEndInternal, registerCallListener]);
 
   // ── UI handlers ───────────────────────────────────────────────────────────
+  const toggleSpeaker = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSpeakerOn((s) => {
+      const next = !s;
+      if (InCallManager) {
+        try { InCallManager.setForceSpeakerphoneOn(next); } catch (e) { console.warn("[Call] setForceSpeakerphoneOn failed:", e); }
+      }
+      return next;
+    });
+  };
+
   const handleEnd = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
+    notifyCallEnded(effectiveCallId, "local");
     handleEndInternal();
-  };
-
-  const toggleVoiceChanger = () => {
-    setShowVoiceChanger((v) => !v);
-    Animated.spring(voiceSlideAnim, { toValue: showVoiceChanger ? 0 : 1, useNativeDriver: true, tension: 80, friction: 12 }).start();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const toggleMute = () => {
@@ -480,6 +653,47 @@ export default function CallScreen() {
     });
   };
 
+  // Native (react-native-webrtc): `_switchCamera()` flips the same track's
+  // underlying camera device in place — no renegotiation, no new track, so
+  // nothing else here needs to change.
+  const facingModeRef = useRef<"user" | "environment">("user");
+  const toggleCamera = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const videoTrack = localStreamRef.current?.getVideoTracks?.()[0];
+    if (!videoTrack) return;
+
+    if (Platform.OS !== "web") {
+      if (typeof (videoTrack as any)._switchCamera === "function") {
+        (videoTrack as any)._switchCamera();
+      }
+      return;
+    }
+
+    // Web has no in-place flip: re-acquire a video track for the other-facing
+    // camera and hot-swap it on the peer connection sender (RTCRtpSender.
+    // replaceTrack avoids a full renegotiation), then rebuild the local
+    // preview stream so the <video> effect (keyed on the `localStream` object
+    // identity) actually picks up the new track.
+    const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
+    try {
+      const newVideoStream: MediaStream = await (navigator as any).mediaDevices.getUserMedia({
+        video: { facingMode: nextFacing },
+      });
+      const newTrack = newVideoStream.getVideoTracks()[0];
+      const sender = pcRef.current?.getSenders?.().find((s: any) => s.track?.kind === "video");
+      if (sender) await sender.replaceTrack(newTrack);
+
+      videoTrack.stop();
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      const rebuilt = new (window as any).MediaStream([...audioTracks, newTrack]);
+      localStreamRef.current = rebuilt;
+      setLocalStream(rebuilt);
+      facingModeRef.current = nextFacing;
+    } catch (e) {
+      console.warn("[Call] toggleCamera (web) failed:", e);
+    }
+  }, []);
+
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -487,8 +701,6 @@ export default function CallScreen() {
   };
 
   const displayAlias = alias ?? "UNKNOWN";
-  const activePreset  = VOICE_PRESETS.find((p) => p.id === activeVoice)!;
-  const voiceActive   = activeVoice !== "natural";
 
   const hasLocalVideoTrack  = !!localStream?.getVideoTracks?.().length;
   const hasRemoteVideoTrack = !!remoteStream?.getVideoTracks?.().length;
@@ -539,41 +751,19 @@ export default function CallScreen() {
     encRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6 },
     encText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
     noteText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1, textAlign: "center" as const, maxWidth: 240 },
-    voiceActiveRow: {
-      flexDirection: "row" as const, alignItems: "center" as const, gap: 6,
-      backgroundColor: `${colors.primary}20`, borderRadius: 20,
-      paddingHorizontal: 12, paddingVertical: 4,
-    },
-    voiceActiveText: { color: colors.primary, fontSize: 10, letterSpacing: 2, fontWeight: "700" as const },
     bottomSection: { gap: 16 },
-    vcPanel: {
-      marginHorizontal: 16, backgroundColor: colors.card,
-      borderRadius: colors.radius, borderWidth: 1,
-      borderColor: voiceActive ? colors.primary : colors.border, overflow: "hidden",
-    },
-    vcHeader: {
-      flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between",
-      paddingHorizontal: 16, paddingVertical: 12,
-      borderBottomWidth: showVoiceChanger ? 1 : 0, borderBottomColor: colors.border,
-    },
-    vcHeaderLeft: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-    vcHeaderTitle: { color: voiceActive ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "700" as const, letterSpacing: 3 },
-    vcHeaderSub: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
-    vcGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, padding: 12, gap: 8 },
-    vcPreset: { flex: 1, minWidth: 80, alignItems: "center" as const, paddingVertical: 12, borderRadius: colors.radius, borderWidth: 1.5, gap: 4 },
-    vcLabel: { fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 },
-    vcDesc: { fontSize: 8, letterSpacing: 0.5 },
     controls: { flexDirection: "row" as const, gap: 20, alignItems: "center" as const, justifyContent: "center" as const },
     ctrlItem: { alignItems: "center" as const },
     ctrlBtn: {
       width: 56, height: 56, borderRadius: 28,
       backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
       alignItems: "center" as const, justifyContent: "center" as const,
+      overflow: "hidden" as const,
     },
-    ctrlBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-    ctrlBtnVoice: {
-      backgroundColor: voiceActive ? `${colors.primary}25` : colors.card,
-      borderColor: voiceActive ? colors.primary : colors.border,
+    ctrlBtnActiveWrap: { borderColor: colors.primary },
+    ctrlBtnGoldFill: {
+      width: "100%" as const, height: "100%" as const,
+      alignItems: "center" as const, justifyContent: "center" as const,
     },
     endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.destructive, alignItems: "center" as const, justifyContent: "center" as const },
     modeLabel: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 4, textAlign: "center" as const },
@@ -651,62 +841,22 @@ export default function CallScreen() {
         {statusNote !== "" && (
           <Text style={styles.noteText}>{statusNote}</Text>
         )}
-
-        {voiceActive && (
-          <View style={styles.voiceActiveRow}>
-            <Ionicons name="mic" size={10} color={colors.primary} />
-            <Text style={styles.voiceActiveText}>VOICE: {activePreset.label}</Text>
-          </View>
-        )}
       </View>
 
       <View style={styles.bottomSection}>
-        {/* Voice changer panel */}
-        <Pressable style={styles.vcPanel} onPress={toggleVoiceChanger}>
-          <View style={styles.vcHeader}>
-            <View style={styles.vcHeaderLeft}>
-              <Ionicons name="mic-outline" size={18} color={voiceActive ? colors.primary : colors.mutedForeground} />
-              <View>
-                <Text style={styles.vcHeaderTitle}>VOICE CHANGER {voiceActive ? `· ${activePreset.label}` : ""}</Text>
-                <Text style={styles.vcHeaderSub}>{voiceActive ? activePreset.description.toUpperCase() : "TAP TO CONFIGURE"}</Text>
-              </View>
-            </View>
-            <Ionicons name={showVoiceChanger ? "chevron-down" : "chevron-up"} size={16} color={colors.mutedForeground} />
-          </View>
-          {showVoiceChanger && (
-            <View style={styles.vcGrid}>
-              {VOICE_PRESETS.map((preset) => {
-                const active = activeVoice === preset.id;
-                return (
-                  <Pressable
-                    key={preset.id}
-                    style={[styles.vcPreset, { backgroundColor: active ? `${colors.primary}20` : "transparent", borderColor: active ? colors.primary : colors.border }]}
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveVoice(preset.id); }}
-                  >
-                    <Ionicons name={preset.icon} size={20} color={active ? colors.primary : colors.mutedForeground} />
-                    <Text style={[styles.vcLabel, { color: active ? colors.primary : colors.foreground }]}>{preset.label}</Text>
-                    <Text style={[styles.vcDesc, { color: colors.mutedForeground }]}>{preset.description}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </Pressable>
-
         {/* Call controls */}
         <View style={styles.controls}>
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActive]} onPress={toggleMute}>
-              <Ionicons name={muted ? "mic-off" : "mic"} size={22} color={muted ? colors.primaryForeground : colors.foreground} />
+            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActiveWrap]} onPress={toggleMute}>
+              {muted ? (
+                <GoldGradient style={styles.ctrlBtnGoldFill}>
+                  <Ionicons name="mic-off" size={22} color="#FFFFFF" />
+                </GoldGradient>
+              ) : (
+                <Ionicons name="mic" size={22} color={colors.foreground} />
+              )}
             </Pressable>
             <Text style={styles.modeLabel}>{muted ? "UNMUTE" : "MUTE"}</Text>
-          </View>
-
-          <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, styles.ctrlBtnVoice]} onPress={toggleVoiceChanger}>
-              <Ionicons name="mic-circle-outline" size={22} color={voiceActive ? colors.primary : colors.foreground} />
-            </Pressable>
-            <Text style={[styles.modeLabel, voiceActive && { color: colors.primary }]}>VOICE FX</Text>
           </View>
 
           <View style={styles.ctrlItem}>
@@ -717,11 +867,26 @@ export default function CallScreen() {
           </View>
 
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSpeakerOn((s) => !s); }}>
-              <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={22} color={speakerOn ? colors.primaryForeground : colors.foreground} />
+            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActiveWrap]} onPress={toggleSpeaker}>
+              {speakerOn ? (
+                <GoldGradient style={styles.ctrlBtnGoldFill}>
+                  <Ionicons name="volume-high" size={22} color="#FFFFFF" />
+                </GoldGradient>
+              ) : (
+                <Ionicons name="volume-medium" size={22} color={colors.foreground} />
+              )}
             </Pressable>
             <Text style={styles.modeLabel}>SPEAKER</Text>
           </View>
+
+          {isVideo && (
+            <View style={styles.ctrlItem}>
+              <Pressable style={styles.ctrlBtn} onPress={toggleCamera} testID="flip-camera-btn">
+                <Ionicons name="camera-reverse-outline" size={22} color={colors.foreground} />
+              </Pressable>
+              <Text style={styles.modeLabel}>FLIP</Text>
+            </View>
+          )}
         </View>
       </View>
     </View>

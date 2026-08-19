@@ -1,3 +1,4 @@
+import { createHmac } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { logger } from "../lib/logger";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
@@ -12,7 +13,7 @@ type IceServer = {
 
 type IceConfigResponse = {
   iceServers: IceServer[];
-  source: "twilio" | "static" | "stun-only";
+  source: "twilio" | "coturn" | "static" | "stun-only";
   ttl: number;
 };
 
@@ -24,16 +25,20 @@ const STUN_SERVERS: IceServer[] = [
 const REFRESH_SKEW_MS = 60_000;
 const STUN_FALLBACK_TTL_SECONDS = 300;
 const TWILIO_FETCH_TIMEOUT_MS = 4_000;
+const DEFAULT_TURN_TTL_SECONDS = 3_600;
 
 type CachedConfig = { body: IceConfigResponse; expiresAt: number };
 let cached: CachedConfig | null = null;
 
 // Per-IP rate limit. TURN credentials are real money (Twilio NTS) and even
 // though we cache them, leaking a fresh token lets a stranger relay media
-// through our account. 60 requests / hour / IP comfortably covers normal
-// call usage while bounding scraping.
-const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 60 });
+// through our account. 600 requests / hour / IP covers normal call usage
+// (including client reconnect/retry bursts around CallKit answer/WS
+// re-auth) while still bounding scraping.
+const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 600 });
 
+// Literal, pre-issued static credentials — only reached when TURN_SECRET
+// isn't set (see coturnConfig below, which takes priority when it is).
 function staticConfigFromEnv(): IceConfigResponse | null {
   const urlsRaw = process.env.TURN_URLS?.trim();
   if (!urlsRaw) return null;
@@ -54,6 +59,35 @@ function staticConfigFromEnv(): IceConfigResponse | null {
     iceServers: [...STUN_SERVERS, turnEntry],
     source: "static",
     ttl: 3600,
+  };
+}
+
+// Self-hosted coturn, authenticated via use-auth-secret (RFC
+// draft-uberti-behave-turn-rest's "TURN REST API" convention). coturn parses
+// everything before the first colon in `username` as the credential's unix
+// expiry timestamp, and computes the expected password as
+// base64(HMAC-SHA1(secret, username)) over the FULL username string —
+// timestamp, colon, and label all included. A bare timestamp with no colon
+// (what this file used to send, aimed at Metered's Open Relay) doesn't parse
+// as a valid coturn username at all and gets rejected outright.
+function coturnConfig(): IceConfigResponse | null {
+  const urlsRaw = process.env.TURN_URLS?.trim();
+  const secret = process.env.TURN_SECRET?.trim();
+  if (!urlsRaw || !secret) return null;
+  const urls = urlsRaw
+    .split(",")
+    .map((u) => u.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return null;
+
+  const ttl = Math.max(120, Number(process.env.TURN_TTL_SECONDS) || DEFAULT_TURN_TTL_SECONDS);
+  const username = `${Math.floor(Date.now() / 1000) + ttl}:ghostface`;
+  const credential = createHmac("sha1", secret).update(username).digest("base64");
+
+  return {
+    iceServers: [...STUN_SERVERS, { urls, username, credential }],
+    source: "coturn",
+    ttl,
   };
 }
 
@@ -117,8 +151,8 @@ router.get("/ice-config", async (req: Request, res: Response) => {
 
   const now = Date.now();
   // Serve from cache until we're inside the refresh skew window. This applies
-  // to every source — including the STUN fallback — so we don't recompute on
-  // every request.
+  // to every source — including the STUN-only fallback — so we don't
+  // recompute on every request.
   if (cached && now < cached.expiresAt - REFRESH_SKEW_MS) {
     res.json(cached.body);
     return;
@@ -135,6 +169,13 @@ router.get("/ice-config", async (req: Request, res: Response) => {
     logger.warn({ err }, "Twilio NTS unavailable, falling back");
   }
 
+  const fromCoturn = coturnConfig();
+  if (fromCoturn) {
+    cached = { body: fromCoturn, expiresAt: now + fromCoturn.ttl * 1000 };
+    res.json(fromCoturn);
+    return;
+  }
+
   const fromStatic = staticConfigFromEnv();
   if (fromStatic) {
     cached = { body: fromStatic, expiresAt: now + fromStatic.ttl * 1000 };
@@ -148,8 +189,13 @@ router.get("/ice-config", async (req: Request, res: Response) => {
     ttl: STUN_FALLBACK_TTL_SECONDS,
   };
   cached = { body: fallback, expiresAt: now + STUN_FALLBACK_TTL_SECONDS * 1000 };
+  // Silent degradation to STUN-only is exactly what made the last TURN outage
+  // hard to find — signalling and ICE both "connect" fine, media just never
+  // flows for anyone behind a symmetric NAT. Log loudly so this shows up in
+  // deploy logs immediately instead of only surfacing as a user report.
   logger.warn(
-    "No TURN credentials configured (set TWILIO_* or TURN_URLS); calls behind strict NAT may fail.",
+    "No TURN configured (TWILIO_*, TURN_SECRET, or TURN_USERNAME/TURN_CREDENTIAL); " +
+      "serving STUN-only. Calls will fail behind symmetric NAT.",
   );
   res.json(fallback);
 });

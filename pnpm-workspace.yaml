@@ -1,7 +1,13 @@
+# Explicit paths, not globs. A glob here silently absorbs any folder dropped
+# into artifacts/ or lib/ as a workspace package — that is how the unrelated
+# vault2fa project ended up in this workspace. Add new packages by hand.
 packages:
-  - artifacts/*
-  - lib/*
-  - lib/integrations/*
+  - artifacts/api-server
+  - artifacts/ghostface
+  - lib/api-client-react
+  - lib/api-spec
+  - lib/api-zod
+  - lib/db
   - scripts
 
 autoInstallPeers: false

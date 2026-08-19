@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as Clipboard from "expo-clipboard";
+import * as Crypto from "expo-crypto";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
@@ -15,14 +16,18 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
+  ViewStyle,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassCallButton } from "@/components/GlassCallButton";
 import { GoldGradient } from "@/components/GoldGradient";
 import { SecureBadge } from "@/components/SecureBadge";
 import { StatusDot } from "@/components/StatusDot";
@@ -187,6 +192,24 @@ function EncryptedImageView({
       accessibilityLabel="Encrypted photo attachment"
     />
   );
+}
+
+// Sent-message bubbles use the app's standard gold liquid glass; received
+// bubbles stay a plain card surface. A shared wrapper here avoids
+// duplicating the (fairly large) bubble children JSX per branch.
+function MsgBubbleSurface({
+  fromMe,
+  style,
+  children,
+}: {
+  fromMe: boolean;
+  style: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  if (fromMe) {
+    return <GoldGradient style={style}>{children}</GoldGradient>;
+  }
+  return <View style={style}>{children}</View>;
 }
 
 function formatTime(ts: number): string {
@@ -975,6 +998,10 @@ export default function ChatScreen() {
       alignItems: "center", justifyContent: "center",
       borderWidth: 1, borderColor: colors.border,
     },
+    recorderBtnGoldFill: {
+      width: "100%", paddingVertical: 12,
+      alignItems: "center", justifyContent: "center",
+    },
     recorderBtnTxt: {
       fontSize: 11, fontWeight: "800", letterSpacing: 2,
     },
@@ -986,6 +1013,17 @@ export default function ChatScreen() {
       borderTopLeftRadius: 20, borderTopRightRadius: 20,
       borderWidth: 1, borderBottomWidth: 0, borderColor: colors.border,
       paddingBottom: insets.bottom + 24,
+      // Caps the sheet so its header (title + close button) always stays
+      // on-screen and reachable — sheetBody scrolls internally instead of
+      // the whole sheet growing past the viewport. Without this, a
+      // conversation with a full Double Ratchet info panel (protocol rows +
+      // wallpaper swatches + verify/clear buttons) overflows the screen
+      // height; since the overlay is bottom-anchored (justifyContent:
+      // "flex-end"), the excess pushed the handle, title, and close button
+      // off the TOP of the screen — leaving no way to dismiss the sheet
+      // except backing into it via another button lower down (e.g. Clear
+      // Chat, whose onPress also happens to call setShowInfo(false)).
+      maxHeight: "88%",
     },
     handle: {
       width: 40, height: 4, borderRadius: 2,
@@ -997,7 +1035,7 @@ export default function ChatScreen() {
       borderBottomWidth: 1, borderBottomColor: colors.border,
     },
     sheetTitle: { color: colors.foreground, fontSize: 13, fontWeight: "800", letterSpacing: 4 },
-    sheetBody: { padding: 20, gap: 16 },
+    sheetBody: { padding: 20, gap: 16 }, // used as ScrollView contentContainerStyle
     emojiRow: {
       flexDirection: "row",
       justifyContent: "space-around",
@@ -1123,28 +1161,26 @@ export default function ChatScreen() {
               )}
             </View>
           )}
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
+          <GlassCallButton
+            icon="call-outline"
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Date.now().toString() } });
+              // Must be a real UUID — relayed through the VoIP push payload and
+              // parsed with NSUUID(uuidString:) on the callee's device.
+              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "voice", role: "caller", callId: Crypto.randomUUID() } });
             }}
             testID="voice-call-btn"
-          >
-            <Ionicons name="call-outline" size={20} color={colors.primary} />
-          </Pressable>
-          <Pressable
-            style={styles.callBtn}
-            hitSlop={6}
+            accessibilityLabel="Voice call"
+          />
+          <GlassCallButton
+            icon="videocam-outline"
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Date.now().toString() } });
+              router.push({ pathname: "/call", params: { alias: conv.alias, mode: "video", role: "caller", callId: Crypto.randomUUID() } });
             }}
             testID="video-call-btn"
-          >
-            <Ionicons name="videocam-outline" size={20} color={colors.primary} />
-          </Pressable>
+            accessibilityLabel="Video call"
+          />
           <Pressable
             style={styles.callBtn}
             hitSlop={6}
@@ -1228,16 +1264,16 @@ export default function ChatScreen() {
             onLongPress={() => handleLongPress(item)}
             delayLongPress={400}
           >
-            <View style={[
-              styles.msgBubble,
-              {
-                backgroundColor: item.fromMe ? colors.primary : colors.card,
-                borderWidth: item.fromMe ? 0 : 1,
-                borderColor: colors.border,
-              },
-              (item.attachment?.kind === "image" || item.attachment?.kind === "image-ref") &&
-                styles.msgBubbleWithImage,
-            ]}>
+            <MsgBubbleSurface
+              fromMe={item.fromMe}
+              style={[
+                styles.msgBubble,
+                item.fromMe
+                  ? { borderWidth: 0 }
+                  : { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+                (item.attachment?.kind === "image" || item.attachment?.kind === "image-ref") &&
+                  styles.msgBubbleWithImage,
+              ]}>
               {(item.attachment?.kind === "image" || item.attachment?.kind === "image-ref") && (
                 <EncryptedImageView attachment={item.attachment} style={styles.msgImage} />
               )}
@@ -1258,7 +1294,7 @@ export default function ChatScreen() {
                   <Ionicons
                     name={playingId === item.id ? "pause" : "play"}
                     size={16}
-                    color={item.fromMe ? colors.primaryForeground : colors.primary}
+                    color={item.fromMe ? "#FFFFFF" : colors.primary}
                   />
                   <View style={styles.audioBars}>
                     {[6, 12, 9, 14, 8, 11, 7].map((h, i) => (
@@ -1268,7 +1304,7 @@ export default function ChatScreen() {
                           styles.audioBar,
                           {
                             height: h,
-                            backgroundColor: item.fromMe ? colors.primaryForeground : colors.primary,
+                            backgroundColor: item.fromMe ? "#FFFFFF" : colors.primary,
                           },
                         ]}
                       />
@@ -1277,7 +1313,7 @@ export default function ChatScreen() {
                   <Text
                     style={[
                       styles.audioDuration,
-                      { color: item.fromMe ? colors.primaryForeground : colors.foreground },
+                      { color: item.fromMe ? "#FFFFFF" : colors.foreground },
                     ]}
                   >
                     {formatDuration(item.attachment.durationMs)}
@@ -1308,14 +1344,14 @@ export default function ChatScreen() {
                     <Ionicons
                       name="document"
                       size={18}
-                      color={item.fromMe ? colors.primaryForeground : colors.primary}
+                      color={item.fromMe ? "#FFFFFF" : colors.primary}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
                       style={[
                         styles.fileName,
-                        { color: item.fromMe ? colors.primaryForeground : colors.foreground },
+                        { color: item.fromMe ? "#FFFFFF" : colors.foreground },
                       ]}
                       numberOfLines={1}
                     >
@@ -1338,14 +1374,14 @@ export default function ChatScreen() {
                 <Text
                   style={[
                     styles.msgText,
-                    { color: item.fromMe ? colors.primaryForeground : colors.foreground },
+                    { color: item.fromMe ? "#FFFFFF" : colors.foreground },
                     item.attachment?.kind === "image" && styles.msgTextWithImage,
                   ]}
                 >
                   {item.text}
                 </Text>
               )}
-            </View>
+            </MsgBubbleSurface>
             <View style={[styles.msgMeta, item.fromMe ? { justifyContent: "flex-end" } : {}]}>
               <Text style={[styles.msgTime, { color: colors.mutedForeground }]}>
                 {formatTime(item.timestamp)}
@@ -1587,7 +1623,7 @@ export default function ChatScreen() {
                 <Ionicons
                   name="send"
                   size={16}
-                  color={colors.primaryForeground}
+                  color="#FFFFFF"
                 />
               </GoldGradient>
             ) : (
@@ -1733,17 +1769,16 @@ export default function ChatScreen() {
                 <Text style={[styles.recorderBtnTxt, { color: colors.mutedForeground }]}>CANCEL</Text>
               </Pressable>
               <Pressable
-                style={[
-                  styles.recorderBtn,
-                  { backgroundColor: colors.primary, borderColor: colors.primary },
-                ]}
+                style={[styles.recorderBtn, { borderColor: colors.primary, padding: 0, overflow: "hidden" }]}
                 onPress={() => stopRecorder(true)}
                 disabled={!isRecording}
                 testID="recorder-stop"
               >
-                <Text style={[styles.recorderBtnTxt, { color: colors.primaryForeground }]}>
-                  STOP &amp; ATTACH
-                </Text>
+                <GoldGradient style={styles.recorderBtnGoldFill}>
+                  <Text style={[styles.recorderBtnTxt, { color: "#FFFFFF" }]}>
+                    STOP &amp; ATTACH
+                  </Text>
+                </GoldGradient>
               </Pressable>
             </View>
           </View>
@@ -1762,7 +1797,7 @@ export default function ChatScreen() {
                   <Ionicons name="close" size={20} color={colors.mutedForeground} />
                 </Pressable>
               </View>
-              <View style={styles.sheetBody}>
+              <ScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator={false}>
                 {/* Safety number */}
                 {conv.safetyNumber && (
                   <View style={[
@@ -1955,7 +1990,7 @@ export default function ChatScreen() {
                   <Ionicons name="trash-outline" size={14} color={colors.destructive} />
                   <Text style={styles.clearBtnTxt}>CLEAR CHAT</Text>
                 </Pressable>
-              </View>
+              </ScrollView>
             </View>
         </View>
       </Modal>
@@ -1987,7 +2022,7 @@ export default function ChatScreen() {
                         key={opt.label}
                         style={[
                           styles.disappearOpt,
-                          active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                          active && { borderColor: colors.primary, overflow: "hidden" },
                         ]}
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1995,9 +2030,10 @@ export default function ChatScreen() {
                           setShowDisappear(false);
                         }}
                       >
+                        {active && <GoldGradient style={StyleSheet.absoluteFill} />}
                         <Text style={[
                           styles.disappearOptTxt,
-                          { color: active ? colors.primaryForeground : colors.mutedForeground },
+                          { color: active ? "#FFFFFF" : colors.mutedForeground },
                         ]}>
                           {opt.label}
                         </Text>

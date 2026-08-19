@@ -1,7 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, prekeysTable, identityKeysTable, deviceTokensTable, pool } from "@workspace/db";
-import { eq, and, count as drizzleCount } from "drizzle-orm";
-import { createHash, randomBytes } from "crypto";
+import { db, prekeysTable, identityKeysTable, deviceTokensTable, reclaimChallengesTable, pool } from "@workspace/db";
+import { eq, and, lt, count as drizzleCount } from "drizzle-orm";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
 import { ensureDeliveryId, generateDeliveryId } from "../utils/delivery";
@@ -32,6 +35,36 @@ function checkRegisterRateLimit(ip: string): boolean {
   if (entry.count >= REGISTER_RATE_LIMIT_MAX) return false;
   entry.count += 1;
   return true;
+}
+
+// ── Rate limiter for /reclaim/challenge and /reclaim/verify ──────────────────
+// Guessing a valid 24-word recovery phrase is cryptographically infeasible
+// regardless of rate — this is ordinary spam/DoS hygiene for the challenge
+// table, not a meaningful brute-force mitigation.
+const RECLAIM_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RECLAIM_RATE_LIMIT_MAX = 10;
+const reclaimAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function checkReclaimRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = reclaimAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    reclaimAttempts.set(ip, { count: 1, resetAt: now + RECLAIM_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RECLAIM_RATE_LIMIT_MAX) return false;
+  entry.count += 1;
+  return true;
+}
+
+const RECLAIM_CHALLENGE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+function requestIp(req: Request): string {
+  return (
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+    req.socket.remoteAddress ??
+    "unknown"
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -274,6 +307,187 @@ router.put(
   },
 );
 
+// ── POST /api/prekeys/:userId/reclaim/challenge — start an alias reclaim ──────
+// For a device that regenerated its IK private key from a recovery phrase and
+// has NO device token (the full-loss case rekey above doesn't cover — rekey
+// requires a still-valid Bearer token). No auth: this only ever hands back an
+// ephemeral public key + nonce, never anything that proves or disproves who
+// owns the alias by itself — see /reclaim/verify for the actual proof step.
+router.post("/prekeys/:userId/reclaim/challenge", async (req: Request, res: Response) => {
+  try {
+    const ip = requestIp(req);
+    if (!checkReclaimRateLimit(ip)) {
+      return res.status(429).json({ error: "Too many reclaim attempts. Try again later." });
+    }
+
+    const userId = normalizeAlias((req.params["userId"] as string) ?? "");
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+
+    const [identity] = await db
+      .select({ ikPublicKey: identityKeysTable.ikPublicKey })
+      .from(identityKeysTable)
+      .where(eq(identityKeysTable.userId, userId));
+    if (!identity) {
+      // Deliberately the same shape as a real challenge response's error
+      // path would be — don't let this endpoint become an alias-existence
+      // oracle beyond what /prekeys/:userId/bundle already exposes.
+      return res.status(404).json({ error: "No identity registered for this alias" });
+    }
+
+    // Opportunistic cleanup of this alias's abandoned attempts — no cron
+    // infra here, so each new challenge sweeps its own leftovers.
+    await db
+      .delete(reclaimChallengesTable)
+      .where(and(eq(reclaimChallengesTable.userId, userId), lt(reclaimChallengesTable.expiresAt, new Date())));
+
+    const serverEph = x25519.utils.randomSecretKey();
+    const serverEphPub = x25519.getPublicKey(serverEph);
+    const nonce = randomBytes(32);
+    const challengeId = randomBytes(32).toString("hex");
+
+    await db.insert(reclaimChallengesTable).values({
+      challengeId,
+      userId,
+      serverEphPriv: Buffer.from(serverEph).toString("hex"),
+      nonce: nonce.toString("hex"),
+      expiresAt: new Date(Date.now() + RECLAIM_CHALLENGE_TTL_MS),
+    });
+
+    return res.status(200).json({
+      challengeId,
+      serverEphPub: Buffer.from(serverEphPub).toString("hex"),
+      nonce: nonce.toString("hex"),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: toErrorMessage(err) });
+  }
+});
+
+// ── POST /api/prekeys/:userId/reclaim/verify — complete an alias reclaim ──────
+// Client proves possession of the IK private key matching this alias's
+// on-file ikPublicKey via DH key confirmation (see reclaim.ts schema comment
+// for the full protocol), then submits fresh SPK/ikSign/PQKEM to replace the
+// lost device's — exactly the material a normal rekey would replace, since
+// the recovered device has none of it cached. ikPublicKey itself is left
+// untouched: that's the identity that was just proven, not replaced.
+router.post("/prekeys/:userId/reclaim/verify", async (req: Request, res: Response) => {
+  try {
+    const ip = requestIp(req);
+    if (!checkReclaimRateLimit(ip)) {
+      return res.status(429).json({ error: "Too many reclaim attempts. Try again later." });
+    }
+
+    const userId = normalizeAlias((req.params["userId"] as string) ?? "");
+    const {
+      challengeId,
+      proof,
+      spkPublicKey,
+      ikSignPublicKey,
+      spkSignature,
+      pqkemPublicKey,
+      pqkemSignature,
+    } = req.body as {
+      challengeId?: string;
+      proof?: string;
+      spkPublicKey?: string;
+      ikSignPublicKey?: string;
+      spkSignature?: string;
+      pqkemPublicKey?: string;
+      pqkemSignature?: string;
+    };
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+    if (!isValidHex(challengeId, 64)) {
+      return res.status(400).json({ error: "challengeId must be a 64-char hex string" });
+    }
+    if (!isValidHex(proof, 64)) {
+      return res.status(400).json({ error: "proof must be a 64-char hex string (HMAC-SHA256)" });
+    }
+    if (!isValidPubKey(spkPublicKey)) {
+      return res.status(400).json({ error: "spkPublicKey must be a 64-char hex string" });
+    }
+    if (ikSignPublicKey !== undefined && !isValidPubKey(ikSignPublicKey)) {
+      return res.status(400).json({ error: "ikSignPublicKey must be a 64-char hex string" });
+    }
+    if (spkSignature !== undefined && !isValidSignature(spkSignature)) {
+      return res.status(400).json({ error: "spkSignature must be a 128-char hex string" });
+    }
+    if (pqkemPublicKey !== undefined && !isValidPqkemPubKey(pqkemPublicKey)) {
+      return res.status(400).json({ error: "pqkemPublicKey must be a 2368-char hex string" });
+    }
+    if (pqkemSignature !== undefined && !isValidSignature(pqkemSignature)) {
+      return res.status(400).json({ error: "pqkemSignature must be a 128-char hex string" });
+    }
+
+    const [challenge] = await db
+      .select()
+      .from(reclaimChallengesTable)
+      .where(and(eq(reclaimChallengesTable.challengeId, challengeId as string), eq(reclaimChallengesTable.userId, userId)));
+
+    // One-shot regardless of outcome below — a challenge is never reusable,
+    // successful verify or not.
+    if (challenge) {
+      await db.delete(reclaimChallengesTable).where(eq(reclaimChallengesTable.id, challenge.id));
+    }
+    if (!challenge || challenge.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ error: "Challenge not found or expired — request a new one" });
+    }
+
+    const [identity] = await db
+      .select({ ikPublicKey: identityKeysTable.ikPublicKey })
+      .from(identityKeysTable)
+      .where(eq(identityKeysTable.userId, userId));
+    if (!identity) {
+      return res.status(404).json({ error: "No identity registered for this alias" });
+    }
+
+    const sharedSecret = x25519.getSharedSecret(
+      Buffer.from(challenge.serverEphPriv, "hex"),
+      Buffer.from(identity.ikPublicKey, "hex"),
+    );
+    const expectedProof = hmac(sha256, sharedSecret, Buffer.from(challenge.nonce, "hex"));
+    const expectedProofHex = Buffer.from(expectedProof).toString("hex");
+
+    const submitted = Buffer.from(proof as string, "hex");
+    const expected = Buffer.from(expectedProofHex, "hex");
+    const validProof = submitted.length === expected.length && timingSafeEqual(submitted, expected);
+    if (!validProof) {
+      return res.status(403).json({ error: "Proof of possession failed" });
+    }
+
+    // Reclaim confirmed — issue a fresh device token (replacing whatever the
+    // lost device held) and fresh SPK/ikSign/PQKEM, same shape as /register.
+    const token = randomBytes(32).toString("hex");
+    const tokenHash = hashToken(token);
+    const deliveryId = await ensureDeliveryId(userId);
+
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(deviceTokensTable)
+        .values({ userId, tokenHash })
+        .onConflictDoUpdate({ target: deviceTokensTable.userId, set: { tokenHash } });
+      await tx
+        .update(identityKeysTable)
+        .set({
+          spkPublicKey,
+          ikSignPublicKey: ikSignPublicKey ?? null,
+          spkSignature: spkSignature ?? null,
+          pqkemPublicKey: pqkemPublicKey ?? null,
+          pqkemSignature: pqkemSignature ?? null,
+        })
+        .where(eq(identityKeysTable.userId, userId));
+    });
+
+    return res.status(200).json({ token, userId, deliveryId });
+  } catch (err) {
+    return res.status(500).json({ error: toErrorMessage(err) });
+  }
+});
+
 // ── POST /api/prekeys/:userId — upload a batch of one-time prekeys ────────────
 // Requires: Authorization: Bearer <device-token>
 router.post(
@@ -305,6 +519,34 @@ router.post(
         .where(and(eq(prekeysTable.userId, userId), eq(prekeysTable.consumed, false)));
 
       return res.status(201).json({ uploaded: keys.length, remaining: Number(remaining) });
+    } catch (err) {
+      return res.status(500).json({ error: toErrorMessage(err) });
+    }
+  },
+);
+
+// ── DELETE /api/prekeys/:userId — release this device's registration ──────────
+// Called by the client during self-destruct (panicWipe), before it clears its
+// own local device token — that's the last moment the app can still prove
+// ownership of the alias. Without this, panicWipe only ever cleared local
+// state: the server-side registration survived, and re-registering the same
+// alias afterward always 409'd (no reissue path, by design — see
+// /prekeys/register above) since the server had no way to tell "the true
+// owner released this" apart from "an attacker is trying to steal it." A
+// valid bearer token for userId IS that proof.
+// Requires: Authorization: Bearer <device-token>
+router.delete(
+  "/prekeys/:userId",
+  (req, res, next) => requireDeviceAuth(req, res, next),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.params["userId"] as string;
+      await db.transaction(async (tx) => {
+        await tx.delete(prekeysTable).where(eq(prekeysTable.userId, userId));
+        await tx.delete(deviceTokensTable).where(eq(deviceTokensTable.userId, userId));
+        await tx.delete(identityKeysTable).where(eq(identityKeysTable.userId, userId));
+      });
+      return res.status(200).json({ ok: true });
     } catch (err) {
       return res.status(500).json({ error: toErrorMessage(err) });
     }

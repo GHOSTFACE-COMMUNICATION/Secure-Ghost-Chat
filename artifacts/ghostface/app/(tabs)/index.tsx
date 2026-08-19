@@ -1,5 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -13,13 +16,29 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GOLD_OUTLINE_COLOR, SpecularHighlight } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
 import { boxShadow } from "@/lib/shadow";
 
 const BG = "#000";
-const GOLD = "#bf9b30";
+const GOLD = "#F5D26B";
+// Real native Liquid Glass (iOS 26+, via expo-glass-effect) for the radial
+// menu nodes where available; older iOS/Android keep the BlurView +
+// gradient approximation below. Black tint (same as every other gold-glass
+// surface in the app) regardless of active state — gold lives in the rim
+// border, not the fill. Active/inactive is distinguished by the rim border
+// color and icon brightness instead, below.
+const USE_NATIVE_GLASS = isLiquidGlassAvailable();
+// Deliberately its own constant, not the shared GLASS_TINT_BLACK — this
+// menu's look was confirmed as the reference/"perfect" one, so it's frozen
+// here and doesn't drift if the shared tint used by the rest of the app's
+// buttons gets tuned later.
+const NODE_GLASS_TINT = "rgba(10,10,12,0.55)";
+const NODE_GLASS_TINT_ACTIVE = NODE_GLASS_TINT;
+const NODE_GLASS_TINT_INACTIVE = NODE_GLASS_TINT;
+const NODE_GLASS_METALLIC_FALLBACK = ["#2a2a2c", "#141416", "#050505", "#000000"] as const;
 
 const FONT_SERIF = Platform.select({
   ios: "Georgia",
@@ -72,11 +91,12 @@ type NavNode = {
   label: string;
   onPress: () => void;
   activeKey?: "vpn";
+  locked?: boolean;
 };
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { alias, vpnConnected, panicWipe } = useApp();
+  const { alias, vpnConnected, panicWipe, hasWalletPin } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Decorative ring spin
@@ -257,12 +277,7 @@ export default function HomeScreen() {
     {
       icon: "call-outline",
       label: "CALL",
-      onPress: go(() =>
-        router.push({
-          pathname: "/call",
-          params: { alias: "SECURE_LINE", mode: "voice" },
-        }),
-      ),
+      onPress: go(() => router.push("/(tabs)/calls")),
     },
     {
       icon: "shield-outline",
@@ -274,6 +289,7 @@ export default function HomeScreen() {
       icon: "wallet-outline",
       label: "WALLET",
       onPress: go(() => router.push("/(tabs)/wallet")),
+      locked: hasWalletPin,
     },
     {
       icon: "phone-portrait-outline",
@@ -484,17 +500,58 @@ export default function HomeScreen() {
                       pressed && { opacity: 0.7 },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.nodeCircle,
-                        active && styles.nodeCircleActive,
-                      ]}
-                    >
-                      <Ionicons
-                        name={node.icon}
-                        size={20}
-                        color={active ? "#FFFFFF" : "rgba(255,255,255,0.75)"}
-                      />
+                    <View style={styles.nodeCircleShadow}>
+                      {USE_NATIVE_GLASS ? (
+                        <GlassView
+                          style={[
+                            styles.nodeCircleGlass,
+                            styles.nodeCircleGlassBorder,
+                            active && styles.nodeCircleGlassBorderActive,
+                          ]}
+                          glassEffectStyle="clear"
+                          tintColor={active ? NODE_GLASS_TINT_ACTIVE : NODE_GLASS_TINT_INACTIVE}
+                          isInteractive
+                        >
+                          <SpecularHighlight intensity={0.35} />
+                          <Ionicons
+                            name={node.icon}
+                            size={20}
+                            color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                          />
+                        </GlassView>
+                      ) : (
+                        <View style={styles.nodeCircle}>
+                          <BlurView
+                            intensity={active ? 45 : 32}
+                            tint="dark"
+                            style={StyleSheet.absoluteFill}
+                          />
+                          <LinearGradient
+                            pointerEvents="none"
+                            // Same gradient regardless of active state — see the
+                            // NODE_GLASS_TINT comment above for why.
+                            colors={NODE_GLASS_METALLIC_FALLBACK}
+                            start={{ x: 0.15, y: 0 }}
+                            end={{ x: 0.85, y: 1 }}
+                            style={StyleSheet.absoluteFill}
+                          />
+                          <SpecularHighlight intensity={0.35} />
+                          <View
+                            pointerEvents="none"
+                            style={[styles.nodeCircleRim, active && styles.nodeCircleRimActive]}
+                          />
+                          <Ionicons
+                            name={node.icon}
+                            size={20}
+                            color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                          />
+                        </View>
+                      )}
+                      {node.locked && (
+                        <View style={styles.nodeLockBadge} pointerEvents="none">
+                          <Ionicons name="lock-closed" size={9} color="#000000" />
+                        </View>
+                      )}
                     </View>
                     <Text
                       style={[
@@ -535,19 +592,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     letterSpacing: 8,
     fontWeight: "400" as const,
-    color: "rgba(191,155,48,0.78)",
+    color: "rgba(245,210,107,0.78)",
   },
   aliasDivider: {
     width: 32,
     height: 1,
     marginVertical: 12,
-    backgroundColor: "rgba(191,155,48,0.3)",
+    backgroundColor: "rgba(245,210,107,0.3)",
   },
   aliasTagline: {
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 5,
-    color: "rgba(191,155,48,0.5)",
+    color: "rgba(245,210,107,0.5)",
   },
 
   // Radial dial
@@ -570,7 +627,7 @@ const styles = StyleSheet.create({
     width: 2,
     height: 10,
     borderRadius: 1,
-    backgroundColor: "rgba(191,155,48,0.4)",
+    backgroundColor: "rgba(245,210,107,0.4)",
   },
 
   // Central coin
@@ -596,7 +653,7 @@ const styles = StyleSheet.create({
     top: (196 - 260) / 2,
     left: (196 - 260) / 2,
     borderRadius: 130,
-    backgroundColor: "rgba(191,155,48,0.06)",
+    backgroundColor: "rgba(245,210,107,0.06)",
     boxShadow: boxShadow(GOLD, 0.55, 50),
   },
   // Metallic coin rim — conic-gradient-style gold ring
@@ -606,7 +663,7 @@ const styles = StyleSheet.create({
     borderRadius: 95,
     padding: 5,
     borderWidth: 4,
-    borderColor: "rgba(191,155,48,0.0)", // transparent — visual ring comes from backgroundColor
+    borderColor: "rgba(245,210,107,0.0)", // transparent — visual ring comes from backgroundColor
     backgroundColor: "#c9971c",
     alignItems: "center",
     justifyContent: "center",
@@ -670,7 +727,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 4,
-    color: "rgba(191,155,48,0.6)",
+    color: "rgba(245,210,107,0.6)",
   },
 
   panicWrap: {
@@ -687,6 +744,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   nodeInner: { alignItems: "center", gap: 6 },
+  nodeCircleShadow: {
+    borderRadius: 22,
+    boxShadow: boxShadow("#000000", 0.35, 10, 0, 4),
+  },
   nodeCircle: {
     width: 44,
     height: 44,
@@ -694,12 +755,47 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.07)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
+    overflow: "hidden",
   },
-  nodeCircleActive: {
-    backgroundColor: "rgba(255,255,255,0.16)",
+  // No manual background/border here — GlassView renders its own native
+  // blur and refraction (see nodeCircle's comment-equivalent in
+  // GlassCallButton.tsx for why layering the fallback's tint underneath
+  // would just mute it).
+  nodeCircleGlass: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nodeCircleGlassBorder: {
+    borderWidth: 1,
+    borderColor: GOLD_OUTLINE_COLOR,
+  },
+  nodeCircleGlassBorderActive: {
+    borderColor: "#FFFFFF",
+  },
+  nodeCircleRim: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: GOLD_OUTLINE_COLOR,
+  },
+  nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",
+  },
+  nodeLockBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#F5D26B",
+    borderWidth: 1.5,
+    borderColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
   },
   nodeLabel: {
     fontFamily: FONT_MONO,

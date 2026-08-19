@@ -129,8 +129,56 @@ const CALL_SIGNAL_TYPES = new Set([
 // existing "callee offline" bounce. Polling (not a single timeout) so a
 // reconnect is picked up as soon as it happens rather than waiting out the
 // full window every time.
-const CALL_WAKE_GRACE_MS = 8_000;
+//
+// Must cover the full cold-launch chain on a killed app, not just network
+// delivery: VoIP push -> CallKit shows the native ringing screen -> the
+// human notices and taps Answer -> only THEN does the app cold-launch,
+// mount AppProvider, wire up usePushNotifications' "answerCall" listener,
+// call forceReconnect(), open the WS, and complete auth. The previous 8s
+// budget covered barely any of that — real calls were getting bounced back
+// to the caller as "offline" while the callee's phone was still audibly
+// ringing, before they had a realistic chance to answer. Kept a few
+// seconds under call.tsx's 30s caller-side ring timeout so this bounce
+// fires first rather than racing it.
+const CALL_WAKE_GRACE_MS = 25_000;
 const CALL_WAKE_POLL_MS = 500;
+
+// Call signalling has no concept of "this pair already has a call in
+// progress" — every call-ring is handled as a fully independent attempt,
+// keyed only by its own callId. Without tracking below, rapid repeat
+// call-rings between the same two aliases (manual retries, or a caller
+// re-ringing after a bounce) each get their own VoIP push and their own
+// native CallKit banner on the callee's phone — answering one does nothing
+// to stop the others, which keep ringing/bouncing on their own schedules.
+// This map makes "one call at a time per pair" an actual invariant: a
+// second call-ring for a pair that already has an entry is rejected
+// immediately with a distinct "busy" hangup instead of stacking a parallel
+// attempt on top of the existing one.
+interface ActiveCall {
+  callId: string;
+  caller: string;
+  callee: string;
+  startedAt: number;
+}
+const activeCallsByPair = new Map<string, ActiveCall>();
+
+// Safety valve: if a hangup is ever lost (crash, dropped frame, a future
+// bug in this cleanup) a stuck entry would otherwise block this pair from
+// ever calling each other again. No real call lasts this long, so treat an
+// entry older than this as abandoned and let a new call-ring through.
+const MAX_CALL_AGE_MS = 2 * 60 * 60 * 1000;
+
+function callPairKey(a: string, b: string): string {
+  return [a, b].sort().join(":");
+}
+
+function clearActiveCall(a: string, b: string, callId?: string): void {
+  const key = callPairKey(a, b);
+  const existing = activeCallsByPair.get(key);
+  if (existing && (!callId || existing.callId === callId)) {
+    activeCallsByPair.delete(key);
+  }
+}
 
 async function waitForReconnect(alias: string, timeoutMs: number): Promise<AuthedSocket | null> {
   const deadline = Date.now() + timeoutMs;
@@ -157,12 +205,29 @@ const ghostpadPartners = new Map<string, string>(); // alias -> paired alias
 // just extending that tier to cover presence. Subscriptions are purely
 // in-memory and scoped to "which alias is watching which alias", never
 // persisted, and torn down on unsubscribe or disconnect.
+//
+// Mutual-only by design: there's deliberately no server-side contacts/
+// relationship table anywhere in this app (POST /invites/:code/consume
+// never even records who redeemed a code) — the server is never supposed
+// to learn who talks to whom. So presence can't be gated on "are these two
+// actually in a conversation" the way a normal app would. Instead, alias A
+// only ever learns alias B's online status once B has *also* subscribed to
+// A — a one-directional subscribe (watching someone who doesn't know it)
+// delivers nothing. In practice this only lights up between two people who
+// both have each other's chat open, which is what legitimate use looks
+// like, without the server needing to persist a social graph to enforce it.
 const presenceSubscribers = new Map<string, Set<string>>(); // target alias -> watcher aliases
+const MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET = 200;
+
+function mutuallySubscribed(a: string, b: string): boolean {
+  return !!presenceSubscribers.get(a)?.has(b) && !!presenceSubscribers.get(b)?.has(a);
+}
 
 function notifyPresence(alias: string, online: boolean): void {
   const watchers = presenceSubscribers.get(alias);
   if (!watchers || watchers.size === 0) return;
   for (const watcherAlias of watchers) {
+    if (!mutuallySubscribed(alias, watcherAlias)) continue;
     const watcher = connectedClients.get(watcherAlias);
     if (watcher && watcher.ws.readyState === WebSocket.OPEN) {
       watcher.ws.send(JSON.stringify({ type: "presence", from: alias, online }));
@@ -324,6 +389,14 @@ export function createWsServer(wss: WebSocketServer): void {
     const cleanup = () => {
       if (authedAlias) {
         connectedClients.delete(authedAlias);
+        // A dropped connection mid-call must release its pair lock too,
+        // otherwise this alias can never call (or be called by) the other
+        // party again until the stale entry ages out.
+        for (const [pairKey, call] of activeCallsByPair) {
+          if (call.caller === authedAlias || call.callee === authedAlias) {
+            activeCallsByPair.delete(pairKey);
+          }
+        }
         revokeGhostpadCode(authedAlias);
         endGhostpadSession(authedAlias);
         for (const target of myPresenceSubscriptions) {
@@ -446,6 +519,38 @@ export function createWsServer(wss: WebSocketServer): void {
         const toAlias = normalizeAlias(msg.to);
         let recipient: AuthedSocket | null | undefined = connectedClients.get(toAlias);
 
+        if (msg.type === "call-ring") {
+          const pairKey = callPairKey(authedAlias, toAlias);
+          const existingCall = activeCallsByPair.get(pairKey);
+          if (existingCall && Date.now() - existingCall.startedAt < MAX_CALL_AGE_MS) {
+            // This pair already has a call ringing or in progress (its own
+            // callId, tracked separately) — reject this one immediately
+            // rather than sending a second independent VoIP push/CallKit
+            // banner that would keep ringing after the first is answered.
+            ws.send(
+              JSON.stringify({
+                type: "call-hangup",
+                from: toAlias,
+                callId: msg.callId,
+                payload: "busy",
+              }),
+            );
+            logger.debug(
+              { from: authedAlias, to: toAlias, existingCallId: existingCall.callId },
+              "Call ring rejected: pair already has a call in progress",
+            );
+            return;
+          }
+          activeCallsByPair.set(pairKey, {
+            callId: msg.callId ?? "",
+            caller: authedAlias,
+            callee: toAlias,
+            startedAt: Date.now(),
+          });
+        } else if (msg.type === "call-hangup") {
+          clearActiveCall(authedAlias, toAlias, msg.callId);
+        }
+
         // Callee isn't connected — before giving up, try to wake their device
         // (VoIP push on iOS via CallKit, high-priority data push on Android)
         // and give it a short window to reconnect. If neither push token is
@@ -515,6 +620,7 @@ export function createWsServer(wss: WebSocketServer): void {
             }),
           );
           logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+          clearActiveCall(authedAlias, toAlias, msg.callId);
         }
         return;
       }
@@ -592,11 +698,23 @@ export function createWsServer(wss: WebSocketServer): void {
       // ── Presence: subscribe/unsubscribe to another alias's online status ───
       if (msg.type === "presence-subscribe") {
         if (!msg.to) return;
+        if (myPresenceSubscriptions.size >= MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET) return;
         const targetAlias = normalizeAlias(msg.to);
         if (!presenceSubscribers.has(targetAlias)) presenceSubscribers.set(targetAlias, new Set());
         presenceSubscribers.get(targetAlias)!.add(authedAlias);
         myPresenceSubscriptions.add(targetAlias);
-        ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: connectedClients.has(targetAlias) }));
+        // Mutual-only (see comment on presenceSubscribers above) — a
+        // one-directional subscribe reveals nothing. Once this subscribe
+        // completes reciprocity, tell both sides each other's status; the
+        // other side may have been sitting on a one-directional subscribe
+        // of their own for a while, waiting for exactly this.
+        if (mutuallySubscribed(authedAlias, targetAlias)) {
+          ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: connectedClients.has(targetAlias) }));
+          const target = connectedClients.get(targetAlias);
+          if (target && target.ws.readyState === WebSocket.OPEN) {
+            target.ws.send(JSON.stringify({ type: "presence", from: authedAlias, online: true }));
+          }
+        }
         return;
       }
 

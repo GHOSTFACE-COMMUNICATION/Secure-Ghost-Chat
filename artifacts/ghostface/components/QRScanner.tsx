@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
 import { Ionicons } from "@expo/vector-icons";
 import { WebQRScanner } from "./WebQRScanner";
@@ -157,13 +158,15 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
       paddingHorizontal: 40,
     },
     permBtn: {
-      backgroundColor: colors.primary,
       borderRadius: colors.radius,
+      overflow: "hidden",
+    },
+    permBtnInner: {
       paddingHorizontal: 28,
       paddingVertical: 12,
     },
     permBtnTxt: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800",
       letterSpacing: 3,
@@ -195,7 +198,9 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
             <Ionicons name="camera-outline" size={56} color={colors.mutedForeground} />
             <Text style={styles.permTxt}>Camera access needed to scan QR codes</Text>
             <Pressable style={styles.permBtn} onPress={requestPermission}>
-              <Text style={styles.permBtnTxt}>ALLOW CAMERA</Text>
+              <GoldGradient style={styles.permBtnInner}>
+                <Text style={styles.permBtnTxt}>ALLOW CAMERA</Text>
+              </GoldGradient>
             </Pressable>
           </View>
         ) : (

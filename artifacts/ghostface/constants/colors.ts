@@ -1,24 +1,24 @@
 const colors = {
   dark: {
-    text: "#EDEDED",
-    tint: "#bf9b30",
+    text: "#FFFFFF",
+    tint: "#F5D26B",
 
     background: "#000000",
-    foreground: "#EDEDED",
+    foreground: "#FFFFFF",
 
     card: "#0A0A0A",
-    cardForeground: "#EDEDED",
+    cardForeground: "#FFFFFF",
 
-    primary: "#bf9b30",
+    primary: "#F5D26B",
     primaryForeground: "#000000",
 
     secondary: "#0F0F0F",
-    secondaryForeground: "#EDEDED",
+    secondaryForeground: "#FFFFFF",
 
     muted: "#161616",
     mutedForeground: "#6B6B6B",
 
-    accent: "#bf9b30",
+    accent: "#F5D26B",
     accentForeground: "#000000",
 
     destructive: "#FF3B30",
@@ -28,30 +28,30 @@ const colors = {
     input: "#0F0F0F",
 
     success: "#7dd3fc",
-    warning: "#bf9b30",
-    ghost: "#EDEDED",
+    warning: "#F5D26B",
+    ghost: "#FFFFFF",
   },
 
   light: {
-    text: "#EDEDED",
-    tint: "#bf9b30",
+    text: "#FFFFFF",
+    tint: "#F5D26B",
 
     background: "#000000",
-    foreground: "#EDEDED",
+    foreground: "#FFFFFF",
 
     card: "#0A0A0A",
-    cardForeground: "#EDEDED",
+    cardForeground: "#FFFFFF",
 
-    primary: "#bf9b30",
+    primary: "#F5D26B",
     primaryForeground: "#000000",
 
     secondary: "#0F0F0F",
-    secondaryForeground: "#EDEDED",
+    secondaryForeground: "#FFFFFF",
 
     muted: "#161616",
     mutedForeground: "#6B6B6B",
 
-    accent: "#bf9b30",
+    accent: "#F5D26B",
     accentForeground: "#000000",
 
     destructive: "#FF3B30",
@@ -61,8 +61,8 @@ const colors = {
     input: "#0F0F0F",
 
     success: "#7dd3fc",
-    warning: "#bf9b30",
-    ghost: "#EDEDED",
+    warning: "#F5D26B",
+    ghost: "#FFFFFF",
   },
 
   radius: 6,

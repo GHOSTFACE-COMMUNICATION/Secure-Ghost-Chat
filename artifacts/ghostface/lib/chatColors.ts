@@ -11,14 +11,14 @@
  * per-swatch contrast logic.
  */
 export const CHAT_COLOR_PALETTE: string[] = [
-  "#0A0F14", // slate
-  "#0F0A14", // violet
-  "#0A140F", // forest
-  "#140A0A", // maroon
-  "#14100A", // amber
-  "#0A1414", // teal
-  "#14140A", // olive
-  "#100A14", // indigo
+  "#0A0F16", // slate
+  "#120A1C", // amethyst
+  "#0A1712", // emerald
+  "#1A0A14", // garnet
+  "#160E08", // bronze
+  "#08151A", // petrol
+  "#0A0E1C", // sapphire
+  "#140F1A", // plum
 ];
 
 /**

@@ -1,6 +1,7 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
+import { notifyCallEnded } from "@/hooks/usePushNotifications";
 export { getApiBase } from "@/lib/apiBase";
 import {
   classifyLinkQuality,
@@ -56,9 +57,13 @@ import {
   type RatchetMessage,
 } from "@/lib/doubleRatchet";
 import { x25519, ed25519 } from "@noble/curves/ed25519.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { randomBytes } from "@noble/hashes/utils.js";
+import { keyToRecoveryPhrase, recoveryPhraseToKey } from "@/lib/recoveryPhrase";
 
 const toHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join("");
+const fromHex = (h: string) => Uint8Array.from(h.match(/.{2}/g)!.map(b => parseInt(b, 16)));
 
 function generateHexKeypair(): { pub: string; priv: string } {
   const priv = randomBytes(32);
@@ -544,6 +549,25 @@ export interface IncomingCall {
   mode: "voice" | "video";
 }
 
+/**
+ * Local call-history record. Purely device-side, like Conversation — this
+ * app is metadata-blind (the server never learns who called whom), so each
+ * device builds its own log from the WebRTC signals it directly observed.
+ * A caller and callee therefore each get their own independent entry for
+ * the same call, not a shared/synced one.
+ */
+export interface CallLogEntry {
+  id: string;
+  alias: string;
+  direction: "incoming" | "outgoing";
+  mode: "voice" | "video";
+  outcome: "answered" | "missed" | "declined";
+  timestamp: number;
+  durationSec?: number;
+  /** Cleared when the user views the Calls tab; drives the missed-call badge. */
+  seen: boolean;
+}
+
 interface AppState {
   alias: string | null;
   deviceToken: string | null;
@@ -558,6 +582,7 @@ interface AppState {
   vpnConnected: boolean;
   vpnServer: VPNServer | null;
   conversations: Conversation[];
+  callHistory: CallLogEntry[];
   fdBalance: number;
   casperBalance: number;
   appTokens: AppToken[];
@@ -595,9 +620,14 @@ interface AppContextType extends AppState {
   hasPin: boolean;
   hasDuressPin: boolean;
   hasDecoyPin: boolean;
+  hasWalletPin: boolean;
+  walletUnlocked: boolean;
   decoyMode: boolean;
   loadError: string | null;
   setAlias: (alias: string) => Promise<void>;
+  recoverIdentity: (alias: string, phrase: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Re-derives the recovery phrase for the currently-stored identity key. Null if none. */
+  getRecoveryPhrase: () => Promise<string | null>;
   setPin: (pin: string) => Promise<void>;
   checkPin: (input: string) => Promise<boolean>;
   checkDuressPin: (input: string) => Promise<boolean>;
@@ -609,6 +639,9 @@ interface AppContextType extends AppState {
   clearDuressPin: () => Promise<void>;
   setDecoyPin: (pin: string) => Promise<void>;
   clearDecoyPin: () => Promise<void>;
+  setWalletPin: (pin: string) => Promise<void>;
+  checkWalletPin: (input: string) => Promise<boolean>;
+  clearWalletPin: () => Promise<void>;
   enterDecoyMode: () => void;
   exitDecoyMode: () => void;
   setBiometricEnabled: (enabled: boolean) => Promise<void>;
@@ -641,6 +674,15 @@ interface AppContextType extends AppState {
   refreshEntitlement: () => Promise<void>;
   sendCallSignal: (msg: object) => void;
   registerCallListener: (fn: ((s: CallSignal) => void) | null) => void;
+  logCall: (entry: Omit<CallLogEntry, "id" | "seen">) => void;
+  markCallsSeen: () => void;
+  /**
+   * Forces an immediate WS reconnect attempt, bypassing the backgrounded
+   * gate and any pending reconnect backoff. Used by the CallKeep "answerCall"
+   * path so a call answered before the AppState "active" transition has
+   * fired doesn't sit on a closed socket for the rest of that transition.
+   */
+  forceReconnect: () => void;
   sendGhostpadSignal: (msg: object) => void;
   registerGhostpadListener: (fn: ((s: GhostpadSignal) => void) | null) => void;
   setGhostpadMode: (mode: GhostpadSession["mode"]) => void;
@@ -713,7 +755,9 @@ export { VPN_SERVERS };
 const SECURE_PIN_KEY = "ghostface_pin";
 const SECURE_DURESS_PIN_KEY = "ghostface_duress_pin";
 const SECURE_DECOY_PIN_KEY = "ghostface_decoy_pin";
+const SECURE_WALLET_PIN_KEY = "ghostface_wallet_pin";
 const CONVERSATIONS_KEY = "ghostface_conversations";
+const CALL_HISTORY_KEY = "ghostface_call_history";
 const OUTBOX_KEY = "ghostface_outbox";
 const CONNECTED_WALLET_KEY = "ghostface_connected_wallet";
 const OPK_STORE_KEY = "ghostface_opk_store";
@@ -740,6 +784,7 @@ const APP_STORAGE_KEYS = [
   "isOnboarded",
   "biometricEnabled",
   CONVERSATIONS_KEY,
+  CALL_HISTORY_KEY,
   OUTBOX_KEY,
   CONNECTED_WALLET_KEY,
   OPK_STORE_KEY,
@@ -782,20 +827,47 @@ async function saveOPKStore(store: Record<string, string>): Promise<void> {
  * Signs the SPK with the ikSign private key (Signal X3DH §2.4).
  * Returns the device token and all key material or null on failure.
  */
-async function registerWithServer(
-  userId: string,
-): Promise<{
-  token:        string;
-  ikPriv:       string;
-  ikPub:        string;
-  spkPriv:      string;
-  spkPub:       string;
-  ikSignPriv:   string;
-  ikSignPub:    string;
-  spkSignature: string;
-  pqkemPriv:    string;
-  pqkemPub:     string;
-} | null> {
+type RegisterResult =
+  | {
+      ok: true;
+      token:        string;
+      ikPriv:       string;
+      ikPub:        string;
+      spkPriv:      string;
+      spkPub:       string;
+      ikSignPriv:   string;
+      ikSignPub:    string;
+      spkSignature: string;
+      pqkemPriv:    string;
+      pqkemPub:     string;
+    }
+  // conflict = alias already registered server-side (409, first-writer-wins).
+  // No token was issued and none can be — see the comment on POST
+  // /prekeys/register. Distinct from `error` so callers can tell "this
+  // alias is permanently unusable on this device" apart from "transient
+  // network/server failure, maybe retry."
+  | { ok: false; conflict: boolean };
+
+// Same lookup onboarding.tsx uses to warn about a taken alias before
+// registration — reused here so the mount self-heal path (which sees "no
+// local device token" on every cold start where SecureStore lost the key,
+// not just a genuinely-never-registered alias) can tell "safe to register"
+// apart from "already claimed — registering again would just 409," instead
+// of finding out the hard way via a failed POST /prekeys/register.
+async function checkAliasExists(alias: string): Promise<boolean | null> {
+  const apiBase = getApiBase();
+  if (!apiBase) return null;
+  try {
+    const res = await fetch(`${apiBase}/users/exists/${encodeURIComponent(alias)}`);
+    if (res.status === 404) return false;
+    if (!res.ok) return null;
+    return true;
+  } catch {
+    return null;
+  }
+}
+
+async function registerWithServer(userId: string): Promise<RegisterResult | null> {
   const apiBase = getApiBase();
   if (!apiBase) return null;
   try {
@@ -824,11 +896,12 @@ async function registerWithServer(
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: string };
       console.warn("[REGISTER] Server registration failed:", err.error ?? res.status);
-      return null;
+      return { ok: false, conflict: res.status === 409 };
     }
 
     const data = await res.json() as { token: string; userId: string };
     return {
+      ok:           true,
       token:        data.token,
       ikPriv:       ik.priv,
       ikPub:        ik.pub,
@@ -842,7 +915,7 @@ async function registerWithServer(
     };
   } catch (err) {
     console.warn("[REGISTER] Failed to register with server:", err);
-    return null;
+    return { ok: false, conflict: false };
   }
 }
 
@@ -893,6 +966,121 @@ async function rekeyWithServer(
   } catch (e) {
     console.warn("[REKEY] Failed:", e);
     return null;
+  }
+}
+
+/**
+ * Reclaim an alias using an IK private key recovered from a recovery phrase
+ * — the full-device-loss case rekeyWithServer doesn't cover (that needs a
+ * still-valid Bearer token; this needs none). Two round trips:
+ *   1. /reclaim/challenge — server hands back an ephemeral X25519 public key
+ *      + nonce.
+ *   2. Compute ss = X25519(recoveredIkPriv, serverEphPub), send back
+ *      HMAC-SHA256(ss, nonce) as proof, along with fresh SPK/ikSign/PQKEM
+ *      (the recovered device has none of its own — same as a rekey).
+ * See lib/db's reclaim.ts schema comment for why this proves ownership
+ * without the private key ever crossing the wire.
+ */
+async function reclaimWithServer(
+  userId: string,
+  recoveredIkPrivHex: string,
+): Promise<{
+  ok: true;
+  token: string; deliveryId: string | null;
+  ikPriv: string; ikPub: string;
+  spkPriv: string; spkPub: string;
+  ikSignPriv: string; ikSignPub: string;
+  spkSignature: string;
+  pqkemPriv: string; pqkemPub: string;
+} | { ok: false; error: string }> {
+  const apiBase = getApiBase();
+  if (!apiBase) return { ok: false, error: "server_unreachable" };
+  try {
+    const ikPub = toHex(x25519.getPublicKey(fromHex(recoveredIkPrivHex)));
+
+    const challengeRes = await fetch(
+      `${apiBase}/prekeys/${encodeURIComponent(userId)}/reclaim/challenge`,
+      { method: "POST" },
+    );
+    if (!challengeRes.ok) {
+      return { ok: false, error: challengeRes.status === 404 ? "not_found" : "server_unreachable" };
+    }
+    const challenge = (await challengeRes.json()) as {
+      challengeId: string; serverEphPub: string; nonce: string;
+    };
+
+    const sharedSecret = x25519.getSharedSecret(fromHex(recoveredIkPrivHex), fromHex(challenge.serverEphPub));
+    const proof = toHex(hmac(sha256, sharedSecret, fromHex(challenge.nonce)));
+
+    const spk      = generateHexKeypair();
+    const ikSign   = generateEd25519Keypair();
+    const spkSig   = signSPKLocal(spk.pub, ikSign.priv);
+    const pqkem    = generateKemKeyPair();
+    const pqkemSig = signKemPreKey(pqkem.pub, ikSign.priv);
+
+    const verifyRes = await fetch(
+      `${apiBase}/prekeys/${encodeURIComponent(userId)}/reclaim/verify`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          proof,
+          spkPublicKey:    spk.pub,
+          ikSignPublicKey: ikSign.pub,
+          spkSignature:    spkSig,
+          pqkemPublicKey:  pqkem.pub,
+          pqkemSignature:  pqkemSig,
+        }),
+      },
+    );
+    if (!verifyRes.ok) {
+      return { ok: false, error: verifyRes.status === 403 ? "proof_failed" : "server_unreachable" };
+    }
+    const result = (await verifyRes.json()) as { token: string; deliveryId: string | null };
+
+    return {
+      ok: true,
+      token: result.token,
+      deliveryId: result.deliveryId,
+      ikPriv: recoveredIkPrivHex, ikPub,
+      spkPriv: spk.priv, spkPub: spk.pub,
+      ikSignPriv: ikSign.priv, ikSignPub: ikSign.pub,
+      spkSignature: spkSig,
+      pqkemPriv: pqkem.priv, pqkemPub: pqkem.pub,
+    };
+  } catch (e) {
+    console.warn("[RECLAIM] Failed:", e);
+    return { ok: false, error: "server_unreachable" };
+  }
+}
+
+/**
+ * Releases this device's server-side registration for userId — called from
+ * panicWipe before it wipes the local device token, since that token is the
+ * only proof of ownership the server accepts (no reissue path otherwise; see
+ * DELETE /prekeys/:userId). Best-effort and silent by design: self-destruct
+ * must still fully wipe local state even if this fails (offline, server
+ * down, timeout) — a failed unregister just means the alias stays claimed
+ * server-side until someone can reach the server, it never blocks the wipe.
+ */
+async function unregisterFromServer(userId: string, token: string): Promise<void> {
+  const apiBase = getApiBase();
+  if (!apiBase) return;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(`${apiBase}/prekeys/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) {
+      console.warn("[UNREGISTER] Server unregister failed:", res.status);
+    }
+  } catch (e) {
+    console.warn("[UNREGISTER] Failed:", e);
   }
 }
 
@@ -1171,6 +1359,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [hasPin, setHasPin] = useState(false);
   const [hasDuressPin, setHasDuressPin] = useState(false);
   const [hasDecoyPin, setHasDecoyPin] = useState(false);
+  const [hasWalletPin, setHasWalletPin] = useState(false);
+  // Session-scoped: cleared whenever the app (re)locks, same as the decoy/
+  // duress model — a wallet PIN unlock doesn't outlive the app lock.
+  const [walletUnlocked, setWalletUnlocked] = useState(false);
   // In-memory only, never persisted — a decoy session must leave no trace
   // that distinguishes it from a normal one once the app is force-closed.
   const [decoyMode, setDecoyMode] = useState(false);
@@ -1187,6 +1379,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     vpnConnected: false,
     vpnServer: null,
     conversations: createDefaultConversations(),
+    callHistory: [],
     fdBalance: 0,
     casperBalance: 0,
     appTokens: [],
@@ -1213,14 +1406,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, biometric, onboarded, convData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
           secureGet(SECURE_DECOY_PIN_KEY),
+          secureGet(SECURE_WALLET_PIN_KEY),
           AsyncStorage.getItem("biometricEnabled"),
           AsyncStorage.getItem("isOnboarded"),
           readEncryptedString(CONVERSATIONS_KEY),
+          readEncryptedString(CALL_HISTORY_KEY),
           AsyncStorage.getItem(CONNECTED_WALLET_KEY),
           AsyncStorage.getItem(AUTO_LOCK_TIMEOUT_KEY),
           secureGet(DEVICE_TOKEN_KEY),
@@ -1236,6 +1431,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const hasPinValue = !!pinValue;
         setHasDuressPin(!!duressValue);
         setHasDecoyPin(!!decoyValue);
+        setHasWalletPin(!!walletPinValue);
         const biometricOn = biometric === "true";
         const isOnboarded = onboarded === "true";
 
@@ -1246,6 +1442,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (Array.isArray(parsed)) conversations = parsed;
           } catch (parseErr) {
             console.warn("[AppContext] Failed to parse conversations:", parseErr);
+          }
+        }
+
+        let callHistory: CallLogEntry[] = [];
+        if (callHistoryData) {
+          try {
+            const parsed = JSON.parse(callHistoryData);
+            if (Array.isArray(parsed)) callHistory = parsed;
+          } catch (parseErr) {
+            console.warn("[AppContext] Failed to parse call history:", parseErr);
           }
         }
 
@@ -1359,6 +1565,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           isOnboarded,
           isLocked: true,
           conversations,
+          callHistory,
           connectedWalletAddress: connectedWallet ?? null,
           autoLockTimeout,
           duressGracePeriod,
@@ -1413,9 +1620,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             try {
               const token = await secureGet(DEVICE_TOKEN_KEY);
               if (!token) {
-                console.warn("[AppContext] No device token on mount — re-registering", alias);
+                // "No local token" doesn't distinguish "never registered"
+                // from "registered fine, but the local write got
+                // interrupted" (e.g. setAlias's registration was still
+                // finishing when the app backgrounded/reloaded) — blindly
+                // calling registerWithServer here previously self-inflicted
+                // a 409 on this device's OWN just-claimed alias. Check
+                // first, and only attempt registration when the alias is
+                // confirmed genuinely unclaimed.
+                console.warn("[AppContext] No device token on mount — checking alias state", alias);
+                const exists = await checkAliasExists(alias);
+                if (exists === true) {
+                  console.warn(
+                    "[AppContext] Alias already registered server-side but no local token — " +
+                      "not blindly re-registering (would just 409)",
+                    alias,
+                  );
+                  Alert.alert(
+                    "Device not linked to this alias",
+                    "This alias is already registered on another device or install. " +
+                      "Push notifications, calls, and new messages won't work here until " +
+                      "you create a new alias.",
+                  );
+                  return;
+                }
+                if (exists === null) {
+                  // Couldn't reach the server to check — don't guess either
+                  // way. The next mount (or the WS auth-rejected path once
+                  // connected) gets another chance.
+                  console.warn("[AppContext] Could not determine alias state (offline?) — skipping for now", alias);
+                  return;
+                }
                 const reg = await registerWithServer(alias);
-                if (reg) {
+                if (reg?.ok) {
                   await secureSet(DEVICE_TOKEN_KEY, reg.token);
                   await secureSet(MY_IK_PRIV_KEY,  reg.ikPriv);
                   await secureSet(MY_IK_PUB_KEY,   reg.ikPub);
@@ -1425,6 +1662,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   await secureSet(MY_PQKEM_PUB_KEY,  reg.pqkemPub);
                   setState((prev) => ({ ...prev, deviceToken: reg.token }));
                   await generateAndUploadOPKs(alias, reg.token);
+                } else if (reg && reg.conflict) {
+                  // Alias became taken between our exists-check above and
+                  // this registration call (race). By design (see POST
+                  // /prekeys/register) there is no reissue path — surface
+                  // it instead of failing silently forever, since this
+                  // device can now never send/receive push, upload
+                  // prekeys, or rekey under this alias.
+                  console.warn(
+                    "[AppContext] Alias became unavailable between check and registration (race)",
+                    alias,
+                  );
+                  Alert.alert(
+                    "Device not linked to this alias",
+                    "This alias is already registered on another device or install. " +
+                      "Push notifications, calls, and new messages won't work here until " +
+                      "you create a new alias.",
+                  );
                 }
                 return;
               }
@@ -1489,6 +1743,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const persistCallHistory = useCallback(async (history: CallLogEntry[]) => {
+    try {
+      await writeEncryptedString(CALL_HISTORY_KEY, JSON.stringify(history));
+    } catch (err) {
+      console.warn("[AppContext] Failed to persist call history:", err);
+    }
+  }, []);
+
+  // Capped so an unanswered-call storm (or years of daily use) can't grow
+  // the encrypted blob unboundedly — same idea as conversations, which are
+  // naturally bounded by contact count instead.
+  const MAX_CALL_HISTORY = 200;
+
+  const logCall = useCallback((entry: Omit<CallLogEntry, "id" | "seen">) => {
+    setState((prev) => {
+      const full: CallLogEntry = {
+        ...entry,
+        id: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
+        // Only a missed INCOMING call is something the user could have
+        // "missed" seeing — outgoing/declined/answered never drive the badge.
+        seen: !(entry.direction === "incoming" && entry.outcome === "missed"),
+      };
+      const callHistory = [full, ...prev.callHistory].slice(0, MAX_CALL_HISTORY);
+      persistCallHistory(callHistory);
+      return { ...prev, callHistory };
+    });
+  }, [persistCallHistory]);
+
+  const markCallsSeen = useCallback(() => {
+    setState((prev) => {
+      if (prev.callHistory.every((c) => c.seen)) return prev;
+      const callHistory = prev.callHistory.map((c) => (c.seen ? c : { ...c, seen: true }));
+      persistCallHistory(callHistory);
+      return { ...prev, callHistory };
+    });
+  }, [persistCallHistory]);
+
   const persistOutbox = useCallback((items: OutboxItem[]) => {
     AsyncStorage.setItem(OUTBOX_KEY, JSON.stringify(items)).catch(console.error);
   }, []);
@@ -1501,6 +1792,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // immediate reconnect the moment the app returns to foreground.
   const backgroundedRef = React.useRef(false);
   const reconnectNowRef = React.useRef<(() => void) | null>(null);
+  // Short-lived buffer for call-signal sends (offer/answer/ICE/hangup) made
+  // while the WS is closed, e.g. mid-reconnect after backgrounding. Flushed
+  // on the next successful open; entries older than CALL_SIGNAL_QUEUE_TTL_MS
+  // are dropped there since a stale ICE candidate is worse than a lost one.
+  const pendingCallSignalsRef = React.useRef<Array<{ msg: object; queuedAt: number }>>([]);
   const callSignalListenerRef = React.useRef<((s: CallSignal) => void) | null>(null);
   const ghostpadListenerRef = React.useRef<((s: GhostpadSignal) => void) | null>(null);
   const latestStateRef = React.useRef(state);
@@ -1556,56 +1852,133 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.setItem("alias", alias);
       await AsyncStorage.setItem("isOnboarded", "true");
       setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false }));
-      (async () => {
-        try {
-          const existing = await secureGet(DEVICE_TOKEN_KEY);
-          if (!existing) {
-            const reg = await registerWithServer(alias);
-            if (reg) {
-              await secureSet(DEVICE_TOKEN_KEY, reg.token);
-              await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
-              await secureSet(MY_IK_PUB_KEY, reg.ikPub);
-              await secureSet(MY_SPK_PRIV_KEY, reg.spkPriv);
-              await secureSet(MY_SPK_PUB_KEY, reg.spkPub);
-              await secureSet(MY_PQKEM_PRIV_KEY, reg.pqkemPriv);
-              await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
-              setState((prev) => ({ ...prev, deviceToken: reg.token }));
-              await generateAndUploadOPKs(alias, reg.token);
-            }
-          } else {
-            // Token persisted but in-memory state was never seeded (first
-            // run after onboarding). Hydrate it so screens that need the
-            // bearer token (e.g. GHOST NUMBER) work without a reload.
-            setState((prev) => (prev.deviceToken ? prev : { ...prev, deviceToken: existing }));
-            // Token present — check that own private keys are also stored.
-            // If they're missing (e.g. SecureStore was cleared after a
-            // previous registration), rotate keys on the server so this
-            // device can resume real X3DH sessions.
-            const ikPriv = await secureGet(MY_IK_PRIV_KEY);
-            const pqPriv = await secureGet(MY_PQKEM_PRIV_KEY);
-            if (!ikPriv || !pqPriv) {
-              console.warn("[AppContext] Device token found but own IK/ML-KEM key missing — rekeying");
-              const rekey = await rekeyWithServer(alias, existing);
-              if (rekey) {
-                await secureSet(MY_IK_PRIV_KEY, rekey.ikPriv);
-                await secureSet(MY_IK_PUB_KEY, rekey.ikPub);
-                await secureSet(MY_SPK_PRIV_KEY, rekey.spkPriv);
-                await secureSet(MY_SPK_PUB_KEY, rekey.spkPub);
-                await secureSet(MY_PQKEM_PRIV_KEY, rekey.pqkemPriv);
-                await secureSet(MY_PQKEM_PUB_KEY, rekey.pqkemPub);
-                await generateAndUploadOPKs(alias, existing);
-              }
-            }
-            await generateAndUploadOPKs(alias, existing);
-          }
-        } catch (e) {
-          console.warn("[AppContext] Background registration failed:", e);
-        }
-      })();
     } catch (err) {
       console.error("[AppContext] Failed to save alias:", err);
       throw err;
     }
+    // Awaited (not fire-and-forget) so callers — onboarding — don't navigate
+    // away until this has genuinely finished. Previously this ran in an
+    // un-awaited inner IIFE: onboarding's `await setAlias(...)` resolved as
+    // soon as the AsyncStorage writes above landed, then immediately
+    // navigated while registration was still in flight. If the app
+    // backgrounded/reloaded in that window, the server registration could
+    // have already succeeded (claiming the alias) while the device token
+    // never made it into SecureStore locally — leaving this device with no
+    // proof it registered. The mount self-heal effect below would then see
+    // "no local token" and re-register the same alias, self-inflicting a
+    // 409 "already registered" against an alias this same device had
+    // legitimately just claimed seconds earlier.
+    try {
+      // SecureStore is Keychain-backed on iOS, which survives app
+      // deletion/reinstall — unlike the AsyncStorage "alias"/"isOnboarded"
+      // flags checked above, which get wiped on uninstall. So a device
+      // that self-destructed via reinstall (rather than in-app panicWipe,
+      // which does clear these) comes back here as a "fresh" onboarding
+      // with a brand-new alias, but with the PREVIOUS alias's device
+      // token and identity keys still sitting in Keychain. Left
+      // unchecked, the `existing` check below finds that stale token,
+      // treats this device as already registered, and never calls
+      // registerWithServer for the new alias at all — this device
+      // silently stays bound to the old alias forever. Any SecureStore
+      // identity data at the moment a NEW alias is being set necessarily
+      // belongs to a different identity, so always start clean here.
+      await Promise.all([
+        secureDelete(DEVICE_TOKEN_KEY),
+        secureDelete(MY_IK_PRIV_KEY),
+        secureDelete(MY_IK_PUB_KEY),
+        secureDelete(MY_SPK_PRIV_KEY),
+        secureDelete(MY_SPK_PUB_KEY),
+        secureDelete(MY_PQKEM_PRIV_KEY),
+        secureDelete(MY_PQKEM_PUB_KEY),
+      ]);
+      const reg = await registerWithServer(alias);
+      if (reg?.ok) {
+        await secureSet(DEVICE_TOKEN_KEY, reg.token);
+        await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
+        await secureSet(MY_IK_PUB_KEY, reg.ikPub);
+        await secureSet(MY_SPK_PRIV_KEY, reg.spkPriv);
+        await secureSet(MY_SPK_PUB_KEY, reg.spkPub);
+        await secureSet(MY_PQKEM_PRIV_KEY, reg.pqkemPriv);
+        await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
+        setState((prev) => ({ ...prev, deviceToken: reg.token }));
+        await generateAndUploadOPKs(alias, reg.token);
+      } else if (reg && reg.conflict) {
+        // Alias was taken between onboarding's availability check and
+        // this registration call (race, or a stale check). No token
+        // was issued, so this device's identity keys were never
+        // actually registered — the user is left "onboarded" but
+        // silently unable to message/call/receive push until they
+        // notice and pick a different alias.
+        console.warn(
+          "[AppContext] Alias became unavailable during registration (race) — no identity registered",
+          alias,
+        );
+        Alert.alert(
+          "Alias already taken",
+          "Someone just registered this alias. Please go back and choose a different one — " +
+            "messaging, calls, and notifications won't work until you do.",
+        );
+      }
+    } catch (e) {
+      console.warn("[AppContext] Background registration failed:", e);
+    }
+  }, []);
+
+  /**
+   * Recover an identity from its alias + a 24-word recovery phrase — for a
+   * device with no local keys and no device token (the case setAlias's
+   * fresh-registration path and rekeyWithServer's still-has-a-token path
+   * both miss). Unlike setAlias, this returns a real result: recovery is an
+   * explicit, one-shot user action that needs synchronous success/failure
+   * feedback, not fire-and-forget background registration.
+   */
+  const recoverIdentity = useCallback(async (
+    alias: string,
+    phrase: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const recoveredIkPriv = recoveryPhraseToKey(phrase);
+    if (!recoveredIkPriv) {
+      return { ok: false, error: "invalid_phrase" };
+    }
+
+    // Same defensive clear as setAlias — any local SecureStore identity
+    // material at this point belongs to whatever was previously on this
+    // device, not the identity about to be recovered.
+    await Promise.all([
+      secureDelete(DEVICE_TOKEN_KEY),
+      secureDelete(MY_IK_PRIV_KEY),
+      secureDelete(MY_IK_PUB_KEY),
+      secureDelete(MY_SPK_PRIV_KEY),
+      secureDelete(MY_SPK_PUB_KEY),
+      secureDelete(MY_PQKEM_PRIV_KEY),
+      secureDelete(MY_PQKEM_PUB_KEY),
+    ]);
+
+    const result = await reclaimWithServer(alias, recoveredIkPriv);
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+
+    await secureSet(DEVICE_TOKEN_KEY, result.token);
+    await secureSet(MY_IK_PRIV_KEY, result.ikPriv);
+    await secureSet(MY_IK_PUB_KEY, result.ikPub);
+    await secureSet(MY_SPK_PRIV_KEY, result.spkPriv);
+    await secureSet(MY_SPK_PUB_KEY, result.spkPub);
+    await secureSet(MY_PQKEM_PRIV_KEY, result.pqkemPriv);
+    await secureSet(MY_PQKEM_PUB_KEY, result.pqkemPub);
+
+    await AsyncStorage.setItem("alias", alias);
+    await AsyncStorage.setItem("isOnboarded", "true");
+    setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false, deviceToken: result.token }));
+
+    await generateAndUploadOPKs(alias, result.token);
+    return { ok: true };
+  }, []);
+
+  const getRecoveryPhrase = useCallback(async (): Promise<string | null> => {
+    const ikPriv = await secureGet(MY_IK_PRIV_KEY);
+    if (!ikPriv) return null;
+    return keyToRecoveryPhrase(ikPriv);
   }, []);
 
   const setPin = useCallback(async (pin: string) => {
@@ -1694,6 +2067,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setHasDecoyPin(false);
     } catch (err) {
       console.error("[AppContext] Failed to clear decoy PIN:", err);
+      throw err;
+    }
+  }, []);
+
+  const setWalletPin = useCallback(async (pin: string) => {
+    try {
+      await secureSet(SECURE_WALLET_PIN_KEY, pin);
+      setHasWalletPin(true);
+      // Setting/changing the PIN counts as unlocking — don't immediately
+      // re-prompt for the PIN you just typed.
+      setWalletUnlocked(true);
+    } catch (err) {
+      console.error("[AppContext] Failed to save wallet PIN:", err);
+      throw err;
+    }
+  }, []);
+
+  const checkWalletPin = useCallback(async (input: string): Promise<boolean> => {
+    try {
+      const stored = await secureGet(SECURE_WALLET_PIN_KEY);
+      const correct = stored !== null && stored === input;
+      if (correct) setWalletUnlocked(true);
+      return correct;
+    } catch (err) {
+      console.error("[AppContext] Failed to check wallet PIN:", err);
+      return false;
+    }
+  }, []);
+
+  const clearWalletPin = useCallback(async () => {
+    try {
+      await secureDelete(SECURE_WALLET_PIN_KEY);
+      setHasWalletPin(false);
+      setWalletUnlocked(false);
+    } catch (err) {
+      console.error("[AppContext] Failed to clear wallet PIN:", err);
       throw err;
     }
   }, []);
@@ -1831,6 +2240,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setLocked = useCallback((locked: boolean) => {
     setState((prev) => ({ ...prev, isLocked: locked }));
+    // A wallet-PIN unlock is scoped to this app-unlock session — the next
+    // time the app locks (auto-lock, manual lock, backgrounding), the
+    // wallet screen must ask again.
+    if (locked) setWalletUnlocked(false);
   }, []);
 
   const setAutoLockTimeout = useCallback(async (ms: number | null) => {
@@ -2717,12 +3130,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // Release the alias server-side while we still hold a valid device
+    // token to prove ownership — this must happen before the SecureStore
+    // wipe below deletes that token. See unregisterFromServer for why:
+    // without this, re-registering the same alias after self-destructing
+    // always 409s, since the server otherwise has no way to reissue it.
+    {
+      const currentAlias = latestStateRef.current.alias;
+      const currentToken = await secureGet(DEVICE_TOKEN_KEY);
+      if (currentAlias && currentToken) {
+        await unregisterFromServer(currentAlias, currentToken);
+      }
+    }
+
     try {
       await Promise.all([
         ...APP_STORAGE_KEYS.map((k) => AsyncStorage.removeItem(k)),
         secureDelete(SECURE_PIN_KEY),
         secureDelete(SECURE_DURESS_PIN_KEY),
         secureDelete(SECURE_DECOY_PIN_KEY),
+        secureDelete(SECURE_WALLET_PIN_KEY),
         secureDelete(DEVICE_TOKEN_KEY),
         secureDelete(MY_IK_PRIV_KEY),
         secureDelete(MY_IK_PUB_KEY),
@@ -2752,6 +3179,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setHasPin(false);
     setHasDuressPin(false);
     setHasDecoyPin(false);
+    setHasWalletPin(false);
+    setWalletUnlocked(false);
     setDecoyMode(false);
     setState({
       alias: null,
@@ -2763,6 +3192,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vpnConnected: false,
       vpnServer: null,
       conversations: [],
+      callHistory: [],
       fdBalance: 0,
       casperBalance: 0,
       appTokens: [],
@@ -2790,6 +3220,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify(msg));
+    } else {
+      pendingCallSignalsRef.current.push({ msg, queuedAt: Date.now() });
+      console.warn(
+        `[CallSignal] WS not open (readyState=${ws?.readyState ?? "none"}) — queued signal:`,
+        msg,
+      );
+    }
+  }, []);
+
+  // Signals queued by sendCallSignal while the WS was closed. Must be
+  // flushed only once the server has actually ack'd auth (see the "ack"
+  // branch in handleIncomingWsMessage below) — api-server's ws/manager.ts
+  // awaits validateToken() before setting authedAlias, so anything sent
+  // right after ws.onopen can still race that await and get rejected
+  // server-side with "not authenticated", silently dropped rather than
+  // relayed. Flushing on the ack means the socket is provably authed first.
+  const CALL_SIGNAL_QUEUE_TTL_MS = 15_000;
+  const flushPendingCallSignals = useCallback(() => {
+    const ws = wsRef.current;
+    const queued = pendingCallSignalsRef.current;
+    pendingCallSignalsRef.current = [];
+    const now = Date.now();
+    for (const { msg, queuedAt } of queued) {
+      const age = now - queuedAt;
+      // A hangup is exempt from the TTL: it's still meaningful arbitrarily
+      // late (worst case the receiver's incoming-call UI dismisses a bit
+      // late), whereas dropping it leaves that UI — CallKit's native banner
+      // or our in-app overlay — stuck showing a call that's actually over.
+      // Everything else here (offers/answers/ICE candidates) really is
+      // useless once stale, so those keep the cutoff.
+      const msgType = (msg as { type?: string }).type;
+      if (msgType !== "call-hangup" && age > CALL_SIGNAL_QUEUE_TTL_MS) {
+        console.warn(`[CallSignal] Dropping stale queued signal (${age}ms old):`, msg);
+        continue;
+      }
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify(msg));
+      } else {
+        console.warn("[CallSignal] Dropping queued signal — socket not open at flush time:", msg);
+      }
     }
   }, []);
 
@@ -3175,6 +3645,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       linkStatsRef.current.reconnectingSince = 0;
       recomputeLinkQuality();
       drainOutbox().catch(console.error);
+      flushPendingCallSignals();
       return;
     }
 
@@ -3276,6 +3747,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...prev,
           incomingCall: { callId: wsMsg.callId ?? "unknown", from: wsMsg.from!.toUpperCase(), mode: (wsMsg.callMode as "voice" | "video") ?? "voice" },
         }));
+      } else if (wsMsg.type === "call-hangup" && !callSignalListenerRef.current) {
+        // The caller cancelled/gave up before we (the callee) answered —
+        // call.tsx never mounted, so there's no listener to forward to.
+        // callSignalListenerRef being null is exactly how we tell this apart
+        // from a remote-hangup on an in-progress call, which call.tsx handles
+        // itself once mounted (registerCallListener(null) on its unmount is
+        // what clears this ref). Clear the incoming-call banner if it's still
+        // showing this call, and tell CallKit — it may have a CXCall pending
+        // from a VoIP push for the same callId.
+        const pendingIncoming =
+          latestStateRef.current.incomingCall?.callId === wsMsg.callId
+            ? latestStateRef.current.incomingCall
+            : null;
+        if (pendingIncoming) {
+          setState((prev) => ({ ...prev, incomingCall: null }));
+        }
+        if (wsMsg.callId) notifyCallEnded(wsMsg.callId, "unanswered");
+        logCall({
+          alias: (pendingIncoming?.from ?? wsMsg.from).toUpperCase(),
+          direction: "incoming",
+          mode: pendingIncoming?.mode ?? "voice",
+          outcome: "missed",
+          timestamp: Date.now(),
+        });
       } else {
         callSignalListenerRef.current?.({ type: wsMsg.type, from: wsMsg.from.toUpperCase(), payload: wsMsg.payload, callId: wsMsg.callId, callMode: wsMsg.callMode });
       }
@@ -3643,7 +4138,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, conversations: updated };
       });
     }
-  }, [persistConversations, drainOutbox]);
+  }, [persistConversations, drainOutbox, flushPendingCallSignals]);
 
   useEffect(() => {
     const alias = state.alias;
@@ -3759,17 +4254,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 // Capture alias as a local const so TypeScript can narrow the type
                 // from string | null to string across the async boundary.
                 const currentAlias: string = alias;
-                await Promise.all([
-                  secureDelete(DEVICE_TOKEN_KEY),
-                  secureDelete(MY_IK_PRIV_KEY),
-                  secureDelete(MY_IK_PUB_KEY),
-                  secureDelete(MY_SPK_PRIV_KEY),
-                  secureDelete(MY_SPK_PUB_KEY),
-                  secureDelete(MY_PQKEM_PRIV_KEY),
-                  secureDelete(MY_PQKEM_PUB_KEY),
-                ]);
+                // Don't delete the old device token / private keys up front.
+                // Re-register FIRST, and only overwrite local storage once a
+                // replacement actually exists. If registration fails (409
+                // conflict, or the server/network is just down), the old
+                // keys are still what let this device decrypt any messages
+                // it already has locally — destroying them speculatively on
+                // every transient auth hiccup made that loss permanent and
+                // unrecoverable even when the failure was temporary.
                 const reg = await registerWithServer(currentAlias);
-                if (reg && mounted) {
+                if (reg?.ok && mounted) {
                   await secureSet(DEVICE_TOKEN_KEY, reg.token);
                   await secureSet(MY_IK_PRIV_KEY, reg.ikPriv);
                   await secureSet(MY_IK_PUB_KEY, reg.ikPub);
@@ -3780,9 +4274,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   await generateAndUploadOPKs(currentAlias, reg.token);
                   reconnectTimer = setTimeout(connect, 1000);
                 } else if (mounted) {
-                  // Alias taken on server (409) or server unreachable — back off
-                  console.warn("[WS] Re-registration failed — retrying in 15 s");
-                  reconnectTimer = setTimeout(connect, 15_000);
+                  if (reg && !reg.ok && reg.conflict) {
+                    // Alias is registered server-side under a different
+                    // device token than the one we just failed to auth
+                    // with — this device can't recover push/session
+                    // capability for it. Local keys are left untouched
+                    // (still needed to read anything already received).
+                    console.warn(
+                      "[WS] Re-registration conflict — alias is bound to a different device token",
+                      currentAlias,
+                    );
+                    Alert.alert(
+                      "Device not linked to this alias",
+                      "This alias is registered on another device or install. " +
+                        "Push notifications, calls, and new messages won't work here until " +
+                        "you create a new alias.",
+                    );
+                    // A 409 conflict is permanent, not transient — retrying
+                    // on a timer would just resend the same rejected token
+                    // and re-trigger this exact branch, alert included,
+                    // every 15s forever. Stay disconnected instead; the
+                    // normal connect effect picks back up if alias changes.
+                  } else {
+                    console.warn("[WS] Re-registration failed — retrying in 15 s");
+                    reconnectTimer = setTimeout(connect, 15_000);
+                  }
                 }
               } catch {
                 if (mounted) reconnectTimer = setTimeout(connect, 10_000);
@@ -3818,6 +4334,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state.alias, state.isLocked, state.isOnboarded, handleIncomingWsMessage]);
 
+  // Shared by the AppState "active" transition below and by the CallKeep
+  // "answerCall" path (wired through usePushNotifications -> RootNavigator,
+  // since backgroundedRef/reconnectNowRef aren't otherwise reachable outside
+  // this provider). Answering a call via CallKit can happen before RN's JS
+  // side has observed the "active" transition, so that path needs to force
+  // this synchronously instead of waiting on the AppState listener.
+  const forceReconnect = useCallback(() => {
+    backgroundedRef.current = false;
+    if (!wsRef.current || wsRef.current.readyState !== 1) {
+      reconnectNowRef.current?.();
+    }
+  }, []);
+
   // Close the WS explicitly the moment the app backgrounds. Without this,
   // backgrounding/closing the app never sends a clean close frame — the
   // server has to wait out its own ~30-60s heartbeat timeout to notice the
@@ -3837,14 +4366,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         backgroundedRef.current = true;
         if (wsRef.current) wsRef.current.close();
       } else if (next === "active") {
-        backgroundedRef.current = false;
-        if (!wsRef.current || wsRef.current.readyState !== 1) {
-          reconnectNowRef.current?.();
-        }
+        forceReconnect();
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [forceReconnect]);
 
   return (
     <AppContext.Provider
@@ -3853,9 +4379,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         hasPin,
         hasDuressPin,
         hasDecoyPin,
+        hasWalletPin,
+        walletUnlocked,
         decoyMode,
         loadError,
         setAlias,
+        recoverIdentity,
+        getRecoveryPhrase,
         setPin,
         checkPin,
         checkDuressPin,
@@ -3867,6 +4397,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         clearDuressPin,
         setDecoyPin,
         clearDecoyPin,
+        setWalletPin,
+        checkWalletPin,
+        clearWalletPin,
         enterDecoyMode,
         exitDecoyMode,
         setBiometricEnabled,
@@ -3887,6 +4420,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         verifyConversation,
         sendCallSignal,
         registerCallListener,
+        logCall,
+        markCallsSeen,
+        forceReconnect,
         sendGhostpadSignal,
         registerGhostpadListener,
         presence,

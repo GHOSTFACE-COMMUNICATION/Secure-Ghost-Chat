@@ -28,7 +28,33 @@ const DELEGATE_METHODS = `
     completion: @escaping () -> Void
   ) {
     RNVoipPushNotificationManager.didReceiveIncomingPush(with: payload, forType: type.rawValue)
-    completion()
+
+    // Apple requires CallKit to be told about this call before completion()
+    // returns — reporting from JS is too slow on a cold, killed-app launch
+    // (fonts, AppContext, CallKeep.setup() all have to run first), and iOS
+    // kills the app when the report doesn't land in time (repeated misses
+    // can get VoIP push delivery revoked entirely). Reported natively here
+    // instead; usePushNotifications.ts still calls displayIncomingCall for
+    // the warm-app case, which CallKit dedupes against this by UUID.
+    let dict = payload.dictionaryPayload
+    let callId = (dict["callId"] as? String) ?? UUID().uuidString
+    let from = (dict["from"] as? String) ?? "Unknown"
+    let hasVideo = (dict["callMode"] as? String) == "video"
+
+    RNCallKeep.reportNewIncomingCall(
+      callId,
+      handle: from,
+      handleType: "generic",
+      hasVideo: hasVideo,
+      localizedCallerName: from,
+      supportsHolding: true,
+      supportsDTMF: true,
+      supportsGrouping: false,
+      supportsUngrouping: false,
+      fromPushKit: true,
+      payload: nil,
+      withCompletionHandler: completion
+    )
   }
 `;
 
@@ -88,8 +114,10 @@ function withVoipPushKitBridgingHeader(config) {
         if (!contents.includes("RNVoipPushNotificationManager.h")) {
           fs.writeFileSync(
             bridgingHeaderPath,
-            contents + `\n#import <PushKit/PushKit.h>\n#import "RNVoipPushNotificationManager.h"\n`,
+            contents + `\n#import <PushKit/PushKit.h>\n#import "RNVoipPushNotificationManager.h"\n#import "RNCallKeep.h"\n`,
           );
+        } else if (!contents.includes("RNCallKeep.h")) {
+          fs.writeFileSync(bridgingHeaderPath, contents + `\n#import "RNCallKeep.h"\n`);
         }
       }
       return config;

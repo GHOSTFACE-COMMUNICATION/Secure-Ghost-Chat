@@ -13,7 +13,7 @@ import {
   normalizeE164,
   parseStoredNumbers,
   sanitizeFallbackMessage,
-} from "./smsFallback";
+} from "./smsFallback.ts";
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);

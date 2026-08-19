@@ -275,6 +275,152 @@ export interface RatchetMessage {
   ciphertext: string; // hex: 12-byte nonce + ChaCha20-Poly1305 ciphertext
 }
 
+// ── Canonical AEAD associated data ─────────────────────────────────────────────
+//
+// The ratchet binds each message to its header by passing the header as AEAD
+// associated data (see aeadEncrypt/aeadDecrypt above). Previously this was
+// `strToBytes(JSON.stringify(header))` — deterministic in practice for this
+// single JS implementation (a plain object with a fixed, small key set
+// round-trips through JSON.stringify identically every time), but not a
+// sound long-term invariant: a second implementation in another language, or
+// an incidental object-spread that reorders keys, could silently produce a
+// different AD for what should be an identical header. There is no known
+// exploit today — this is a hygiene / future-proofing fix, not a patched
+// vulnerability. Full writeup in docs/PROTOCOL.md.
+//
+// encodeHeaderAD() replaces it with a fixed, self-describing binary layout:
+// fixed field order, fixed integer widths, big-endian, raw bytes (not hex
+// strings) for key material, and explicit presence+length framing for the
+// optional PQ fields so a field is NEVER simply omitted. One function, used
+// identically by both ratchetEncrypt and ratchetDecrypt.
+//
+//   offset  size  content
+//   0       4     magic = "GFDR"
+//   4       1     protocol_version = 0x01
+//   5       1     field_count = 0x05
+//   6       1     field_id 0x01 (DH)
+//   7       32    dh — raw X25519 pubkey (mandatory, fixed width)
+//   39      1     field_id 0x02 (N)
+//   40      4     n — u32BE
+//   44      1     field_id 0x03 (PN)
+//   45      4     pn — u32BE
+//   49      1     field_id 0x04 (PQPUB)
+//   50      1     presence (0x00 | 0x01)
+//   51      2     length u16BE (0x0000 if absent)
+//   53      len   pqPub — raw ML-KEM-768 pubkey (0 bytes if absent)
+//   ...     1     field_id 0x05 (PQCT)
+//   ...     1     presence (0x00 | 0x01)
+//   ...     2     length u16BE (0x0000 if absent)
+//   ...     len   pqCt — raw ML-KEM ciphertext (0 bytes if absent)
+
+const AD_MAGIC = new Uint8Array([0x47, 0x46, 0x44, 0x52]); // "GFDR"
+const AD_PROTOCOL_VERSION = 0x01;
+const AD_FIELD_COUNT = 0x05;
+
+const AD_FIELD_DH = 0x01;
+const AD_FIELD_N = 0x02;
+const AD_FIELD_PN = 0x03;
+const AD_FIELD_PQPUB = 0x04;
+const AD_FIELD_PQCT = 0x05;
+
+/**
+ * Strict hex → bytes for AD-bound key material. Unlike the general-purpose
+ * fromHex() above (used pervasively elsewhere in this file and lenient —
+ * parseInt() silently turns invalid input into NaN → a corrupted byte,
+ * never a thrown error), this rejects anything that isn't exactly
+ * `expectedBytes` of strictly-lowercase [0-9a-f]. Uppercase hex is valid hex
+ * representing the SAME bytes a different way — accepting both is exactly
+ * the encoding ambiguity this fix exists to close, so it's rejected
+ * outright rather than normalised.
+ */
+function strictHexToBytes(hex: string, expectedBytes: number, fieldName: string): Uint8Array {
+  if (hex.length !== expectedBytes * 2) {
+    throw new Error(`[DR] AD: ${fieldName} must be ${expectedBytes * 2} hex chars, got ${hex.length}`);
+  }
+  if (!/^[0-9a-f]*$/.test(hex)) {
+    throw new Error(`[DR] AD: ${fieldName} must be strictly lowercase [0-9a-f] hex`);
+  }
+  const out = new Uint8Array(expectedBytes);
+  for (let i = 0; i < expectedBytes; i++) {
+    out[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/**
+ * Encode a u32 as 4 big-endian bytes. Throws on non-integer, negative, or
+ * > 0xFFFFFFFF — never silently truncates.
+ */
+function writeU32BE(n: number, fieldName: string): Uint8Array {
+  if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) {
+    throw new Error(`[DR] AD: ${fieldName} must be an integer in [0, 0xFFFFFFFF], got ${n}`);
+  }
+  return new Uint8Array([(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
+}
+
+/** Encode a u16 length as 2 big-endian bytes. Caller guarantees n fits (byte-array lengths here are bounded by PQKEM sizes, well under 0xFFFF). */
+function writeU16BE(n: number): Uint8Array {
+  return new Uint8Array([(n >>> 8) & 0xff, n & 0xff]);
+}
+
+/**
+ * Canonical binary encoding of a RatchetHeader for use as AEAD associated
+ * data — see the layout comment above. Called identically from both
+ * ratchetEncrypt (trusted, locally-built header) and ratchetDecrypt
+ * (untrusted, wire-received header): every field is validated before any
+ * bytes are written, so a malformed wire header throws HERE — before the
+ * result is ever handed to aeadDecrypt as AD — rather than silently
+ * producing a wrong-but-valid-looking AD buffer that would only surface as
+ * a MAC failure later. magic/protocol_version/field_count are written as
+ * fixed constants (never read from the input), so there is no path by which
+ * any caller, trusted or not, can make this function emit a mismatched
+ * prefix; the trailing self-check asserts that invariant explicitly at the
+ * one function both encrypt and decrypt funnel through, rather than leaving
+ * it as an implicit assumption on the decode side.
+ */
+export function encodeHeaderAD(header: RatchetHeader): Uint8Array {
+  const dh = strictHexToBytes(header.dh, 32, "dh");
+  const n  = writeU32BE(header.n, "n");
+  const pn = writeU32BE(header.pn, "pn");
+
+  const hasPqPub   = header.pqPub !== undefined;
+  const pqPubBytes = hasPqPub ? strictHexToBytes(header.pqPub!, PQKEM_PUBLIC_BYTES, "pqPub") : new Uint8Array(0);
+
+  const hasPqCt   = header.pqCt !== undefined;
+  const pqCtBytes = hasPqCt ? strictHexToBytes(header.pqCt!, PQKEM_CIPHERTEXT_BYTES, "pqCt") : new Uint8Array(0);
+
+  const parts: Uint8Array[] = [
+    AD_MAGIC,
+    new Uint8Array([AD_PROTOCOL_VERSION, AD_FIELD_COUNT]),
+    new Uint8Array([AD_FIELD_DH]), dh,
+    new Uint8Array([AD_FIELD_N]), n,
+    new Uint8Array([AD_FIELD_PN]), pn,
+    new Uint8Array([AD_FIELD_PQPUB, hasPqPub ? 1 : 0]), writeU16BE(pqPubBytes.length), pqPubBytes,
+    new Uint8Array([AD_FIELD_PQCT, hasPqCt ? 1 : 0]), writeU16BE(pqCtBytes.length), pqCtBytes,
+  ];
+
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) { out.set(p, offset); offset += p.length; }
+
+  // Decode-side hard-reject: magic/version/field_count are constants we just
+  // wrote ourselves, so this can never actually fire today — it enforces
+  // the invariant explicitly, at the single chokepoint ratchetDecrypt's
+  // wire-derived headers pass through, rather than relying on it implicitly.
+  if (out[0] !== AD_MAGIC[0] || out[1] !== AD_MAGIC[1] || out[2] !== AD_MAGIC[2] || out[3] !== AD_MAGIC[3]) {
+    throw new Error("[DR] AD: magic mismatch — refusing to build associated data");
+  }
+  if (out[4] !== AD_PROTOCOL_VERSION) {
+    throw new Error("[DR] AD: protocol_version mismatch — refusing to build associated data");
+  }
+  if (out[5] !== AD_FIELD_COUNT) {
+    throw new Error("[DR] AD: field_count mismatch — refusing to build associated data");
+  }
+
+  return out;
+}
+
 interface RatchetState {
   DHs:       DHKeyPair;
   DHr:       Uint8Array | null;
@@ -557,7 +703,7 @@ export function ratchetEncrypt(
   if (s.pq && s.PQs) header.pqPub = s.PQs.pub;
   if (s.pq && s.pendingPqCt && s.Ns < PQ_CT_RESEND_WINDOW) header.pqCt = s.pendingPqCt;
 
-  const ad         = strToBytes(JSON.stringify(header));
+  const ad         = encodeHeaderAD(header);
   const ciphertext = aeadEncrypt(mk, padPlaintext(plaintext), ad);
 
   s.CKs = newCKs;
@@ -650,7 +796,7 @@ export function ratchetDecrypt(
   const s  = deserializeState(serialized);
   const { header, ciphertext: ctHex } = message;
   const ct = fromHex(ctHex);
-  const ad = strToBytes(JSON.stringify(header));
+  const ad = encodeHeaderAD(header);
 
   // 1. Try a cached skipped-message key
   const fromSkip = trySkippedKey(s, header, ct, ad);
@@ -791,14 +937,18 @@ export function initSessionAliceWithHeader(
 ): { session: DRSession; x3dhHeader: X3DHHeader } {
   // ── SPK signature verification (Signal X3DH §2.4) ─────────────────────────
   // Must verify before performing any DH operations. An invalid signature means
-  // the server returned a tampered bundle — reject immediately.
-  if (bundle.spkSignature && bundle.ikSignPublicKey) {
-    const valid = verifySPKSignature(bundle.spkPublicKey, bundle.spkSignature, bundle.ikSignPublicKey);
-    if (!valid) {
-      throw new Error("[X3DH] SPK signature verification FAILED — bundle rejected (possible MITM)");
-    }
-  } else {
-    console.warn("[X3DH] Bundle has no SPK signature — proceeding without MITM protection (legacy registration)");
+  // the server returned a tampered bundle — reject immediately. Strict, like the
+  // ML-KEM check below: GET /prekeys/:userId/bundle is unauthenticated by design,
+  // so a compromised/malicious server can freely omit these two fields from what
+  // it serves regardless of what was actually registered — silently proceeding
+  // without verification here would hand it exactly the MITM this check exists
+  // to prevent.
+  if (!bundle.spkSignature || !bundle.ikSignPublicKey) {
+    throw new Error("[X3DH] Bundle has no SPK signature — bundle rejected (possible MITM)");
+  }
+  const validSpk = verifySPKSignature(bundle.spkPublicKey, bundle.spkSignature, bundle.ikSignPublicKey);
+  if (!validSpk) {
+    throw new Error("[X3DH] SPK signature verification FAILED — bundle rejected (possible MITM)");
   }
 
   const IK_A: DHKeyPair = { priv: fromHex(myIKPriv), pub: fromHex(myIKPub) };

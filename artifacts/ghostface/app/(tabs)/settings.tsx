@@ -95,6 +95,7 @@ export default function SettingsScreen() {
     biometricEnabled,
     hasDuressPin,
     hasDecoyPin,
+    hasWalletPin,
     autoLockTimeout,
     duressGracePeriod,
     language,
@@ -117,6 +118,9 @@ export default function SettingsScreen() {
     clearDuressPin,
     setDecoyPin,
     clearDecoyPin,
+    setWalletPin,
+    clearWalletPin,
+    getRecoveryPhrase,
     setLocked,
     panicWipe,
     setAutoLockTimeout,
@@ -268,6 +272,16 @@ export default function SettingsScreen() {
   const [decoyPinConfirm, setDecoyPinConfirm] = useState("");
   const [decoyPinError, setDecoyPinError] = useState("");
   const [decoyPinSaved, setDecoyPinSaved] = useState(false);
+  const [showWalletPin, setShowWalletPin] = useState(false);
+  const [walletPin, setWalletPinInput] = useState("");
+  const [walletPinConfirm, setWalletPinConfirm] = useState("");
+  const [walletPinError, setWalletPinError] = useState("");
+  const [walletPinSaved, setWalletPinSaved] = useState(false);
+  const [showRecoveryPhrase, setShowRecoveryPhrase] = useState(false);
+  const [recoveryPhraseStage, setRecoveryPhraseStage] = useState<"pin" | "phrase">("pin");
+  const [recoveryPinInput, setRecoveryPinInput] = useState("");
+  const [recoveryPinError, setRecoveryPinError] = useState("");
+  const [recoveryPhraseValue, setRecoveryPhraseValue] = useState("");
 
   // ── Satellite SMS fallback (Task #113) ───────────────────────────────────
   const [showSmsFallback, setShowSmsFallback] = useState(false);
@@ -489,6 +503,64 @@ export default function SettingsScreen() {
     setDecoyPinError("");
   };
 
+  const handleWalletPinSave = async () => {
+    if (walletPin.length < 4) {
+      setWalletPinError("Minimum 4 digits");
+      return;
+    }
+    if (walletPin !== walletPinConfirm) {
+      setWalletPinError("PINs do not match");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    // Not a hard requirement like decoy/duress (which share the main lock
+    // screen's entry field and would be genuinely ambiguous) — the wallet
+    // PIN has its own dedicated entry screen. But a wallet PIN identical to
+    // the main PIN adds no real protection, so still guard against it.
+    const matchesMain = await checkPin(walletPin);
+    if (matchesMain) {
+      setWalletPinError("WALLET PIN CANNOT MATCH YOUR MAIN PIN");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    await setWalletPin(walletPin);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setWalletPinSaved(true);
+    setTimeout(() => {
+      setWalletPinSaved(false);
+      setShowWalletPin(false);
+      setWalletPinInput("");
+      setWalletPinConfirm("");
+      setWalletPinError("");
+    }, 1500);
+  };
+
+  const handleClearWalletPin = async () => {
+    await clearWalletPin();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowWalletPin(false);
+    setWalletPinInput("");
+    setWalletPinConfirm("");
+    setWalletPinError("");
+  };
+
+  const handleRecoveryPinSubmit = async () => {
+    const correct = await checkPin(recoveryPinInput);
+    if (!correct) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setRecoveryPinError("INCORRECT PIN");
+      setRecoveryPinInput("");
+      return;
+    }
+    const phrase = await getRecoveryPhrase();
+    if (!phrase) {
+      setRecoveryPinError("NO IDENTITY KEY FOUND ON THIS DEVICE");
+      return;
+    }
+    setRecoveryPhraseValue(phrase);
+    setRecoveryPhraseStage("phrase");
+  };
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -648,7 +720,7 @@ export default function SettingsScreen() {
       borderRadius: colors.radius,
     },
     modalBtnText: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
       fontSize: 12,
       fontWeight: "800" as const,
       letterSpacing: 3,
@@ -927,12 +999,64 @@ export default function SettingsScreen() {
               </Text>
             </View>
             {hasDecoyPin ? (
-              <View style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                <Text style={{ color: colors.primaryForeground, fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
-              </View>
+              <GoldGradient style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, overflow: "hidden" }}>
+                <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
+              </GoldGradient>
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
+          </Pressable>
+          <View style={styles.settingDivider} />
+          <Pressable
+            style={styles.settingRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setWalletPinInput("");
+              setWalletPinConfirm("");
+              setWalletPinError("");
+              setShowWalletPin(true);
+            }}
+            testID="wallet-pin-row"
+          >
+            <View style={styles.settingIcon}>
+              <Ionicons name="wallet-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingLabel}>WALLET PIN</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                EXTRA PIN REQUIRED TO OPEN THE WALLET
+              </Text>
+            </View>
+            {hasWalletPin ? (
+              <GoldGradient style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, overflow: "hidden" }}>
+                <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
+              </GoldGradient>
+            ) : (
+              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+            )}
+          </Pressable>
+          <View style={styles.settingDivider} />
+          <Pressable
+            style={styles.settingRow}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setRecoveryPinInput("");
+              setRecoveryPinError("");
+              setRecoveryPhraseStage("pin");
+              setShowRecoveryPhrase(true);
+            }}
+            testID="recovery-phrase-row"
+          >
+            <View style={styles.settingIcon}>
+              <Ionicons name="key-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingLabel}>RECOVERY PHRASE</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                VIEW YOUR IDENTITY BACKUP PHRASE
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
           </Pressable>
           <View style={styles.settingDivider} />
           <Pressable
@@ -1151,11 +1275,11 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={newPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   {pinSimilar && (
-                    <Text style={{ color: "#bf9b30", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginTop: -8, marginBottom: 10 }}>
+                    <Text style={{ color: "#F5D26B", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginTop: -8, marginBottom: 10 }}>
                       TOO SIMILAR TO CURRENT PIN
                     </Text>
                   )}
@@ -1239,7 +1363,7 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={duressPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   <TextInput
@@ -1323,7 +1447,7 @@ export default function SettingsScreen() {
                   />
                   <PinStrengthIndicator
                     pin={decoyPin}
-                    barColor={(level) => ["#ef4444", "#bf9b30", "#7dd3fc"][level]}
+                    barColor={() => "#FFFFFF"}
                     mutedColor={colors.border}
                   />
                   <TextInput
@@ -1342,15 +1466,16 @@ export default function SettingsScreen() {
                   ) : null}
                   <Pressable
                     style={[
-                      styles.modalBtn,
-                      { backgroundColor: colors.primary },
+                      styles.modalBtnGold,
                       decoyPin.length < 4 && { opacity: 0.4 },
                     ]}
                     onPress={handleDecoyPinSave}
                     disabled={decoyPin.length < 4}
                     testID="decoy-pin-save-btn"
                   >
-                    <Text style={styles.modalBtnText}>SET DECOY PIN</Text>
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>SET DECOY PIN</Text>
+                    </GoldGradient>
                   </Pressable>
                   {hasDecoyPin && (
                     <Pressable
@@ -1366,6 +1491,171 @@ export default function SettingsScreen() {
                     onPress={() => setShowDecoyPin(false)}
                   >
                     <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Wallet PIN modal */}
+      <Modal
+        visible={showWalletPin}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWalletPin(false)}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletPin(false)} />
+            <View style={styles.modalContent}>
+              {walletPinSaved ? (
+                <Text style={styles.successText}>WALLET PIN SAVED</Text>
+              ) : (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="wallet-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>WALLET PIN</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
+                    REQUIRES THIS PIN TO OPEN THE WALLET, ON TOP OF YOUR MAIN APP LOCK
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={walletPin}
+                    onChangeText={(t) => { setWalletPinInput(t); setWalletPinError(""); }}
+                    placeholder="WALLET PIN (4–8 DIGITS)"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="wallet-pin-set-input"
+                  />
+                  <PinStrengthIndicator
+                    pin={walletPin}
+                    barColor={() => "#FFFFFF"}
+                    mutedColor={colors.border}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={walletPinConfirm}
+                    onChangeText={(t) => { setWalletPinConfirm(t); setWalletPinError(""); }}
+                    placeholder="CONFIRM WALLET PIN"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="wallet-pin-confirm-input"
+                  />
+                  {walletPinError ? (
+                    <Text style={styles.errorText}>{walletPinError}</Text>
+                  ) : null}
+                  <Pressable
+                    style={[
+                      styles.modalBtnGold,
+                      walletPin.length < 4 && { opacity: 0.4 },
+                    ]}
+                    onPress={handleWalletPinSave}
+                    disabled={walletPin.length < 4}
+                    testID="wallet-pin-save-btn"
+                  >
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>SET WALLET PIN</Text>
+                    </GoldGradient>
+                  </Pressable>
+                  {hasWalletPin && (
+                    <Pressable
+                      style={[styles.modalBtn, { backgroundColor: colors.muted, marginBottom: 4 }]}
+                      onPress={handleClearWalletPin}
+                      testID="wallet-pin-clear-btn"
+                    >
+                      <Text style={[styles.modalBtnText, { color: colors.destructive }]}>REMOVE WALLET PIN</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={styles.cancelBtn}
+                    onPress={() => setShowWalletPin(false)}
+                  >
+                    <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Recovery Phrase modal */}
+      <Modal
+        visible={showRecoveryPhrase}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRecoveryPhrase(false)}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRecoveryPhrase(false)} />
+            <View style={styles.modalContent}>
+              {recoveryPhraseStage === "pin" ? (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="key-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>CONFIRM YOUR PIN</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
+                    ANYONE WHO SEES YOUR RECOVERY PHRASE CAN TAKE OVER YOUR IDENTITY — CONFIRM IT'S YOU
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={recoveryPinInput}
+                    onChangeText={(t) => { setRecoveryPinInput(t); setRecoveryPinError(""); }}
+                    placeholder="MAIN PIN"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numeric"
+                    secureTextEntry
+                    maxLength={8}
+                    testID="recovery-pin-input"
+                    autoFocus
+                  />
+                  {recoveryPinError ? <Text style={styles.errorText}>{recoveryPinError}</Text> : null}
+                  <Pressable
+                    style={[styles.modalBtnGold, recoveryPinInput.length < 4 && { opacity: 0.4 }]}
+                    onPress={handleRecoveryPinSubmit}
+                    disabled={recoveryPinInput.length < 4}
+                    testID="recovery-pin-submit"
+                  >
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>REVEAL PHRASE</Text>
+                    </GoldGradient>
+                  </Pressable>
+                  <Pressable style={styles.cancelBtn} onPress={() => setShowRecoveryPhrase(false)}>
+                    <Text style={styles.cancelText}>CANCEL</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <Ionicons name="key-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>RECOVERY PHRASE</Text>
+                  </View>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 16, lineHeight: 16 }}>
+                    KEEP THIS PRIVATE. ANYONE WITH THESE WORDS CAN TAKE OVER YOUR IDENTITY.
+                  </Text>
+                  <View style={{ backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: colors.radius, padding: 12, marginBottom: 16 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {recoveryPhraseValue.split(" ").map((word, i) => (
+                        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.muted, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, minWidth: "30%" }}>
+                          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontWeight: "700" as const, width: 14 }}>{i + 1}</Text>
+                          <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.5 }}>{word}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                  <Pressable
+                    style={styles.modalBtnGold}
+                    onPress={() => setShowRecoveryPhrase(false)}
+                    testID="recovery-phrase-done"
+                  >
+                    <GoldGradient style={styles.modalBtnGoldInner}>
+                      <Text style={styles.modalBtnText}>DONE</Text>
+                    </GoldGradient>
                   </Pressable>
                 </>
               )}

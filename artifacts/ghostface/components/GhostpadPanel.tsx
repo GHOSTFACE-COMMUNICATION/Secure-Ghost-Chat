@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostpadSignal, useApp } from "@/context/AppContext";
+import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
 
 // How long after the last keystroke to relay the buffer to the partner —
@@ -213,8 +214,14 @@ export default function GhostpadScreen({
       borderColor: colors.border,
     },
     actionBtnPrimary: {
-      backgroundColor: colors.primary,
       borderColor: colors.primary,
+      padding: 0,
+      overflow: "hidden" as const,
+    },
+    actionBtnPrimaryInner: {
+      width: "100%" as const,
+      paddingVertical: 14,
+      alignItems: "center" as const,
     },
     actionBtnText: {
       color: colors.foreground,
@@ -223,7 +230,7 @@ export default function GhostpadScreen({
       letterSpacing: 2,
     },
     actionBtnTextPrimary: {
-      color: colors.primaryForeground,
+      color: "#FFFFFF",
     },
     codeInput: {
       width: "100%",
@@ -315,7 +322,9 @@ export default function GhostpadScreen({
             onPress={handleCreate}
             disabled={!wsConnected}
           >
-            <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>CREATE PAD</Text>
+            <GoldGradient style={styles.actionBtnPrimaryInner}>
+              <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>CREATE PAD</Text>
+            </GoldGradient>
           </Pressable>
           <Pressable
             style={[styles.actionBtn, !wsConnected && { opacity: 0.4 }]}
@@ -338,7 +347,7 @@ export default function GhostpadScreen({
                   <Ionicons
                     name={copied ? "checkmark" : "copy-outline"}
                     size={14}
-                    color={copied ? colors.success : colors.mutedForeground}
+                    color={copied ? colors.foreground : colors.mutedForeground}
                   />
                   <Text style={styles.footerBtnText}>{copied ? "COPIED" : "COPY"}</Text>
                 </Pressable>
@@ -377,7 +386,9 @@ export default function GhostpadScreen({
             onPress={handleJoin}
             disabled={joinCode.length !== 6}
           >
-            <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>CONNECT</Text>
+            <GoldGradient style={styles.actionBtnPrimaryInner}>
+              <Text style={[styles.actionBtnText, styles.actionBtnTextPrimary]}>CONNECT</Text>
+            </GoldGradient>
           </Pressable>
           <Pressable style={styles.actionBtn} onPress={() => setGhostpadMode("idle")}>
             <Text style={styles.actionBtnText}>CANCEL</Text>
