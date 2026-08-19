@@ -658,7 +658,7 @@ interface AppContextType extends AppState {
   clearConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
   markConversationRead: (conversationId: string) => void;
-  setDisappearTimer: (conversationId: string, seconds: number | undefined) => void;
+  setDisappearTimer: (conversationId: string, seconds: number) => void;
   setConversationBgColor: (conversationId: string, color: string | undefined) => void;
   markMessagesViewed: (conversationId: string, messageIds: string[]) => void;
   verifyConversation: (conversationId: string) => void;
@@ -732,6 +732,22 @@ function buildSystemMessage(
  */
 function createDefaultConversations(): Conversation[] {
   return [];
+}
+
+// ── Disappearing messages: always on ────────────────────────────────────────
+// Policy (Benji, 19 Aug 2026): every conversation has a disappear timer,
+// no OFF setting. Range 5s–7d, default 1h. clampDisappearSec is the single
+// place that enforces it — applied to loads (migration of pre-policy
+// conversations), local setting changes, and peer-synced "disappear-timer"
+// signals (whose sender may be an older build that still knows about OFF /
+// undefined).
+export const DISAPPEAR_MIN_SEC = 5;
+export const DISAPPEAR_MAX_SEC = 7 * 24 * 3600;
+export const DEFAULT_DISAPPEAR_SEC = 3600;
+
+export function clampDisappearSec(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_DISAPPEAR_SEC;
+  return Math.min(DISAPPEAR_MAX_SEC, Math.max(DISAPPEAR_MIN_SEC, Math.round(value)));
 }
 
 const CALL_SIGNAL_TYPES = new Set([
@@ -1448,6 +1464,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             console.warn("[AppContext] Failed to parse conversations:", parseErr);
           }
         }
+        // Always-on disappearing messages: migrate pre-policy conversations
+        // (disappearAfterSec undefined = the old "OFF") to the default, and
+        // clamp any out-of-range persisted value. Forward-only, same as a
+        // manual timer change — existing messages' expiresAt are untouched.
+        conversations = conversations.map((c) =>
+          c.disappearAfterSec === clampDisappearSec(c.disappearAfterSec)
+            ? c
+            : { ...c, disappearAfterSec: clampDisappearSec(c.disappearAfterSec) },
+        );
 
         let callHistory: CallLogEntry[] = [];
         if (callHistoryData) {
@@ -2416,7 +2441,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Applies going forward only — never rewrites expiresAt on messages
   // already in the conversation, only the setting used for new sends and
   // for messages received from here on.
-  const setDisappearTimer = useCallback((conversationId: string, seconds: number | undefined) => {
+  const setDisappearTimer = useCallback((conversationId: string, secondsRaw: number) => {
+    // Always-on policy: no undefined/OFF accepted, out-of-range clamped.
+    const seconds = clampDisappearSec(secondsRaw);
     const conv = latestStateRef.current.conversations.find((c) => c.id === conversationId);
     setState((prev) => {
       const updated = prev.conversations.map((c) =>
@@ -2588,7 +2615,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      const outgoingTtlMs = conv.disappearAfterSec ? conv.disappearAfterSec * 1000 : undefined;
+      const outgoingTtlMs = clampDisappearSec(conv.disappearAfterSec) * 1000;
       // Generated up front so the same id goes into both the wire envelope
       // (below) and this device's own copy of the message — the receiver
       // adopts this id verbatim rather than minting its own.
@@ -2965,6 +2992,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           safetyNumber,
           drSession,
           isRealContact: true,
+          disappearAfterSec: DEFAULT_DISAPPEAR_SEC,
           pendingX3DHHeader,
           recipientDeliveryId: bundle.deliveryId,
           messages: [
@@ -3477,7 +3505,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // back to the committed session.
           const aliceForEncrypt = aliceCursor.get(item.conversationId) ?? conv.drSession.alice;
           const myAlias = (latestStateRef.current.alias ?? "GHOST_USER").toUpperCase();
-          const outgoingTtlMs = conv.disappearAfterSec ? conv.disappearAfterSec * 1000 : undefined;
+          const outgoingTtlMs = clampDisappearSec(conv.disappearAfterSec) * 1000;
           const wireText = item.reaction
             ? wrapPayload(myAlias, item.id, "", undefined, undefined, item.reaction)
             : wrapPayload(myAlias, item.id, item.text, item.attachment, outgoingTtlMs);
@@ -3712,7 +3740,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // already in the conversation.
     if (wsMsg.type === "disappear-timer" && wsMsg.from) {
       const peerAlias = wsMsg.from.toUpperCase();
-      const seconds = typeof wsMsg.seconds === "number" ? wsMsg.seconds : undefined;
+      // Older builds could sync "OFF" (undefined) — always-on policy maps
+      // that, and anything out of range, back into [5s, 7d] / default 1h.
+      const seconds = clampDisappearSec(wsMsg.seconds);
       setState((prev) => {
         const existing = prev.conversations.find((c) => c.alias === peerAlias);
         if (!existing) return prev;
@@ -4124,6 +4154,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           unread: 1,
           safetyNumber,
           isRealContact: true,
+          disappearAfterSec: DEFAULT_DISAPPEAR_SEC,
           drSession: updatedSession,
           messages: [initMsg, firstMsg],
         };
@@ -4175,6 +4206,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           timestamp: Date.now(),
           unread: 1,
           isRealContact: true,
+          disappearAfterSec: DEFAULT_DISAPPEAR_SEC,
           messages: [placeholder],
         };
         const updated = [newConv, ...prev.conversations];

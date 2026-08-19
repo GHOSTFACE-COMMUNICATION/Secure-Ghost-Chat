@@ -225,8 +225,9 @@ function formatExpiry(expiresAt: number): string {
   return `${Math.floor(secsLeft / 86400)}d`;
 }
 
+// Always-on policy: no OFF. Range 5s–7d, default 1h (DEFAULT_DISAPPEAR_SEC).
 const DISAPPEAR_OPTIONS = [
-  { label: "OFF", value: undefined },
+  { label: "5s", value: 5 },
   { label: "30s", value: 30 },
   { label: "5m", value: 300 },
   { label: "1h", value: 3600 },
@@ -722,8 +723,11 @@ export default function ChatScreen() {
     }
   };
 
+  // Fall back to the 1h default entry — a conversation can hold a clamped
+  // non-preset value (e.g. synced from a peer build with different presets);
+  // label the nearest sensible thing rather than crashing on find().
   const currentDisappear = DISAPPEAR_OPTIONS.find((o) => o.value === conv.disappearAfterSec)
-    ?? DISAPPEAR_OPTIONS[0];
+    ?? DISAPPEAR_OPTIONS.find((o) => o.value === 3600)!;
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: conv.bgColor ?? colors.background },
@@ -1213,7 +1217,7 @@ export default function ChatScreen() {
             color={conv.disappearAfterSec ? colors.destructive : colors.mutedForeground}
           />
           <Text style={styles.disappearTxt}>
-            {currentDisappear.label === "OFF" ? "DISAPPEAR: OFF" : `DISAPPEAR: ${currentDisappear.label}`}
+            {`DISAPPEAR: ${currentDisappear.label}`}
           </Text>
         </Pressable>
       </View>
