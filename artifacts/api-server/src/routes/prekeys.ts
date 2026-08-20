@@ -108,13 +108,26 @@ async function requireDeviceAuth(req: Request, res: Response, next: () => void):
     return;
   }
 
-  const userId = req.params["userId"] as string;
+  // Normalize before matching — the path param arrives from the URL raw and
+  // must be compared against the same canonical form every stored userId is
+  // saved in, or a differently-cased/decorated request silently fails to
+  // match rather than resolving to the wrong account (fails closed either
+  // way, but normalizing keeps this consistent with every other alias path).
+  const normalizedUserId = normalizeAlias((req.params["userId"] as string) ?? "");
+  if (!normalizedUserId) {
+    res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
+    return;
+  }
+  // Downstream handlers read req.params["userId"] directly — overwrite it
+  // with the normalized form so they never see the raw, un-normalized value.
+  req.params["userId"] = normalizedUserId;
+
   const hash = hashToken(token);
 
   const [row] = await db
     .select()
     .from(deviceTokensTable)
-    .where(and(eq(deviceTokensTable.userId, userId), eq(deviceTokensTable.tokenHash, hash)));
+    .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
 
   if (!row) {
     res.status(403).json({ error: "Invalid or mismatched device token for userId" });
@@ -190,8 +203,10 @@ router.post("/prekeys/register", async (req: Request, res: Response) => {
 
     // Normalize and validate alias format
     const normalizedUserId = normalizeAlias(userId);
-    if (!normalizedUserId || normalizedUserId.length < 3) {
-      return res.status(400).json({ error: "userId must be at least 3 valid characters" });
+    if (!normalizedUserId) {
+      return res
+        .status(400)
+        .json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
     }
 
     // Check for existing registration
@@ -565,7 +580,10 @@ router.delete(
 // This endpoint is intentionally readable without auth (Alice needs Bob's keys).
 router.get("/prekeys/:userId/bundle", async (req: Request, res: Response) => {
   try {
-    const userId = req.params["userId"] as string;
+    const userId = normalizeAlias((req.params["userId"] as string) ?? "");
+    if (!userId) {
+      return res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
+    }
 
     // Fetch user's identity key bundle (IK + SPK)
     const [identityKey] = await db

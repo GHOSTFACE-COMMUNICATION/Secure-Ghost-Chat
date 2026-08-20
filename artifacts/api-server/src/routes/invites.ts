@@ -44,6 +44,9 @@ router.post("/invites", async (req: Request, res: Response) => {
   }
 
   const normalizedAlias = normalizeAlias(ownerAlias);
+  if (!normalizedAlias) {
+    return res.status(400).json({ error: "ownerAlias must be 3-20 characters: A-Z, 0-9, underscore only" });
+  }
   const normalizedCode = code.toUpperCase();
 
   try {

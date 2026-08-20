@@ -25,17 +25,19 @@ async function getAuthedAlias(req: Request): Promise<string | null> {
   if (!token) return null;
   const alias = req.query.alias as string | undefined;
   if (!alias) return null;
+  const normalizedAlias = normalizeAlias(alias);
+  if (!normalizedAlias) return null;
   const hash = hashToken(token);
   const [row] = await db
     .select()
     .from(deviceTokensTable)
     .where(
       and(
-        eq(deviceTokensTable.userId, normalizeAlias(alias)),
+        eq(deviceTokensTable.userId, normalizedAlias),
         eq(deviceTokensTable.tokenHash, hash),
       ),
     );
-  return row ? normalizeAlias(alias) : null;
+  return row ? normalizedAlias : null;
 }
 
 router.get("/users/exists/:alias", async (req: Request, res: Response) => {
@@ -44,6 +46,9 @@ router.get("/users/exists/:alias", async (req: Request, res: Response) => {
   }
   try {
     const alias = normalizeAlias(req.params.alias as string);
+    if (!alias) {
+      return res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
+    }
     const [row] = await db
       .select({ userId: identityKeysTable.userId, ikPublicKey: identityKeysTable.ikPublicKey })
       .from(identityKeysTable)

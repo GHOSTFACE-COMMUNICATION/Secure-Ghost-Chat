@@ -1,6 +1,7 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
+import { normalizeAlias } from "@/utils/alias";
 import { notifyCallEnded } from "@/hooks/usePushNotifications";
 import { markCallEnded } from "@/lib/endedCalls";
 export { getApiBase } from "@/lib/apiBase";
@@ -2910,7 +2911,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addConversation = useCallback(
     async (alias: string) => {
-      const aliasUpper = alias.toUpperCase();
+      // Reject rather than silently transform — a decorated/Unicode alias
+      // must never be allowed to collapse into a different, unintended
+      // target after this point (see utils/alias.ts).
+      const aliasUpper = normalizeAlias(alias);
+      if (!aliasUpper) {
+        return { ok: false, error: "invalid_alias" };
+      }
       const apiBase = getApiBase();
       if (!apiBase) {
         return { ok: false, error: "server_unreachable" };

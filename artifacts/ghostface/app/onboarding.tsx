@@ -91,16 +91,16 @@ export default function OnboardingScreen() {
   // Debounced "is this alias already registered" check against the same
   // lookup messages.ts uses to route to an existing identity.
   useEffect(() => {
-    const trimmed = alias.trim();
+    const normalized = normalizeAlias(alias);
     if (checkTimer.current) clearTimeout(checkTimer.current);
-    if (trimmed.length < 3) {
+    if (!normalized) {
       setAliasStatus("idle");
       return;
     }
     setAliasStatus("checking");
     const seq = ++checkSeq.current;
     checkTimer.current = setTimeout(async () => {
-      const taken = await checkAliasTaken(normalizeAlias(trimmed));
+      const taken = await checkAliasTaken(normalized);
       if (checkSeq.current !== seq) return; // alias changed since this fired
       setAliasStatus(taken === null ? "unknown" : taken ? "taken" : "available");
     }, 450);
@@ -110,7 +110,7 @@ export default function OnboardingScreen() {
   }, [alias]);
 
   const handleAliasConfirm = async () => {
-    if (alias.trim().length < 3 || aliasStatus === "taken" || aliasStatus === "checking") return;
+    if (!normalizeAlias(alias) || aliasStatus === "taken" || aliasStatus === "checking") return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setStep("pin");
   };
@@ -125,8 +125,12 @@ export default function OnboardingScreen() {
   };
 
   const handleSkipPin = async () => {
+    // Defensive — handleAliasConfirm already gates entry to this step on a
+    // valid normalized alias, so this should never actually be null here.
+    const normalized = normalizeAlias(alias);
+    if (!normalized) { setStep("alias"); return; }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await setAlias(normalizeAlias(alias));
+    await setAlias(normalized);
     await goToRecoveryStep();
   };
 
@@ -140,8 +144,10 @@ export default function OnboardingScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
+    const normalized = normalizeAlias(alias);
+    if (!normalized) { setStep("alias"); return; }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await setAlias(normalizeAlias(alias));
+    await setAlias(normalized);
     await setPin(pin);
     await goToRecoveryStep();
   };
@@ -152,7 +158,8 @@ export default function OnboardingScreen() {
   };
 
   const handleRestoreSubmit = async () => {
-    if (restoreAlias.trim().length < 3) {
+    const normalizedRestoreAlias = normalizeAlias(restoreAlias);
+    if (!normalizedRestoreAlias) {
       setRestoreError("Enter the alias you originally registered");
       return;
     }
@@ -162,7 +169,7 @@ export default function OnboardingScreen() {
     }
     setRestoreError("");
     setRestoring(true);
-    const result = await recoverIdentity(normalizeAlias(restoreAlias), restorePhrase);
+    const result = await recoverIdentity(normalizedRestoreAlias, restorePhrase);
     setRestoring(false);
     if (!result.ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -474,7 +481,12 @@ export default function OnboardingScreen() {
             <TextInput
               style={styles.input}
               value={alias}
-              onChangeText={(t) => setAliasText(t.toUpperCase())}
+              // Filter every keystroke (and paste) to the same allowlist the
+              // server enforces — A-Z, 0-9, underscore only — so a decorated
+              // or Unicode "fancy font" alias can never be entered in the
+              // first place. What's shown here is always exactly what will
+              // be registered; nothing gets silently transformed later.
+              onChangeText={(t) => setAliasText(t.toUpperCase().replace(/[^A-Z0-9_]/g, ""))}
               placeholder="GHOST_00"
               placeholderTextColor={colors.mutedForeground}
               autoCapitalize="characters"
@@ -722,7 +734,7 @@ export default function OnboardingScreen() {
             <TextInput
               style={styles.input}
               value={restoreAlias}
-              onChangeText={(t) => setRestoreAlias(t.toUpperCase())}
+              onChangeText={(t) => setRestoreAlias(t.toUpperCase().replace(/[^A-Z0-9_]/g, ""))}
               placeholder="YOUR ORIGINAL ALIAS"
               placeholderTextColor={colors.mutedForeground}
               autoCapitalize="characters"

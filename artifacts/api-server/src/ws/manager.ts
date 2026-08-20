@@ -313,11 +313,13 @@ function hashToken(token: string): string {
 
 async function validateToken(alias: string, token: string): Promise<boolean> {
   try {
+    const normalizedAlias = normalizeAlias(alias);
+    if (!normalizedAlias) return false;
     const hash = hashToken(token);
     const [row] = await db
       .select()
       .from(deviceTokensTable)
-      .where(and(eq(deviceTokensTable.userId, alias), eq(deviceTokensTable.tokenHash, hash)));
+      .where(and(eq(deviceTokensTable.userId, normalizedAlias), eq(deviceTokensTable.tokenHash, hash)));
     return !!row;
   } catch {
     return false;
@@ -469,14 +471,23 @@ export function createWsServer(wss: WebSocketServer): void {
           ws.send(JSON.stringify({ type: "error", message: "auth requires alias + token" }));
           return;
         }
-        const valid = await validateToken(msg.alias, msg.token);
+        // Normalize once, up front — validateToken previously matched the
+        // raw wire alias against the (always-normalized) stored userId,
+        // which is a different form than every other alias path uses.
+        const normalizedAuthAlias = normalizeAlias(msg.alias);
+        if (!normalizedAuthAlias) {
+          ws.send(JSON.stringify({ type: "error", message: "auth failed" }));
+          ws.close(4001, "Unauthorized");
+          return;
+        }
+        const valid = await validateToken(normalizedAuthAlias, msg.token);
         if (!valid) {
           ws.send(JSON.stringify({ type: "error", message: "auth failed" }));
           ws.close(4001, "Unauthorized");
           return;
         }
 
-        authedAlias = normalizeAlias(msg.alias);
+        authedAlias = normalizedAuthAlias;
         connectedClients.set(authedAlias, { ws, alias: authedAlias });
         // Resolve (and warm the cache for) this user's opaque delivery token so
         // pending messages addressed to it can be routed back to this socket.
@@ -556,6 +567,7 @@ export function createWsServer(wss: WebSocketServer): void {
       if (CALL_SIGNAL_TYPES.has(msg.type)) {
         if (!msg.to) return;
         const toAlias = normalizeAlias(msg.to);
+        if (!toAlias) return;
         let recipient: AuthedSocket | null | undefined = connectedClients.get(toAlias);
 
         if (msg.type === "call-ring") {
@@ -764,6 +776,7 @@ export function createWsServer(wss: WebSocketServer): void {
       if (msg.type === "disappear-timer") {
         if (!msg.to) return;
         const toAlias = normalizeAlias(msg.to);
+        if (!toAlias) return;
         const recipient = connectedClients.get(toAlias);
         if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
           recipient.ws.send(
@@ -778,6 +791,7 @@ export function createWsServer(wss: WebSocketServer): void {
         if (!msg.to) return;
         if (myPresenceSubscriptions.size >= MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET) return;
         const targetAlias = normalizeAlias(msg.to);
+        if (!targetAlias) return;
         if (!presenceSubscribers.has(targetAlias)) presenceSubscribers.set(targetAlias, new Set());
         presenceSubscribers.get(targetAlias)!.add(authedAlias);
         myPresenceSubscriptions.add(targetAlias);
@@ -799,6 +813,7 @@ export function createWsServer(wss: WebSocketServer): void {
       if (msg.type === "presence-unsubscribe") {
         if (!msg.to) return;
         const targetAlias = normalizeAlias(msg.to);
+        if (!targetAlias) return;
         presenceSubscribers.get(targetAlias)?.delete(authedAlias);
         myPresenceSubscriptions.delete(targetAlias);
         return;
@@ -899,7 +914,8 @@ export function createWsServer(wss: WebSocketServer): void {
           new Set(
             targets
               .filter((a): a is string => typeof a === "string" && a.trim().length > 0)
-              .map((a) => normalizeAlias(a)),
+              .map((a) => normalizeAlias(a))
+              .filter((a): a is string => a !== null),
           ),
         ).filter((a) => a !== authedAlias);
 
@@ -960,6 +976,7 @@ export function createWsServer(wss: WebSocketServer): void {
  */
 export function broadcastToAlias(alias: string, message: Omit<WireMessage, "token">): void {
   const normalized = normalizeAlias(alias);
+  if (!normalized) return;
   const client = connectedClients.get(normalized);
   if (client && client.ws.readyState === WebSocket.OPEN) {
     client.ws.send(JSON.stringify(message));

@@ -8,7 +8,7 @@ to set.
 
 Status legend: ✅ done · 🔄 in progress · ⏸ blocked/waiting · ⬜ not started
 
-Last updated: 2026-08-19 (Cowork — GF-01 counsel email sent, chase clock started; email domain verified; GF-01 "resolved" mark corrected to "awaiting reply")
+Last updated: 2026-08-20 (Claude Code — alias-normalization vulnerability fixed, settings page + radial menu UI polish)
 
 ## Business / legal (GF tracker)
 
@@ -54,6 +54,10 @@ Last updated: 2026-08-19 (Cowork — GF-01 counsel email sent, chase clock start
 | Local STATUS/TRACKER commits unpushed | ✅ 19 Aug | Pushed — `feat/push-notifications` now in sync with origin through `864a40f`. |
 | pg_dumpall incident backups on disk | ✅ 19 Aug | Located and deleted `pre-rotation-dump-20260819.sql` (1.8MB, full cluster dump incl. role password hashes) + its `.stderr` sibling, found in Claude Code session `e968c7a2`'s scratchpad (`/private/tmp/claude-501/.../scratchpad/`). **Only 1 file found, not 2 as STATUS.md's "one per rotation" implied** — exhaustive search of home, /tmp, /var, and all session scratchpads on this Mac turned up nothing else. If a second dump exists it may be on a different machine/session already cleaned up; flag to Benji if that matters. |
 | Legacy AD/plaintext tiers in secureStorage | ⏸ scheduled | Remove a release or two after 72 ships; unknown format then becomes a hard error (audit #6 follow-up). |
+| Alias-normalization vulnerability (registration/add-contact identity confusion) | ✅ 20 Aug | `normalizeAlias` was stripping instead of rejecting invalid chars, inconsistently between client/server; onboarding never previewed the actual normalized alias before registering. Fixed with a strict reject-based `^[A-Z0-9_]{3,20}$` allowlist everywhere (client keystroke filter + shared normalizer across all api-server routes and ws/manager.ts). tsc clean both sides, vitest 53/1/0, prod check query returned 0 pre-existing violations — no grandfathering needed. |
+| Radial menu buttons: remove gold edge | ✅ 20 Aug | Inactive nodeCircleGlassBorder/nodeCircleRim switched from GOLD_OUTLINE_COLOR to a neutral rgba(255,255,255,0.18) rim; active state (white) unchanged. |
+| Messages list: remove fake "LIVE" badge | ✅ 20 Aug | Badge was driven by static `isRealContact`, not actual presence — misleading next to the real ONLINE/OFFLINE indicator in chat headers (which is presence-driven and was left untouched). |
+| Settings page: style makeover to match rest of app | ✅ 20 Aug | Unified 3 inconsistent status-pill styles into one `StatusPill` (secure/danger/neutral tones), fixed the SUBSCRIPTION card's margin + moved it off inline styles, consolidated repeated inline styles into the shared StyleSheet, applied one label-tinting rule (danger rows only), realigned a few icons to the app's outline/solid convention. |
 
 ## Incidents
 

@@ -45,17 +45,19 @@ async function getAuthedAlias(req: Request): Promise<string | null> {
   if (!token) return null;
   const alias = (req.query.alias as string | undefined) ?? (req.body?.alias as string | undefined);
   if (!alias) return null;
+  const normalizedAlias = normalizeAlias(alias);
+  if (!normalizedAlias) return null;
   const hash = hashToken(token);
   const [row] = await db
     .select()
     .from(deviceTokensTable)
     .where(
       and(
-        eq(deviceTokensTable.userId, normalizeAlias(alias)),
+        eq(deviceTokensTable.userId, normalizedAlias),
         eq(deviceTokensTable.tokenHash, hash),
       ),
     );
-  return row ? normalizeAlias(alias) : null;
+  return row ? normalizedAlias : null;
 }
 
 /** True for a Postgres unique-constraint violation (replay), not a generic fault. */

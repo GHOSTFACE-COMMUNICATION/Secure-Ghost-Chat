@@ -3,6 +3,7 @@ import { db, identityKeysTable, deviceTokensTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { createHash } from "crypto";
 import { toErrorMessage } from "../utils/error";
+import { normalizeAlias } from "../utils/alias";
 
 const router: IRouter = Router();
 
@@ -20,13 +21,19 @@ async function requireDeviceAuth(req: Request, res: Response, next: () => void):
     return;
   }
 
-  const userId = req.params["userId"] as string;
+  const normalizedUserId = normalizeAlias((req.params["userId"] as string) ?? "");
+  if (!normalizedUserId) {
+    res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
+    return;
+  }
+  req.params["userId"] = normalizedUserId;
+
   const hash = hashToken(token);
 
   const [row] = await db
     .select()
     .from(deviceTokensTable)
-    .where(and(eq(deviceTokensTable.userId, userId), eq(deviceTokensTable.tokenHash, hash)));
+    .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
 
   if (!row) {
     res.status(403).json({ error: "Invalid or mismatched device token for userId" });
