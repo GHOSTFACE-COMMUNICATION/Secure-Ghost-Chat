@@ -8,13 +8,13 @@ to set.
 
 Status legend: ✅ done · 🔄 in progress · ⏸ blocked/waiting · ⬜ not started
 
-Last updated: 2026-08-19 (Claude Code session — preview + production build 62 shipped, GF-01 marked resolved per Benji)
+Last updated: 2026-08-19 (Cowork — GF-01 counsel email sent, chase clock started; email domain verified; GF-01 "resolved" mark corrected to "awaiting reply")
 
 ## Business / legal (GF tracker)
 
 | ID | Task | Status | Blocked on / next action |
 |---|---|---|---|
-| GF-01 | Export compliance (CCATS) — engage counsel | ✅ 19 Aug (per Benji) | Benji reported this resolved mid-session; not independently verified by an agent (no counsel doc/confirmation seen). Confirm the paper trail before treating App Store submission as fully cleared. |
+| GF-01 | Export compliance — engage counsel | 🔄 email sent 19 Aug | Enquiry sent from benjamin@ghostface.co.nz with research memo + crypto inventory. Asks US EAR (self-classify vs CCATS) AND NZ strategic-goods (MFAT permit vs Wassenaar mass-market); kdfRkPQ is the crux. **NOT resolved** — awaiting counsel's written answer. CHASE if no reply by ~Mon 25 Aug. App Store submission stays blocked until answered. (Corrects an earlier over-eager "✅ resolved" mark — a sent email is not a legal opinion.) |
 | GF-02 | Crypto inventory | 🔄 | Append build-71 ASC questionnaire screenshots, then send with counsel engagement (GF-01). |
 | GF-03 | GHOSTFACE word mark (IPONZ) | ✅ 11 Aug 2026 | Filed under Ghostface Limited, classes 9/38/42. |
 | — | Hood-logo figurative mark | ⏸ waiting | File once figurative clearance opinion obtained. |
