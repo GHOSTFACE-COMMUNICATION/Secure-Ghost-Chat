@@ -87,6 +87,54 @@ function PinStrengthIndicator({
   );
 }
 
+// Single shared treatment for the small status pills scattered across this
+// screen (PIN "ACTIVE", SMS fallback "ARMED", subscription "UPGRADE", …) so
+// they read as one system instead of three different badge languages.
+type PillTone = "secure" | "danger" | "neutral";
+
+function StatusPill({
+  label,
+  tone,
+  colors,
+}: {
+  label: string;
+  tone: PillTone;
+  colors: ReturnType<typeof useColors>;
+}) {
+  if (tone === "secure") {
+    return (
+      <GoldGradient style={pillStyles.pill}>
+        <Text style={pillStyles.pillText}>{label}</Text>
+      </GoldGradient>
+    );
+  }
+  return (
+    <View
+      style={[
+        pillStyles.pill,
+        { backgroundColor: tone === "danger" ? colors.destructive : colors.mutedForeground },
+      ]}
+    >
+      <Text style={pillStyles.pillText}>{label}</Text>
+    </View>
+  );
+}
+
+const pillStyles = StyleSheet.create({
+  pill: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: "hidden",
+  },
+  pillText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800" as const,
+    letterSpacing: 2,
+  },
+});
+
 export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -734,6 +782,40 @@ export default function SettingsScreen() {
       fontSize: 12,
       letterSpacing: 2,
     },
+    subscriptionCard: {
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 10,
+      marginHorizontal: 20,
+      backgroundColor: `${colors.primary}11`,
+      overflow: "hidden",
+    },
+    subscriptionValue: {
+      color: colors.mutedForeground,
+      fontSize: 10,
+      letterSpacing: 2,
+      marginTop: 2,
+    },
+    settingSubtext: {
+      color: colors.mutedForeground,
+      fontSize: 9,
+      letterSpacing: 2,
+      marginTop: 2,
+    },
+    settingHelperText: {
+      color: colors.mutedForeground,
+      fontSize: 9,
+      letterSpacing: 1.5,
+      lineHeight: 14,
+    },
+    emptyHintText: {
+      color: colors.mutedForeground,
+      fontSize: 9,
+      letterSpacing: 1.5,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      textAlign: "center",
+    },
   });
 
   return (
@@ -758,21 +840,19 @@ export default function SettingsScreen() {
         </View>
 
         <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
-        <View style={{ borderWidth: 1, borderColor: colors.primary, borderRadius: 10, marginHorizontal: 16, backgroundColor: `${colors.primary}11`, overflow: "hidden" }}>
+        <View style={styles.subscriptionCard}>
           <Pressable
             style={styles.settingRow}
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push("/paywall"); }}
           >
             <View style={styles.settingIcon}>
-              <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+              <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.settingLabel}>CURRENT PLAN</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, letterSpacing: 2, marginTop: 2 }}>GHOST — FREE  ·  ◎ USDC</Text>
+              <Text style={styles.subscriptionValue}>GHOST — FREE  ·  ◎ USDC</Text>
             </View>
-            <View style={{ backgroundColor: "#8A8A8A", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
-              <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>UPGRADE</Text>
-            </View>
+            <StatusPill tone="neutral" label="UPGRADE" colors={colors} />
           </Pressable>
         </View>
 
@@ -788,7 +868,7 @@ export default function SettingsScreen() {
             <View style={[styles.settingIcon, { borderColor: colors.primary, backgroundColor: `${colors.primary}18` }]}>
               <Ionicons name="lock-closed" size={18} color={colors.primary} />
             </View>
-            <Text style={[styles.settingLabel, { color: colors.primary }]}>LOCK SESSION</Text>
+            <Text style={styles.settingLabel}>LOCK SESSION</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.primary} />
           </Pressable>
           <View style={styles.settingDivider} />
@@ -799,7 +879,7 @@ export default function SettingsScreen() {
             <View style={styles.settingIcon}>
               <Ionicons name="shield-checkmark" size={18} color={colors.success} />
             </View>
-            <Text style={[styles.settingLabel, { color: colors.success }]}>SECURITY AUDIT</Text>
+            <Text style={styles.settingLabel}>SECURITY AUDIT</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
           </Pressable>
           <View style={styles.settingDivider} />
@@ -808,7 +888,7 @@ export default function SettingsScreen() {
             onPress={() => setShowPinChange(true)}
           >
             <View style={styles.settingIcon}>
-              <Ionicons name="keypad" size={18} color={colors.primary} />
+              <Ionicons name="keypad-outline" size={18} color={colors.primary} />
             </View>
             <Text style={styles.settingLabel}>CHANGE PIN</Text>
             <Ionicons
@@ -820,7 +900,7 @@ export default function SettingsScreen() {
           <View style={styles.settingDivider} />
           <View style={styles.settingRow}>
             <View style={styles.settingIcon}>
-              <Ionicons name="finger-print" size={18} color={colors.primary} />
+              <Ionicons name="finger-print-outline" size={18} color={colors.primary} />
             </View>
             <Text style={styles.settingLabel}>BIOMETRIC LOCK</Text>
             <Switch
@@ -841,7 +921,7 @@ export default function SettingsScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.settingLabel}>LOW-BANDWIDTH MODE</Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                <Text style={styles.settingSubtext}>
                   {lowBandwidthActive ? "ACTIVE" : "INACTIVE"} · LINK {linkQuality.toUpperCase()}
                 </Text>
               </View>
@@ -889,7 +969,7 @@ export default function SettingsScreen() {
                 );
               })}
             </View>
-            <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 1.5, lineHeight: 14 }}>
+            <Text style={styles.settingHelperText}>
               FOR SATELLITE LINKS. BLOCKS ATTACHMENT SENDS, DEFERS INCOMING MEDIA, STRETCHES KEEPALIVES.
             </Text>
           </View>
@@ -905,16 +985,14 @@ export default function SettingsScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.settingLabel, { color: colors.destructive }]}>SATELLITE FALLBACK</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+              <Text style={styles.settingSubtext}>
                 {smsFallbackNumbers.length > 0
                   ? `${smsFallbackNumbers.length} / ${MAX_SMS_FALLBACK_NUMBERS} RECIPIENTS ARMED`
                   : "NO RECIPIENTS"}
               </Text>
             </View>
             {smsFallbackNumbers.length > 0 ? (
-              <View style={{ backgroundColor: colors.destructive, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ARMED</Text>
-              </View>
+              <StatusPill tone="danger" label="ARMED" colors={colors} />
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
@@ -936,21 +1014,19 @@ export default function SettingsScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.settingLabel, { color: colors.destructive }]}>DURESS PIN</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+              <Text style={styles.settingSubtext}>
                 TRIGGERS SILENT WIPE ON ENTRY
               </Text>
             </View>
             {hasDuressPin ? (
-              <View style={{ backgroundColor: colors.destructive, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
-              </View>
+              <StatusPill tone="danger" label="ACTIVE" colors={colors} />
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
           </Pressable>
           <View style={styles.settingDivider} />
           {!hasDuressPin && (
-            <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 1.5, paddingHorizontal: 16, paddingVertical: 8, textAlign: 'center' }}>
+            <Text style={styles.emptyHintText}>
               SET A DURESS PIN TO CONFIGURE GRACE PERIOD
             </Text>
           )}
@@ -966,7 +1042,7 @@ export default function SettingsScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.settingLabel, { color: colors.destructive }]}>DURESS GRACE PERIOD</Text>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+                  <Text style={styles.settingSubtext}>
                     {currentGraceLabel} TO CANCEL AFTER ENTRY
                   </Text>
                 </View>
@@ -994,14 +1070,12 @@ export default function SettingsScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.settingLabel}>DECOY PIN</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+              <Text style={styles.settingSubtext}>
                 UNLOCKS TO AN EMPTY, HARMLESS-LOOKING APP
               </Text>
             </View>
             {hasDecoyPin ? (
-              <GoldGradient style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, overflow: "hidden" }}>
-                <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
-              </GoldGradient>
+              <StatusPill tone="secure" label="ACTIVE" colors={colors} />
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
@@ -1023,14 +1097,12 @@ export default function SettingsScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.settingLabel}>WALLET PIN</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+              <Text style={styles.settingSubtext}>
                 EXTRA PIN REQUIRED TO OPEN THE WALLET
               </Text>
             </View>
             {hasWalletPin ? (
-              <GoldGradient style={{ borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, overflow: "hidden" }}>
-                <Text style={{ color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>ACTIVE</Text>
-              </GoldGradient>
+              <StatusPill tone="secure" label="ACTIVE" colors={colors} />
             ) : (
               <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
             )}
@@ -1052,7 +1124,7 @@ export default function SettingsScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.settingLabel}>RECOVERY PHRASE</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 2 }}>
+              <Text style={styles.settingSubtext}>
                 VIEW YOUR IDENTITY BACKUP PHRASE
               </Text>
             </View>
@@ -1709,7 +1781,7 @@ export default function SettingsScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowSmsFallback(false)} />
           <View style={styles.modalContent}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <Ionicons name="paper-plane" size={20} color={colors.destructive} />
+              <Ionicons name="paper-plane-outline" size={20} color={colors.destructive} />
               <Text style={styles.modalTitle}>SATELLITE FALLBACK</Text>
             </View>
             <Text style={{ color: colors.mutedForeground, fontSize: 10, letterSpacing: 1.5, marginBottom: 14, textAlign: "center", lineHeight: 16 }}>

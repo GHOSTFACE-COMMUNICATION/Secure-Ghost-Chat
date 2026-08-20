@@ -16,7 +16,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { GOLD_OUTLINE_COLOR, SpecularHighlight } from "@/components/GoldGradient";
+import { SpecularHighlight } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
   },
   nodeCircleGlassBorder: {
     borderWidth: 1,
-    borderColor: GOLD_OUTLINE_COLOR,
+    borderColor: "rgba(255,255,255,0.18)",
   },
   nodeCircleGlassBorderActive: {
     borderColor: "#FFFFFF",
@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: GOLD_OUTLINE_COLOR,
+    borderColor: "rgba(255,255,255,0.18)",
   },
   nodeCircleRimActive: {
     borderColor: "rgba(255,255,255,0.6)",

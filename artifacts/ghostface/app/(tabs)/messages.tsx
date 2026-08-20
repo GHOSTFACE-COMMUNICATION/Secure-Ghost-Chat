@@ -41,6 +41,8 @@ function addConvErrorTitle(error?: string): string {
   switch (error) {
     case "not_found":
       return "User Not Found";
+    case "invalid_alias":
+      return "Invalid Alias";
     case "server_unreachable":
       return "Network Unavailable";
     case "pq_downgrade":
@@ -54,6 +56,8 @@ function addConvErrorMessage(alias: string, error?: string): string {
   switch (error) {
     case "not_found":
       return `${alias} is not on the GHOSTFACE network. They must install GHOSTFACE and register before you can start an encrypted conversation.`;
+    case "invalid_alias":
+      return "Aliases are 3-20 characters: A-Z, 0-9, and underscore only. Check what you typed and try again.";
     case "server_unreachable":
       return "Cannot reach the GHOSTFACE network. Check your connection and try again.";
     case "no_bundle":
@@ -593,14 +597,10 @@ export default function MessagesScreen() {
                       {item.verified && !item.destroyedAt && (
                         <Ionicons name="shield-checkmark" size={13} color={colors.primary} />
                       )}
-                      {item.destroyedAt ? (
+                      {item.destroyedAt && (
                         <View style={{ backgroundColor: colors.destructive + "22", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, flexDirection: "row", alignItems: "center", gap: 3 }}>
                           <Ionicons name="skull-outline" size={9} color={colors.destructive} />
                           <Text style={{ color: colors.destructive, fontSize: 8, fontWeight: "800", letterSpacing: 1.5 }}>SELF-DESTRUCTED</Text>
-                        </View>
-                      ) : item.isRealContact && (
-                        <View style={{ backgroundColor: colors.success + "22", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                          <Text style={{ color: colors.success, fontSize: 8, fontWeight: "800", letterSpacing: 1.5 }}>LIVE</Text>
                         </View>
                       )}
                     </View>
