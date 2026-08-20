@@ -338,6 +338,13 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
             // launch, which is exactly when this fires via didLoadWithEvents.
             await ensureCallKeepSetup();
             activeCallKitUUIDs.add(callId);
+            // The WS is closed while backgrounded (see AppContext's
+            // background-close effect) and only reopens on foreground or on
+            // answerCall below — so without this, any call-hangup the caller
+            // sends while this banner is up has nowhere to land: the socket
+            // isn't there to receive it until the human acts. Reconnect the
+            // instant CallKit is told to ring, not just once answered.
+            onForceReconnect?.();
             CallKeep.displayIncomingCall(
               callId,
               payload.from ?? "Unknown",

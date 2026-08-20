@@ -63,6 +63,28 @@ function IncomingCallOverlay() {
     }
   }, [incomingCall, slideAnim, pulseAnim]);
 
+  // ── Local ring-timeout backstop ───────────────────────────────────────────
+  // Independent of any network signal: if nothing else has ended this call
+  // within 45s of the banner appearing, end it locally. Covers the caller's
+  // hangup signal getting lost or badly delayed — without this, the banner
+  // would otherwise sit here indefinitely with no fallback (CallKit's native
+  // ~60s timeout only applies to the backgrounded/VoIP-push path, not this
+  // in-app overlay). Re-keyed per callId; cleanup fires whenever
+  // `incomingCall` changes — which accept, decline, and a remote call-hangup
+  // (handled in AppContext) all already do by setting it to null — so all
+  // three required cancellation paths fall out of that without extra wiring.
+  useEffect(() => {
+    if (!incomingCall) return;
+    const { callId, from, mode } = incomingCall;
+    const timeout = setTimeout(() => {
+      notifyCallEnded(callId, "unanswered");
+      dismissIncomingCall();
+      logCall({ alias: from, direction: "incoming", mode, outcome: "missed", timestamp: Date.now() });
+    }, 45_000);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingCall?.callId]);
+
   if (!incomingCall) return null;
 
   const handleAccept = () => {

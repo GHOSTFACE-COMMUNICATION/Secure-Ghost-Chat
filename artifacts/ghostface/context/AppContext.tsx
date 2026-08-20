@@ -4442,7 +4442,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // this synchronously instead of waiting on the AppState listener.
   const forceReconnect = useCallback(() => {
     backgroundedRef.current = false;
-    if (!wsRef.current || wsRef.current.readyState !== 1) {
+    // readyState 0 = CONNECTING, 1 = OPEN — skip reconnecting on either.
+    // connect() has no guard of its own against a second overlapping socket:
+    // calling it while one is already mid-handshake would spawn a fresh
+    // WebSocket and orphan the first, whose onclose still fires later and
+    // queues its own reconnect, competing with whichever socket actually
+    // won. Without this, two triggers close together (e.g. two VoIP pushes
+    // a beat apart) would each kick off their own connect().
+    const readyState = wsRef.current?.readyState;
+    if (readyState !== 0 && readyState !== 1) {
       reconnectNowRef.current?.();
     }
   }, []);

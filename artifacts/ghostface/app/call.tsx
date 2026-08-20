@@ -461,15 +461,21 @@ export default function CallScreen() {
   // by the time this cleanup runs (another effect's cleanup owns flipping
   // it) — so teardownCallResources is called directly instead.
   //
-  // Only notifies the peer if the call had actually connected ("active") —
-  // best-effort: the signal goes out over the same WS that a lock-triggered
+  // Notifies the peer for any non-terminal state ("ringing", "connecting",
+  // "active") — not just "active". A caller backgrounding mid-ring used to
+  // send nothing here: the 30s ring-timeout timer (below) dies with this
+  // component on unmount, so without this the callee would ring until
+  // CallKit's native ~60s timeout with no earlier signal at all. Best-effort
+  // either way — the signal goes out over the same WS that a lock-triggered
   // unmount may be closing around the same time, so delivery isn't
   // guaranteed, but sending it costs nothing (sendCallSignal no-ops if the
-  // socket isn't open). A call still ringing/negotiating when the screen
-  // unmounts intentionally does not send call-hangup here.
+  // socket isn't open; call-hangup is exempt from the pending-signal queue's
+  // TTL, so a late reconnect still delivers it). "ended"/"no_answer" are the
+  // only states skipped — both mean a hangup was already sent on whichever
+  // path got the call there.
   useEffect(() => {
     return () => {
-      if (callStateRef.current === "active") {
+      if (callStateRef.current !== "ended" && callStateRef.current !== "no_answer") {
         sendCallSignal({ type: "call-hangup", to: alias, callId: effectiveCallId });
         // Same reasoning as the call-hangup signal path in handleEnd(): this
         // device's call session is ending without going through handleEnd()
