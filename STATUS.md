@@ -23,11 +23,16 @@ export-compliance path, account lockouts, open loops below)
   CrazyDomains ID recovery; CHECK DOMAIN EXPIRY (couldn't read whois from
   sandbox) — a locked registrar + expiring domain = losing the domain +
   api.ghostface.co.nz with it.
-- **Company email setup:** DNS is delegated to Vercel (ns1/ns2.vercel-dns),
-  NOT CrazyDomains — so iCloud Custom Email Domain records get added in the
-  Vercel DNS panel. Create benjamin@ / support@ / legal@ ghostface.co.nz.
-  Manual steps in chat history (Chrome extension not connected, can't
-  co-drive).
+- **Company email setup — DONE (19 Aug):** iCloud Custom Email Domain for
+  ghostface.co.nz verified; DNS records live in Vercel panel. Confirm the
+  addresses (benjamin@ / support@ / legal@) exist and do one test-send to
+  benjamin@ to prove delivery. Use benjamin@ghostface.co.nz on the counsel
+  email from here on.
+- ⚠ **Vercel access token was pasted into chat this session** (vcp_… ,
+  redacted). Assistant refused to use it. Benji to REVOKE it (Vercel →
+  Account Settings → Tokens) if not already done. Never paste secrets in
+  chat; use a scoped, expiring token in a secrets store if automation is
+  needed later.
 - **Domain switch (polish, not urgent):** eas.json prod/preview use
   api-server-production-b252.up.railway.app; branded api.ghostface.co.nz
   CNAMEs to a DIFFERENT railway host (lz2me39h.up.railway.app). MUST verify
