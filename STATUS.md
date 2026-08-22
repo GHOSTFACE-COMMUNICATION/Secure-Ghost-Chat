@@ -6,7 +6,7 @@ sessions re-derive context wrong.
 
 Last updated: 2026-08-22 (Cowork session — GF-01 US counsel outreach,
 Gmail connector live, Google account recovered, Apple org migration
-in flight)
+in flight; then Claude Code — SELF DESTRUCT button glass restyle)
 
 ## 22 Aug session changes
 
@@ -35,6 +35,14 @@ in flight)
   signup deliberately deferred until Apple verification clears.
 - Cowork scheduled tasks created: daily 7am briefing, Monday 8am weekly
   roadmap, one-shot counsel-chase reminder (Mon 24 Aug).
+- **SELF DESTRUCT button restyled** (Claude Code session, branch
+  `worktree-panic-glass`): scaled to 0.8 on Settings and converted from the
+  solid red gradient to the app's standard `<GoldGradient solid>` liquid
+  glass, keeping a destructive-red icon/label. This retires the "destructive
+  buttons stay flat" carve-out from the 21 Aug glass restyle for this button.
+  tsc clean, **not run on device** — the surface change also hits the home
+  screen's `scale={0.5}` instance, so verify both, and check the hold-progress
+  sweep is still clearly visible mid-hold. Not in builds 64/vc26.
 
 ## ⏳ OPEN LOOPS (as of last session)
 

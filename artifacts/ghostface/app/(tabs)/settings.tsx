@@ -1374,7 +1374,7 @@ export default function SettingsScreen() {
 
         <Text style={[styles.sectionHeader, { color: colors.destructive }]}>DANGER ZONE</Text>
         <View style={styles.panicSection}>
-          <PanicButton onWipe={handlePanicWipe} />
+          <PanicButton onWipe={handlePanicWipe} scale={0.8} />
         </View>
 
         <View style={styles.versionSection}>

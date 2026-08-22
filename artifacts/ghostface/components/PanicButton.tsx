@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -12,8 +11,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
-import { boxShadow } from "@/lib/shadow";
 import { type } from "@/constants/typography";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -298,11 +297,16 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
           onPressOut={cancelPanic}
           testID="panic-btn"
         >
-          <LinearGradient
-            colors={["#ff6b6b", "#ef4444", "#b91c1c", "#7f1d1d"]}
-            locations={[0, 0.45, 0.75, 1]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
+          {/* Glass surface, but the icon and label stay destructive-red — the
+              action is irreversible, so the danger signal has to survive the
+              restyle. Same treatment as DELETE SEALED CONVERSATION in
+              app/chat/[id].tsx; colour lives in the content, never in the
+              surface or the rim (see GoldGradient).
+              `solid` because on the settings screen this sits on a flat
+              #000000 backdrop with nothing behind it to refract — clear glass
+              over black renders as black. See GLASS_SOLID_FILL. */}
+          <GoldGradient
+            solid
             style={[
               styles.btn,
               { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
@@ -313,11 +317,21 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
                 style={[styles.progressFill, { width: `${panicProgress}%` }]}
               />
             )}
-            <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-            <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
+            <Ionicons
+              name="nuclear-outline"
+              size={22 * scale}
+              color={colors.destructive}
+              allowFontScaling={false}
+            />
+            <Text
+              style={[
+                styles.btnText,
+                { fontSize: 15 * scale, letterSpacing: 2 * scale, color: colors.destructive },
+              ]}
+            >
               {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
             </Text>
-          </LinearGradient>
+          </GoldGradient>
         </Pressable>
       </View>
     </>
@@ -331,10 +345,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: "center",
   },
+  // Just the hit area now. The full-opacity white border and red glow this
+  // used to carry belonged to the old solid-red button; layered outside glass
+  // they read as a double rim and a coloured leak — precisely the "painted
+  // plastic imitating glass" look GoldGradient exists to avoid. The rim is
+  // now GoldGradient's own neutral one.
   btnWrap: {
-    borderWidth: 1,
-    borderColor: "#ffffff",
-    boxShadow: boxShadow("#ef4444", 0.45, 16, 0, 4),
+    overflow: "hidden",
   },
   btn: {
     flexDirection: "row",
@@ -349,7 +366,11 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: "rgba(255,255,255,0.22)",
+    // Was rgba(255,255,255,0.22), tuned against the old saturated-red fill.
+    // Over GLASS_TINT_BLACK that washes out, and this sweep is the only
+    // feedback that the 3-second hold is progressing — so it goes red, which
+    // also puts the danger colour back exactly when it matters most.
+    backgroundColor: "rgba(255,59,48,0.32)",
   },
   btnText: {
     ...type.labelStrong,
