@@ -2,7 +2,7 @@ import { BlurView } from "expo-blur";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
-import { StyleProp, StyleSheet, ViewStyle } from "react-native";
+import { StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 
 // Metallic gold sheen used across the app's gold surfaces (buttons/badges).
 // Pale-gold highlight → bright gold → deep gold → dark edge gives a polished,
@@ -24,31 +24,54 @@ export const GOLD_METALLIC_LOCATIONS = [0, 0.45, 0.75, 1] as const;
 // against a black backdrop while keeping some genuine translucency.
 export const GOLD_GLASS_TINT = "rgba(245,210,107,0.82)";
 
-// Black liquid-glass tint — the button surface itself stays dark/translucent
-// (matching the app's black backdrop) with the gold carried by the outline
-// and the white specular shine instead of a gold fill. Alpha kept moderate
-// so native Liquid Glass still shows real refraction/blur under it rather
-// than reading as an opaque flat panel. Lifted a bit off pure black (grey
-// instead of near-black) for a touch more white in the surface itself, on
-// top of the white shine.
-export const GLASS_TINT_BLACK = "rgba(60,60,64,0.5)";
+// Black liquid-glass tint — MUST match the home screen's radial-menu nodes
+// (NODE_GLASS_TINT in app/(tabs)/index.tsx). Those are the reference
+// treatment: they are the one surface in the app that reads as real glass,
+// and every other glass button should be indistinguishable from them.
+//
+// This was previously rgba(60,60,64,0.5) — a lighter, greyer tint that made
+// buttons look like painted plastic imitating glass rather than glass. The
+// home screen was corrected in ca2d7aa; GoldGradient was not, which is why
+// the rest of the app diverged from it.
+export const GLASS_TINT_BLACK = "rgba(10,10,12,0.55)";
+
 export const GOLD_OUTLINE_COLOR = "#F5D26B";
-// Translucent gold used on the app's general glass buttons (everything
-// except the radial menu, which keeps a crisper solid edge) — a lighter
-// touch so these surfaces read as clear glass with a gold hint, not a
-// gold-ringed panel.
-export const GOLD_OUTLINE_COLOR_CLEAR = "rgba(245,210,107,0.45)";
+
+// Neutral white rim, matching nodeCircleGlassBorder on the home screen.
+//
+// The gold rim this replaces was the other half of the "fake glass" problem:
+// real glass picks up a light edge from what's behind it, not a coloured
+// ring painted around it. The gold now lives only in content (icons, text,
+// active states), never in the surface edge. Kept as GOLD_OUTLINE_* names so
+// existing call sites keep working.
+export const GOLD_OUTLINE_COLOR_CLEAR = "rgba(255,255,255,0.18)";
 export const GOLD_OUTLINE_WIDTH = 1;
 export const GOLD_OUTLINE_STYLE = {
   borderWidth: GOLD_OUTLINE_WIDTH,
   borderColor: GOLD_OUTLINE_COLOR_CLEAR,
 } as const;
 
-// Fallback (non-native-glass) gradient for the black-tint style — dark
-// graphite rather than metallic gold, since the gold now lives in the
-// outline/shine, not the fill. Top stop lifted a touch for the same
-// "more white" nudge as GLASS_TINT_BLACK above.
-export const GLASS_METALLIC_BLACK = ["#3c3c40", "#141416", "#050505", "#000000"] as const;
+// Fallback gradient for platforms without native Liquid Glass. Matches
+// NODE_GLASS_METALLIC_FALLBACK on the home screen. The old top stop (#3c3c40)
+// was lighter and read as a painted metallic panel.
+export const GLASS_METALLIC_BLACK = ["#2a2a2c", "#141416", "#050505", "#000000"] as const;
+
+/**
+ * Fill for glass surfaces that sit on a FLAT BLACK background with nothing
+ * behind them to refract — the lock screen PIN pad being the case that
+ * exposed this.
+ *
+ * Liquid glass works by bending whatever is behind it. The home screen's
+ * nodes look right because the spinning coin and its glow sit underneath.
+ * Put the same "clear" glass on a plain #000000 screen and there is nothing
+ * to bend, so it renders as... black. That is why the PIN pad keys
+ * disappeared.
+ *
+ * Surfaces like that need an actual visible material instead: a faint white
+ * fill that lifts them off the background, with the same rim so they still
+ * belong to the same family. Use <GoldGradient solid> for these.
+ */
+export const GLASS_SOLID_FILL = "rgba(255,255,255,0.07)";
 
 const useNativeGlass = isLiquidGlassAvailable();
 
@@ -93,15 +116,28 @@ export function GoldGradient({
   style,
   children,
   specularIntensity = WIDE_SURFACE_SPECULAR,
+  solid = false,
 }: {
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
   specularIntensity?: number;
+  /**
+   * Set on surfaces sitting on a flat black background with nothing behind
+   * them to refract (the lock-screen PIN pad). Adds a faint white fill so
+   * the surface is actually visible, instead of clear glass over #000000
+   * rendering as black. See GLASS_SOLID_FILL.
+   */
+  solid?: boolean;
 }) {
   if (useNativeGlass) {
     return (
       <GlassView
-        style={[{ overflow: "hidden" }, GOLD_OUTLINE_STYLE, style]}
+        style={[
+          { overflow: "hidden" },
+          GOLD_OUTLINE_STYLE,
+          solid && { backgroundColor: GLASS_SOLID_FILL },
+          style,
+        ]}
         glassEffectStyle="clear"
         tintColor={GLASS_TINT_BLACK}
         isInteractive
@@ -123,6 +159,15 @@ export function GoldGradient({
         end={{ x: 0, y: 1 }}
         style={[{ backgroundColor: "#000000" }, StyleSheet.absoluteFill]}
       />
+      {/* Same reasoning as the native path: without native refraction this
+          gradient bottoms out at pure black, so a surface on a black screen
+          needs the fill to be visible at all. */}
+      {solid && (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: GLASS_SOLID_FILL }]}
+        />
+      )}
       <SpecularHighlight intensity={specularIntensity} />
       {children}
     </BlurView>

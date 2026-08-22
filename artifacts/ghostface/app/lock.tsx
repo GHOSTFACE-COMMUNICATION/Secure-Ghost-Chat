@@ -819,7 +819,7 @@ export default function LockScreen() {
                   if (k === "del") {
                     return (
                       <Pressable key={ki} style={styles.keyBtn} onPress={handleDelete}>
-                        <GoldGradient style={styles.keyBtnGoldFill}>
+                        <GoldGradient solid style={styles.keyBtnGoldFill}>
                           <Ionicons name="backspace-outline" size={22} color={colors.foreground} />
                         </GoldGradient>
                       </Pressable>
@@ -833,7 +833,7 @@ export default function LockScreen() {
                         onPress={handleSubmit}
                         testID="key-submit"
                       >
-                        <GoldGradient style={StyleSheet.absoluteFill}>
+                        <GoldGradient solid style={StyleSheet.absoluteFill}>
                           <View style={styles.keyBtnGoldFill}>
                             <Ionicons name="checkmark" size={26} color="#FFFFFF" />
                           </View>
@@ -848,7 +848,7 @@ export default function LockScreen() {
                       onPress={() => handleKey(k)}
                       testID={`key-${k}`}
                     >
-                      <GoldGradient style={styles.keyBtnGoldFill}>
+                      <GoldGradient solid style={styles.keyBtnGoldFill}>
                         <Text style={styles.keyText}>{k}</Text>
                       </GoldGradient>
                     </Pressable>
@@ -889,7 +889,7 @@ export default function LockScreen() {
             onPress={hasPin ? revealKeypad : () => setLocked(false)}
             testID={hasPin ? "enter-btn" : "no-pin-continue"}
           >
-            <GoldGradient style={styles.enterBtn}>
+            <GoldGradient solid style={styles.enterBtn}>
               <Text style={styles.enterBtnText}>ENTER</Text>
             </GoldGradient>
           </Pressable>

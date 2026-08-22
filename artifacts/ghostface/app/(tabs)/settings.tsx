@@ -43,6 +43,7 @@ import {
   normalizeE164,
 } from "@/lib/smsFallback";
 import { type } from "@/constants/typography";
+import { getContrastText, getProfileColor } from "@/lib/chatColors";
 
 function getPinStrength(pin: string): { level: 0 | 1 | 2; label: string } | null {
   if (pin.length === 0) return null;
@@ -283,6 +284,12 @@ export default function SettingsScreen() {
       setShowLanguage(true);
     }
   };
+
+  // Advanced group starts collapsed. Most of these are set once and never
+  // touched again (decoy/duress/wallet PINs, grace period, language), so
+  // surfacing them all at once was most of what made this screen read as an
+  // undifferentiated list.
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [showLanguage, setShowLanguage] = useState(false);
   const [showGracePeriod, setShowGracePeriod] = useState(false);
@@ -640,31 +647,197 @@ export default function SettingsScreen() {
       height: 1,
       backgroundColor: colors.border,
     },
-    profileSection: {
+    // ── Identity hero ───────────────────────────────────────────────
+    hero: {
       alignItems: "center",
-      paddingVertical: 28,
+      paddingTop: 22,
+      paddingBottom: 24,
     },
-    aliasText: {
+    heroAvatar: {
+      width: 76,
+      height: 76,
+      borderRadius: 38,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.18)",
+    },
+    heroAvatarTxt: {
       ...type.title,
-      fontSize: 20,
-      letterSpacing: 1.5,
-      color: colors.foreground,
-      marginTop: 12,
+      fontSize: 27,
+      letterSpacing: 0.5,
     },
-    aliasLabel: {
+    heroBadge: {
+      position: "absolute",
+      bottom: -1,
+      right: -1,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    heroAlias: {
+      ...type.title,
+      fontSize: 23,
+      letterSpacing: 2,
+      color: colors.foreground,
+      marginTop: 15,
+    },
+    heroSub: {
       ...type.micro,
-      fontSize: 10,
+      color: colors.mutedForeground,
+      marginTop: 6,
+    },
+
+    // ── Section headers — deliberately quiet ────────────────────────
+    sectionHeader: {
+      ...type.micro,
+      color: colors.mutedForeground,
+      paddingHorizontal: 26,
+      marginTop: 28,
+      marginBottom: 10,
+    },
+
+    // ── Cards ───────────────────────────────────────────────────────
+    // Grouped surfaces instead of full-bleed lines. The faint white fill
+    // lifts the card off pure black without becoming a visible panel.
+    card: {
+      marginHorizontal: 16,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: "rgba(255,255,255,0.03)",
+      overflow: "hidden",
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingVertical: 15,
+      gap: 13,
+    },
+    rowIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: "rgba(255,255,255,0.05)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    rowLabel: {
+      ...type.body,
+      fontSize: 14,
+      flex: 1,
+      color: colors.foreground,
+    },
+    rowSub: {
+      ...type.micro,
+      color: colors.mutedForeground,
+      marginTop: 3,
+    },
+    rowValue: {
+      ...type.label,
+      color: colors.primary,
+    },
+    rowDivider: {
+      height: 1,
+      backgroundColor: colors.border,
+      marginLeft: 59,
+    },
+
+    // ── Plan card ───────────────────────────────────────────────────
+    planCard: {
+      marginHorizontal: 16,
+      borderRadius: 16,
+      overflow: "hidden",
+    },
+    planCardInner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+      paddingHorizontal: 16,
+      paddingVertical: 18,
+      borderRadius: 16,
+    },
+    planIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: `${colors.primary}1A`,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    planLabel: {
+      ...type.label,
+      color: colors.foreground,
+    },
+    planValue: {
+      ...type.micro,
       color: colors.mutedForeground,
       marginTop: 4,
     },
-    sectionLabel: {
-      ...type.label,
-      fontSize: 10,
-      color: colors.mutedForeground,
-      paddingHorizontal: 20,
-      marginTop: 20,
-      marginBottom: 8,
+
+    // ── Primary action tiles ────────────────────────────────────────
+    // Two tap targets rather than two more list rows — the main break
+    // from the old line-after-line rhythm.
+    actionGrid: {
+      flexDirection: "row",
+      gap: 12,
+      marginHorizontal: 16,
+      marginTop: 14,
     },
+    actionTile: {
+      flex: 1,
+      borderRadius: 16,
+      overflow: "hidden",
+    },
+    actionTileInner: {
+      alignItems: "center",
+      gap: 10,
+      paddingVertical: 20,
+      paddingHorizontal: 12,
+      borderRadius: 16,
+    },
+    actionTileLabel: {
+      ...type.label,
+      color: colors.foreground,
+      textAlign: "center",
+      lineHeight: 15,
+    },
+
+    // ── Status grid ─────────────────────────────────────────────────
+    statusGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      marginHorizontal: 16,
+      gap: 8,
+    },
+    statusChip: {
+      flexGrow: 1,
+      flexBasis: "46%",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: "rgba(255,255,255,0.03)",
+    },
+    statusChipLabel: {
+      ...type.micro,
+      color: colors.mutedForeground,
+      flex: 1,
+    },
+    statusChipValue: {
+      ...type.micro,
+    },
+
     settingRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -672,30 +845,17 @@ export default function SettingsScreen() {
       paddingVertical: 14,
       gap: 14,
     },
-    settingIcon: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: "center",
-      justifyContent: "center",
-    },
     settingLabel: {
       ...type.subheading,
       fontSize: 13,
       flex: 1,
       color: colors.foreground,
     },
-    settingDivider: {
-      height: 1,
-      backgroundColor: colors.border,
-      marginLeft: 70,
-    },
     panicSection: {
-      marginHorizontal: 20,
-      marginTop: 32,
+      // marginTop was 32 when this followed a bare row list; it now sits
+      // under a DANGER ZONE section header, which supplies that space.
+      marginHorizontal: 16,
+      marginTop: 0,
       marginBottom: 12,
     },
     versionSection: {
@@ -789,25 +949,6 @@ export default function SettingsScreen() {
       fontSize: 12,
       color: colors.mutedForeground,
     },
-    subscriptionCard: {
-      borderWidth: 1,
-      borderColor: colors.primary,
-      borderRadius: 10,
-      marginHorizontal: 20,
-      backgroundColor: `${colors.primary}11`,
-      overflow: "hidden",
-    },
-    subscriptionValue: {
-      ...type.micro,
-      fontSize: 10,
-      color: colors.mutedForeground,
-      marginTop: 2,
-    },
-    settingSubtext: {
-      ...type.micro,
-      color: colors.mutedForeground,
-      marginTop: 2,
-    },
     settingHelperText: {
       ...type.micro,
       color: colors.mutedForeground,
@@ -837,76 +978,91 @@ export default function SettingsScreen() {
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.profileSection}>
-          <GhostLogo size={140} color={colors.primary} />
-          <Text style={styles.aliasText}>{alias ?? "GHOST_00"}</Text>
-          <Text style={styles.aliasLabel}>ANONYMOUS IDENTITY</Text>
+        {/* ── Identity ─────────────────────────────────────────────── */}
+        <View style={styles.hero}>
+          <View>
+            <View
+              style={[
+                styles.heroAvatar,
+                { backgroundColor: getProfileColor(alias ?? "GHOST_00") },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.heroAvatarTxt,
+                  { color: getContrastText(getProfileColor(alias ?? "GHOST_00")) },
+                ]}
+              >
+                {(alias ?? "GH").slice(0, 2)}
+              </Text>
+            </View>
+            <View style={styles.heroBadge}>
+              <Ionicons name="shield-checkmark" size={11} color={colors.background} />
+            </View>
+          </View>
+          <Text style={styles.heroAlias}>{alias ?? "GHOST_00"}</Text>
+          <Text style={styles.heroSub}>ANONYMOUS IDENTITY</Text>
         </View>
 
-        <Text style={styles.sectionLabel}>SUBSCRIPTION</Text>
-        <View style={styles.subscriptionCard}>
-          <Pressable
-            style={styles.settingRow}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push("/paywall"); }}
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
+        {/* ── Plan ─────────────────────────────────────────────────── */}
+        <Pressable
+          style={styles.planCard}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push("/paywall"); }}
+        >
+          <GoldGradient style={styles.planCardInner}>
+            <View style={styles.planIcon}>
+              <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.settingLabel}>CURRENT PLAN</Text>
-              <Text style={styles.subscriptionValue}>GHOST — FREE  ·  ◎ USDC</Text>
+              <Text style={styles.planLabel}>CURRENT PLAN</Text>
+              <Text style={styles.planValue}>GHOST — FREE  ·  ◎ USDC</Text>
             </View>
             <StatusPill tone="neutral" label="UPGRADE" colors={colors} />
-          </Pressable>
-        </View>
+          </GoldGradient>
+        </Pressable>
 
-        <Text style={styles.sectionLabel}>SECURITY</Text>
-        <View>
+        {/* ── Primary actions ──────────────────────────────────────── */}
+        <View style={styles.actionGrid}>
           <Pressable
-            style={styles.settingRow}
+            style={styles.actionTile}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               setLocked(true);
             }}
           >
-            <View style={[styles.settingIcon, { borderColor: colors.primary, backgroundColor: `${colors.primary}18` }]}>
-              <Ionicons name="lock-closed" size={18} color={colors.primary} />
-            </View>
-            <Text style={styles.settingLabel}>LOCK SESSION</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+            <GoldGradient style={styles.actionTileInner}>
+              <Ionicons name="lock-closed" size={22} color={colors.primary} />
+              <Text style={styles.actionTileLabel}>LOCK{"\n"}SESSION</Text>
+            </GoldGradient>
           </Pressable>
-          <View style={styles.settingDivider} />
           <Pressable
-            style={styles.settingRow}
+            style={styles.actionTile}
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/security-audit"); }}
           >
-            <View style={styles.settingIcon}>
-              <Ionicons name="shield-checkmark" size={18} color={colors.success} />
-            </View>
-            <Text style={styles.settingLabel}>SECURITY AUDIT</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+            <GoldGradient style={styles.actionTileInner}>
+              <Ionicons name="shield-checkmark" size={22} color={colors.success} />
+              <Text style={styles.actionTileLabel}>SECURITY{"\n"}AUDIT</Text>
+            </GoldGradient>
           </Pressable>
-          <View style={styles.settingDivider} />
-          <Pressable
-            style={styles.settingRow}
-            onPress={() => setShowPinChange(true)}
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="keypad-outline" size={18} color={colors.primary} />
+        </View>
+
+        {/* ── Security ─────────────────────────────────────────────── */}
+        <Text style={styles.sectionHeader}>SECURITY</Text>
+        <View style={styles.card}>
+          <Pressable style={styles.row} onPress={() => setShowPinChange(true)}>
+            <View style={styles.rowIcon}>
+              <Ionicons name="keypad-outline" size={17} color={colors.primary} />
             </View>
-            <Text style={styles.settingLabel}>CHANGE PIN</Text>
-            <Ionicons
-              name="chevron-forward"
-              size={16}
-              color={colors.mutedForeground}
-            />
+            <Text style={styles.rowLabel}>CHANGE PIN</Text>
+            <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
           </Pressable>
-          <View style={styles.settingDivider} />
-          <View style={styles.settingRow}>
-            <View style={styles.settingIcon}>
-              <Ionicons name="finger-print-outline" size={18} color={colors.primary} />
+          <View style={styles.rowDivider} />
+
+          <View style={styles.row}>
+            <View style={styles.rowIcon}>
+              <Ionicons name="finger-print-outline" size={17} color={colors.primary} />
             </View>
-            <Text style={styles.settingLabel}>BIOMETRIC LOCK</Text>
+            <Text style={styles.rowLabel}>BIOMETRIC LOCK</Text>
             <Switch
               value={biometricEnabled}
               onValueChange={handleBioToggle}
@@ -916,203 +1072,20 @@ export default function SettingsScreen() {
               testID="biometric-switch"
             />
           </View>
-          <View style={styles.settingDivider} />
-          {/* ── Low-bandwidth mode (Task #111) ────────────────────────── */}
-          <View style={[styles.settingRow, { flexDirection: "column", alignItems: "stretch", gap: 10, paddingVertical: 14 }]}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <View style={styles.settingIcon}>
-                <Ionicons name="cellular-outline" size={18} color={colors.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>LOW-BANDWIDTH MODE</Text>
-                <Text style={styles.settingSubtext}>
-                  {lowBandwidthActive ? "ACTIVE" : "INACTIVE"} · LINK {linkQuality.toUpperCase()}
-                </Text>
-              </View>
+          <View style={styles.rowDivider} />
+
+          <Pressable style={styles.row} onPress={handleAutoLockPress} testID="auto-lock-row">
+            <View style={styles.rowIcon}>
+              <Ionicons name="timer-outline" size={17} color={colors.primary} />
             </View>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {(
-                [
-                  { value: "auto", label: "AUTO" },
-                  { value: "forceOn", label: "ON" },
-                  { value: "forceOff", label: "OFF" },
-                ] as const
-              ).map((opt) => {
-                const selected = lowBandwidthMode === opt.value;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setLowBandwidthMode(opt.value).catch((e) =>
-                        console.warn("[Settings] Failed to set LBW mode:", e),
-                      );
-                    }}
-                    style={{ flex: 1 }}
-                    testID={`low-bw-${opt.value}`}
-                  >
-                    <GoldGradient
-                      style={{
-                        borderRadius: 8,
-                        paddingVertical: 8,
-                        alignItems: "center",
-                        ...(selected ? { borderColor: GOLD_OUTLINE_COLOR } : null),
-                      }}
-                    >
-                      <Text
-                        style={{
-                          ...type.labelStrong,
-                          color: selected ? colors.primary : colors.mutedForeground,
-                        }}
-                      >
-                        {opt.label}
-                      </Text>
-                    </GoldGradient>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Text style={styles.settingHelperText}>
-              FOR SATELLITE LINKS. BLOCKS ATTACHMENT SENDS, DEFERS INCOMING MEDIA, STRETCHES KEEPALIVES.
-            </Text>
-          </View>
-          <View style={styles.settingDivider} />
-          {/* ── Satellite SMS fallback (Task #113) ─────────────────────── */}
-          <Pressable
-            style={styles.settingRow}
-            onPress={handleOpenSmsFallback}
-            testID="sms-fallback-row"
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="paper-plane-outline" size={18} color={colors.destructive} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.settingLabel, { color: colors.destructive }]}>SATELLITE FALLBACK</Text>
-              <Text style={styles.settingSubtext}>
-                {smsFallbackNumbers.length > 0
-                  ? `${smsFallbackNumbers.length} / ${MAX_SMS_FALLBACK_NUMBERS} RECIPIENTS ARMED`
-                  : "NO RECIPIENTS"}
-              </Text>
-            </View>
-            {smsFallbackNumbers.length > 0 ? (
-              <StatusPill tone="danger" label="ARMED" colors={colors} />
-            ) : (
-              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-            )}
+            <Text style={styles.rowLabel}>AUTO-LOCK</Text>
+            <Text style={styles.rowValue}>{currentAutoLockLabel}</Text>
+            <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
           </Pressable>
-          <View style={styles.settingDivider} />
+          <View style={styles.rowDivider} />
+
           <Pressable
-            style={styles.settingRow}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setDuressPinInput("");
-              setDuressPinConfirm("");
-              setDuressPinError("");
-              setShowDuressPin(true);
-            }}
-            testID="duress-pin-row"
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="skull-outline" size={18} color={colors.destructive} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.settingLabel, { color: colors.destructive }]}>DURESS PIN</Text>
-              <Text style={styles.settingSubtext}>
-                TRIGGERS SILENT WIPE ON ENTRY
-              </Text>
-            </View>
-            {hasDuressPin ? (
-              <StatusPill tone="danger" label="ACTIVE" colors={colors} />
-            ) : (
-              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-            )}
-          </Pressable>
-          <View style={styles.settingDivider} />
-          {!hasDuressPin && (
-            <Text style={styles.emptyHintText}>
-              SET A DURESS PIN TO CONFIGURE GRACE PERIOD
-            </Text>
-          )}
-          {hasDuressPin && (
-            <>
-              <Pressable
-                style={styles.settingRow}
-                onPress={handleGracePeriodPress}
-                testID="grace-period-row"
-              >
-                <View style={styles.settingIcon}>
-                  <Ionicons name="hourglass-outline" size={18} color={colors.destructive} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.settingLabel, { color: colors.destructive }]}>DURESS GRACE PERIOD</Text>
-                  <Text style={styles.settingSubtext}>
-                    {currentGraceLabel} TO CANCEL AFTER ENTRY
-                  </Text>
-                </View>
-                <Text style={{ ...type.labelStrong, color: colors.destructive }}>
-                  {currentGraceLabel}
-                </Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-              </Pressable>
-              <View style={styles.settingDivider} />
-            </>
-          )}
-          <Pressable
-            style={styles.settingRow}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setDecoyPinInput("");
-              setDecoyPinConfirm("");
-              setDecoyPinError("");
-              setShowDecoyPin(true);
-            }}
-            testID="decoy-pin-row"
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="eye-off-outline" size={18} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingLabel}>DECOY PIN</Text>
-              <Text style={styles.settingSubtext}>
-                UNLOCKS TO AN EMPTY, HARMLESS-LOOKING APP
-              </Text>
-            </View>
-            {hasDecoyPin ? (
-              <StatusPill tone="secure" label="ACTIVE" colors={colors} />
-            ) : (
-              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-            )}
-          </Pressable>
-          <View style={styles.settingDivider} />
-          <Pressable
-            style={styles.settingRow}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setWalletPinInput("");
-              setWalletPinConfirm("");
-              setWalletPinError("");
-              setShowWalletPin(true);
-            }}
-            testID="wallet-pin-row"
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="wallet-outline" size={18} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingLabel}>WALLET PIN</Text>
-              <Text style={styles.settingSubtext}>
-                EXTRA PIN REQUIRED TO OPEN THE WALLET
-              </Text>
-            </View>
-            {hasWalletPin ? (
-              <StatusPill tone="secure" label="ACTIVE" colors={colors} />
-            ) : (
-              <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-            )}
-          </Pressable>
-          <View style={styles.settingDivider} />
-          <Pressable
-            style={styles.settingRow}
+            style={styles.row}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setRecoveryPinInput("");
@@ -1122,104 +1095,284 @@ export default function SettingsScreen() {
             }}
             testID="recovery-phrase-row"
           >
-            <View style={styles.settingIcon}>
-              <Ionicons name="key-outline" size={18} color={colors.primary} />
+            <View style={styles.rowIcon}>
+              <Ionicons name="key-outline" size={17} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.settingLabel}>RECOVERY PHRASE</Text>
-              <Text style={styles.settingSubtext}>
-                VIEW YOUR IDENTITY BACKUP PHRASE
-              </Text>
+              <Text style={styles.rowLabel}>RECOVERY PHRASE</Text>
+              <Text style={styles.rowSub}>VIEW YOUR IDENTITY BACKUP PHRASE</Text>
             </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-          </Pressable>
-          <View style={styles.settingDivider} />
-          <Pressable
-            style={styles.settingRow}
-            onPress={handleAutoLockPress}
-            testID="auto-lock-row"
-          >
-            <View style={styles.settingIcon}>
-              <Ionicons name="timer-outline" size={18} color={colors.primary} />
-            </View>
-            <Text style={styles.settingLabel}>AUTO-LOCK</Text>
-            <Text style={{ ...type.labelStrong, color: colors.primary }}>
-              {currentAutoLockLabel}
-            </Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+            <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
           </Pressable>
         </View>
 
-        <Text style={styles.sectionLabel}>APPEARANCE</Text>
-        <View>
+        {/* ── Status readouts ──────────────────────────────────────────
+            Six read-only indicators that were previously six full-width
+            rows apiece. They carry no action, so they get the least
+            weight on the screen: a compact grid instead of a list. */}
+        <Text style={styles.sectionHeader}>STATUS</Text>
+        <View style={styles.statusGrid}>
           {(
             [
+              { icon: "eye-off-outline", label: "ANONYMOUS", value: "ON" },
+              { icon: "lock-closed-outline", label: "E2EE", value: "ON" },
+              { icon: "globe-outline", label: "DNS LEAK", value: "ON" },
+              { icon: "analytics-outline", label: "TELEMETRY", value: "OFF" },
               { icon: "moon-outline", label: "THEME", value: "DARK" },
               { icon: "glasses-outline", label: "GHOST MODE", value: "ENABLED" },
             ] as Array<{ icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; value: string }>
           ).map((item) => (
-            <View key={item.label}>
-              <View style={styles.settingRow}>
-                <View style={styles.settingIcon}>
-                  <Ionicons name={item.icon} size={18} color={colors.mutedForeground} />
-                </View>
-                <Text style={styles.settingLabel}>{item.label}</Text>
-                <Text
-                  style={{
-                    ...type.labelStrong,
-                    color: colors.primary,
-                  }}
-                >
-                  {item.value}
-                </Text>
-              </View>
-              <View style={styles.settingDivider} />
+            <View key={item.label} style={styles.statusChip}>
+              <Ionicons name={item.icon} size={14} color={colors.mutedForeground} />
+              <Text style={styles.statusChipLabel} numberOfLines={1}>{item.label}</Text>
+              <Text
+                style={[
+                  styles.statusChipValue,
+                  { color: item.value === "OFF" ? colors.destructive : colors.success },
+                ]}
+              >
+                {item.value}
+              </Text>
             </View>
           ))}
-          <Pressable style={styles.settingRow} onPress={handleLanguagePress}>
-            <View style={styles.settingIcon}>
-              <Ionicons name="globe-outline" size={18} color={colors.mutedForeground} />
+        </View>
+
+        {/* ── Advanced (collapsed) ─────────────────────────────────── */}
+        <Text style={styles.sectionHeader}>ADVANCED</Text>
+        <View style={styles.card}>
+          <Pressable
+            style={styles.row}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowAdvanced((v) => !v);
+            }}
+            testID="advanced-toggle"
+          >
+            <View style={styles.rowIcon}>
+              <Ionicons name="options-outline" size={17} color={colors.mutedForeground} />
             </View>
-            <Text style={styles.settingLabel}>LANGUAGE</Text>
-            <Text style={{ color: colors.primary, fontSize: 13, marginRight: 4 }}>{currentLanguage.flag}</Text>
-            <Text style={{ ...type.labelStrong, color: colors.primary }}>
-              {currentLanguage.label}
-            </Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} style={{ marginLeft: 4 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>ADVANCED SETTINGS</Text>
+              <Text style={styles.rowSub}>DECOY &amp; DURESS, WALLET PIN, LINK, LANGUAGE</Text>
+            </View>
+            <Ionicons
+              name={showAdvanced ? "chevron-up" : "chevron-down"}
+              size={15}
+              color={colors.mutedForeground}
+            />
           </Pressable>
-        </View>
 
-        <Text style={styles.sectionLabel}>PRIVACY</Text>
-        <View>
-          {(
-            [
-              { icon: "eye-off-outline", label: "ANONYMOUS MODE", value: "ON" },
-              { icon: "lock-closed-outline", label: "E2EE MESSAGING", value: "ON" },
-              { icon: "globe-outline", label: "DNS LEAK PROTECTION", value: "ON" },
-              { icon: "analytics-outline", label: "TELEMETRY", value: "OFF" },
-            ] as Array<{ icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; value: string }>
-          ).map((item, idx, arr) => (
-            <View key={item.label}>
-              <View style={styles.settingRow}>
-                <View style={styles.settingIcon}>
-                  <Ionicons name={item.icon} size={18} color={colors.mutedForeground} />
+          {showAdvanced && (
+            <>
+              <View style={styles.rowDivider} />
+              <Pressable
+                style={styles.row}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setDecoyPinInput("");
+                  setDecoyPinConfirm("");
+                  setDecoyPinError("");
+                  setShowDecoyPin(true);
+                }}
+                testID="decoy-pin-row"
+              >
+                <View style={styles.rowIcon}>
+                  <Ionicons name="eye-off-outline" size={17} color={colors.primary} />
                 </View>
-                <Text style={styles.settingLabel}>{item.label}</Text>
-                <Text
-                  style={{
-                    ...type.labelStrong,
-                    color:
-                      item.value === "ON" ? colors.success : colors.destructive,
-                  }}
-                >
-                  {item.value}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowLabel}>DECOY PIN</Text>
+                  <Text style={styles.rowSub}>UNLOCKS TO AN EMPTY, HARMLESS-LOOKING APP</Text>
+                </View>
+                {hasDecoyPin ? (
+                  <StatusPill tone="secure" label="ACTIVE" colors={colors} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
+                )}
+              </Pressable>
+              <View style={styles.rowDivider} />
+
+              <Pressable
+                style={styles.row}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setDuressPinInput("");
+                  setDuressPinConfirm("");
+                  setDuressPinError("");
+                  setShowDuressPin(true);
+                }}
+                testID="duress-pin-row"
+              >
+                <View style={styles.rowIcon}>
+                  <Ionicons name="skull-outline" size={17} color={colors.destructive} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.rowLabel, { color: colors.destructive }]}>DURESS PIN</Text>
+                  <Text style={styles.rowSub}>TRIGGERS SILENT WIPE ON ENTRY</Text>
+                </View>
+                {hasDuressPin ? (
+                  <StatusPill tone="danger" label="ACTIVE" colors={colors} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
+                )}
+              </Pressable>
+              <View style={styles.rowDivider} />
+
+              {!hasDuressPin && (
+                <>
+                  <Text style={styles.emptyHintText}>
+                    SET A DURESS PIN TO CONFIGURE GRACE PERIOD
+                  </Text>
+                  <View style={styles.rowDivider} />
+                </>
+              )}
+              {hasDuressPin && (
+                <>
+                  <Pressable
+                    style={styles.row}
+                    onPress={handleGracePeriodPress}
+                    testID="grace-period-row"
+                  >
+                    <View style={styles.rowIcon}>
+                      <Ionicons name="hourglass-outline" size={17} color={colors.destructive} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.rowLabel, { color: colors.destructive }]}>DURESS GRACE PERIOD</Text>
+                      <Text style={styles.rowSub}>{currentGraceLabel} TO CANCEL AFTER ENTRY</Text>
+                    </View>
+                    <Text style={{ ...type.label, color: colors.destructive }}>
+                      {currentGraceLabel}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
+                  </Pressable>
+                  <View style={styles.rowDivider} />
+                </>
+              )}
+
+              <Pressable
+                style={styles.row}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setWalletPinInput("");
+                  setWalletPinConfirm("");
+                  setWalletPinError("");
+                  setShowWalletPin(true);
+                }}
+                testID="wallet-pin-row"
+              >
+                <View style={styles.rowIcon}>
+                  <Ionicons name="wallet-outline" size={17} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowLabel}>WALLET PIN</Text>
+                  <Text style={styles.rowSub}>EXTRA PIN REQUIRED TO OPEN THE WALLET</Text>
+                </View>
+                {hasWalletPin ? (
+                  <StatusPill tone="secure" label="ACTIVE" colors={colors} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
+                )}
+              </Pressable>
+              <View style={styles.rowDivider} />
+
+              <Pressable
+                style={styles.row}
+                onPress={handleOpenSmsFallback}
+                testID="sms-fallback-row"
+              >
+                <View style={styles.rowIcon}>
+                  <Ionicons name="paper-plane-outline" size={17} color={colors.destructive} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.rowLabel, { color: colors.destructive }]}>SATELLITE FALLBACK</Text>
+                  <Text style={styles.rowSub}>
+                    {smsFallbackNumbers.length > 0
+                      ? `${smsFallbackNumbers.length} / ${MAX_SMS_FALLBACK_NUMBERS} RECIPIENTS ARMED`
+                      : "NO RECIPIENTS"}
+                  </Text>
+                </View>
+                {smsFallbackNumbers.length > 0 ? (
+                  <StatusPill tone="danger" label="ARMED" colors={colors} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
+                )}
+              </Pressable>
+              <View style={styles.rowDivider} />
+
+              {/* Low-bandwidth mode (Task #111) */}
+              <View style={[styles.row, { flexDirection: "column", alignItems: "stretch", gap: 11 }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 13 }}>
+                  <View style={styles.rowIcon}>
+                    <Ionicons name="cellular-outline" size={17} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowLabel}>LOW-BANDWIDTH MODE</Text>
+                    <Text style={styles.rowSub}>
+                      {lowBandwidthActive ? "ACTIVE" : "INACTIVE"} · LINK {linkQuality.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {(
+                    [
+                      { value: "auto", label: "AUTO" },
+                      { value: "forceOn", label: "ON" },
+                      { value: "forceOff", label: "OFF" },
+                    ] as const
+                  ).map((opt) => {
+                    const selected = lowBandwidthMode === opt.value;
+                    return (
+                      <Pressable
+                        key={opt.value}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setLowBandwidthMode(opt.value).catch((e) =>
+                            console.warn("[Settings] Failed to set LBW mode:", e),
+                          );
+                        }}
+                        style={{ flex: 1 }}
+                        testID={`low-bw-${opt.value}`}
+                      >
+                        <GoldGradient
+                          style={{
+                            borderRadius: 10,
+                            paddingVertical: 9,
+                            alignItems: "center",
+                            ...(selected ? { borderColor: GOLD_OUTLINE_COLOR } : null),
+                          }}
+                        >
+                          <Text
+                            style={{
+                              ...type.label,
+                              color: selected ? colors.primary : colors.mutedForeground,
+                            }}
+                          >
+                            {opt.label}
+                          </Text>
+                        </GoldGradient>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.settingHelperText}>
+                  FOR SATELLITE LINKS. BLOCKS ATTACHMENT SENDS, DEFERS INCOMING MEDIA, STRETCHES KEEPALIVES.
                 </Text>
               </View>
-              {idx < arr.length - 1 && <View style={styles.settingDivider} />}
-            </View>
-          ))}
+              <View style={styles.rowDivider} />
+
+              <Pressable style={styles.row} onPress={handleLanguagePress}>
+                <View style={styles.rowIcon}>
+                  <Ionicons name="globe-outline" size={17} color={colors.mutedForeground} />
+                </View>
+                <Text style={styles.rowLabel}>LANGUAGE</Text>
+                <Text style={{ color: colors.primary, fontSize: 13, marginRight: 2 }}>{currentLanguage.flag}</Text>
+                <Text style={styles.rowValue}>{currentLanguage.label}</Text>
+                <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
+              </Pressable>
+            </>
+          )}
         </View>
 
+        <Text style={[styles.sectionHeader, { color: colors.destructive }]}>DANGER ZONE</Text>
         <View style={styles.panicSection}>
           <PanicButton onWipe={handlePanicWipe} />
         </View>

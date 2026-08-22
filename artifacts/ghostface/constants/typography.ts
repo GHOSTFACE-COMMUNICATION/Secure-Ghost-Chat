@@ -81,18 +81,25 @@ type T = TextStyle;
  *
  *   title: { ...type.title, color: colors.foreground }
  */
+// ── Weight pass 2 ──────────────────────────────────────────────────────
+// Every style below dropped one step: semibold→medium, medium→regular. The
+// first pass removed the 800s but still leant on 600 for headings and 500
+// for body, which kept the screens feeling denser than intended. Weight is
+// now carried almost entirely by size and colour rather than stroke, which
+// is what reads as "executive" rather than "sturdy". 600 survives only on
+// `title`, and 700 nowhere.
 export const type = {
-  /** Screen-level headline. The only place 700 is used. */
-  display: { fontFamily: FONT.bold, fontSize: 26, letterSpacing: TRACKING.display } as T,
+  /** Screen-level headline. */
+  display: { fontFamily: FONT.semibold, fontSize: 26, letterSpacing: TRACKING.display } as T,
 
-  /** Screen titles / header bars. */
+  /** Screen titles / header bars. The only remaining 600. */
   title: { fontFamily: FONT.semibold, fontSize: 20, letterSpacing: TRACKING.title } as T,
 
   /** Section headings, card titles, primary row labels. */
-  heading: { fontFamily: FONT.semibold, fontSize: 16, letterSpacing: TRACKING.heading } as T,
+  heading: { fontFamily: FONT.medium, fontSize: 16, letterSpacing: TRACKING.heading } as T,
 
   /** Emphasised row text — a setting's name, a contact's alias. */
-  subheading: { fontFamily: FONT.medium, fontSize: 15, letterSpacing: TRACKING.heading } as T,
+  subheading: { fontFamily: FONT.regular, fontSize: 15, letterSpacing: TRACKING.heading } as T,
 
   /** Default reading text. */
   body: { fontFamily: FONT.regular, fontSize: 15, letterSpacing: TRACKING.body } as T,
@@ -108,13 +115,13 @@ export const type = {
    * This is the one place tracking stays wide, because small caps genuinely
    * need it. Apply `textTransform: "uppercase"` at the call site.
    */
-  label: { fontFamily: FONT.medium, fontSize: 11, letterSpacing: TRACKING.label } as T,
+  label: { fontFamily: FONT.regular, fontSize: 11, letterSpacing: TRACKING.label } as T,
 
   /** Same, with a little more presence — active tabs, primary button text. */
-  labelStrong: { fontFamily: FONT.semibold, fontSize: 11, letterSpacing: TRACKING.label } as T,
+  labelStrong: { fontFamily: FONT.medium, fontSize: 11, letterSpacing: TRACKING.label } as T,
 
   /** Timestamps, counters, the smallest supporting text. */
-  micro: { fontFamily: FONT.medium, fontSize: 9, letterSpacing: TRACKING.micro } as T,
+  micro: { fontFamily: FONT.regular, fontSize: 9, letterSpacing: TRACKING.micro } as T,
 
   /** Technical values read character by character. */
   mono: { fontFamily: MONO, fontSize: 13, letterSpacing: 0.4 } as T,
