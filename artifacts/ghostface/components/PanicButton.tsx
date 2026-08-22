@@ -392,7 +392,9 @@ const styles = StyleSheet.create({
     // Hairline light edge, matching every other glass surface in the app —
     // the old solid #ffffff outline read as a painted button, not glass.
     borderColor: "rgba(255,255,255,0.32)",
-    overflow: "hidden",
+    // No overflow:hidden here — this view carries the red glow, and clipping
+    // to its own bounds kills it on iOS. The inner glass surface already
+    // clips itself to the same radius.
     boxShadow: boxShadow("#ef4444", 0.5, 18, 0, 4),
   },
   btn: {
