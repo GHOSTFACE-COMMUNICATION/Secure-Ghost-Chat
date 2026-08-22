@@ -18,9 +18,11 @@ in flight)
   enquiry) still silent — chase draft sits in Gmail drafts on that thread;
   one-time Cowork reminder fires Mon 24 Aug 9am NZT to check replies/nudge.
   (Earlier "chase Mon 25 Aug" was a date error; Monday is the 24th.)
-- ⚠️ Copies of counsel emails were forwarded to jjules@xtra.com and
-  jjules@xtra.co (two spellings). If the intended address is jjules@xtra.co.nz,
-  both may have bounced or reached a stranger — verify.
+- Copies of counsel emails were forwarded to jjules@ — Benji's mother, an
+  intended recipient, not a leak. ⚠️ However the two spellings used were
+  `xtra.com` and `xtra.co`, while NZ Xtra addresses are `@xtra.co.nz`. Both
+  domains used are real and separately owned, so confirm she actually
+  received it; if not, the mail reached whoever holds jjules@ there.
 - **Google account recovered** (was locked). Gmail connector authorized in
   Cowork; send-as alias benjamin@ghostface.co.nz confirmed working.
   Follow-ups from the lockout list still open: Vercel 2nd login method,
