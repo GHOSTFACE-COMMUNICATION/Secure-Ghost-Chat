@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
-import { type } from "@/constants/typography";
+import { TRACKING, type } from "@/constants/typography";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -282,7 +282,15 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
         <Text
           style={[
             styles.label,
-            { color: colors.mutedForeground, fontSize: 10 * scale, marginBottom: 12 * scale },
+            {
+              color: colors.mutedForeground,
+              fontSize: 10 * scale,
+              // Scales with the type for the same reason btnText's does: left
+              // fixed, tracking gets proportionally looser as the font shrinks,
+              // and this caption is already inside a `scale`-width container.
+              letterSpacing: TRACKING.label * scale,
+              marginBottom: 12 * scale,
+            },
           ]}
         >
           HOLD 3 SECONDS TO WIPE ALL DATA
@@ -302,9 +310,14 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
               restyle. Same treatment as DELETE SEALED CONVERSATION in
               app/chat/[id].tsx; colour lives in the content, never in the
               surface or the rim (see GoldGradient).
-              `solid` because on the settings screen this sits on a flat
-              #000000 backdrop with nothing behind it to refract — clear glass
-              over black renders as black. See GLASS_SOLID_FILL. */}
+              `solid` because BOTH call sites sit on a flat black backdrop
+              with nothing behind them to refract, which is the PIN-pad case
+              GLASS_SOLID_FILL documents — clear glass over black renders as
+              black. Settings is `background: #000000`; the home screen's
+              panicWrap is pinned `bottom: 100` over `BG = "#000"`, well clear
+              of the coin and its glow. If this button is ever moved over the
+              coin, drop `solid` for that call site — there is something to
+              refract there. */}
           <GoldGradient
             solid
             style={[
