@@ -1,4 +1,5 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
+import { timingSafeEqual } from "node:crypto";
 import { db, tokensTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, clusterApiUrl } from "@solana/web3.js";
@@ -39,6 +40,56 @@ function getDeployerKeypair(): Keypair | null {
   } catch {
     return null;
   }
+}
+
+// ── Admin gate ────────────────────────────────────────────────────────────────
+//
+// These routes mint SPL tokens with the server's own deployer keypair and can
+// spend real SOL on mainnet. They are NOT user-scoped, so the per-user Bearer
+// auth the rest of the API uses (see getAuthedAlias in messages.ts) is the
+// wrong model — no ordinary user should be able to mint. They take a separate
+// shared admin secret instead.
+//
+// FAILS CLOSED. If TOKEN_ADMIN_SECRET is unset the mutating routes refuse
+// outright rather than defaulting open. That ordering matters: until now these
+// routes were reachable by anyone and were inert only because
+// SOLANA_DEPLOYER_KEY happened to be unset, so setting the deployer key would
+// silently have armed an unauthenticated mint endpoint.
+//
+// Reads (GET /tokens, GET /tokens/:id) stay public on purpose — the mobile app
+// fetches them for its token tabs (appTokens in AppContext), and they expose
+// nothing but already-public token metadata.
+function requireTokenAdmin(req: Request, res: Response, next: NextFunction): void {
+  const expected = process.env.TOKEN_ADMIN_SECRET?.trim();
+  if (!expected) {
+    logger.error("[tokens] TOKEN_ADMIN_SECRET is not set — refusing admin request");
+    res.status(503).json({
+      error:
+        "Token administration is disabled: TOKEN_ADMIN_SECRET is not configured on the server.",
+    });
+    return;
+  }
+
+  const auth = req.headers.authorization ?? "";
+  const provided = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!provided) {
+    res.status(401).json({ error: "Missing admin credentials." });
+    return;
+  }
+
+  // Constant-time compare. Hash-free but length-safe: compare equal-length
+  // buffers so timingSafeEqual can't throw and length isn't leaked by an early
+  // return.
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  const ok = a.length === b.length && timingSafeEqual(a, b);
+  if (!ok) {
+    logger.warn({ ip: req.ip }, "[tokens] rejected admin request with bad credentials");
+    res.status(403).json({ error: "Invalid admin credentials." });
+    return;
+  }
+
+  next();
 }
 
 // ── Seed CASPER + FaceZero on first run ───────────────────────────────────────
@@ -96,7 +147,7 @@ router.get("/tokens/:id", async (req: Request, res: Response) => {
 });
 
 // ── POST /api/tokens ──────────────────────────────────────────────────────────
-router.post("/tokens", async (req: Request, res: Response) => {
+router.post("/tokens", requireTokenAdmin, async (req: Request, res: Response) => {
   try {
     const { name, symbol, description, decimals, totalSupply, logoColor, notes } = req.body;
     if (!name || !symbol) return res.status(400).json({ error: "name and symbol are required" });
@@ -119,7 +170,7 @@ router.post("/tokens", async (req: Request, res: Response) => {
 });
 
 // ── PUT /api/tokens/:id ───────────────────────────────────────────────────────
-router.put("/tokens/:id", async (req: Request, res: Response) => {
+router.put("/tokens/:id", requireTokenAdmin, async (req: Request, res: Response) => {
   try {
     const { name, symbol, description, decimals, totalSupply, logoColor, notes } = req.body;
     const [token] = await db
@@ -135,7 +186,7 @@ router.put("/tokens/:id", async (req: Request, res: Response) => {
 });
 
 // ── DELETE /api/tokens/:id ────────────────────────────────────────────────────
-router.delete("/tokens/:id", async (req: Request, res: Response) => {
+router.delete("/tokens/:id", requireTokenAdmin, async (req: Request, res: Response) => {
   try {
     const [token] = await db
       .select()
@@ -157,7 +208,7 @@ router.delete("/tokens/:id", async (req: Request, res: Response) => {
 // network defaults to "devnet" — deploying a real, irreversible mainnet
 // token requires explicitly passing { network: "mainnet-beta" }. This was
 // previously hardcoded to mainnet-beta with no way to test safely first.
-router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
+router.post("/tokens/:id/deploy", requireTokenAdmin, async (req: Request, res: Response) => {
   try {
     const [token] = await db
       .select()
@@ -274,7 +325,7 @@ router.post("/tokens/:id/deploy", async (req: Request, res: Response) => {
 });
 
 // ── GET /admin — Token management admin dashboard ─────────────────────────────
-router.get("/admin", (_req: Request, res: Response) => {
+router.get("/admin", requireTokenAdmin, (_req: Request, res: Response) => {
   const API = `/api`;
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!DOCTYPE html>
