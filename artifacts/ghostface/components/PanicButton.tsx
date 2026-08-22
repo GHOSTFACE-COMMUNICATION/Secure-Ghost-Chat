@@ -1,4 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
@@ -8,13 +10,71 @@ import {
   Easing,
   Modal,
   Pressable,
+  StyleProp,
   StyleSheet,
   Text,
   View,
+  ViewStyle,
 } from "react-native";
+import { SpecularHighlight } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
 import { boxShadow } from "@/lib/shadow";
 import { type } from "@/constants/typography";
+
+// ─── Liquid-glass red surface ─────────────────────────────────────────────────
+// The panic button used to be a flat red gradient; it is now the same glass
+// material as the rest of the app, tinted red.
+//
+// It sits on a flat black screen, which is the case GLASS_SOLID_FILL documents
+// in GoldGradient.tsx: clear glass with nothing behind it to refract renders as
+// black, and a low-alpha red tint over black composites to dark maroon rather
+// than red. So both paths carry a real translucent red fill under the glass —
+// the surface reads unambiguously red while still being see-through.
+const RED_GLASS_TINT = "rgba(196,26,26,0.66)";
+const RED_GLASS_FILL = "rgba(214,40,40,0.28)";
+const RED_GLASS_GRADIENT = [
+  "rgba(255,138,138,0.55)",
+  "rgba(239,68,68,0.48)",
+  "rgba(153,27,27,0.52)",
+  "rgba(90,10,10,0.58)",
+] as const;
+const USE_NATIVE_GLASS = isLiquidGlassAvailable();
+
+function RedGlassSurface({
+  style,
+  children,
+}: {
+  style?: StyleProp<ViewStyle>;
+  children?: React.ReactNode;
+}) {
+  if (USE_NATIVE_GLASS) {
+    return (
+      <GlassView
+        style={[{ backgroundColor: RED_GLASS_FILL }, style]}
+        glassEffectStyle="clear"
+        tintColor={RED_GLASS_TINT}
+        isInteractive
+      >
+        <SpecularHighlight intensity={0.22} />
+        {children}
+      </GlassView>
+    );
+  }
+  return (
+    <BlurView intensity={28} tint="dark" style={[{ backgroundColor: RED_GLASS_FILL }, style]}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={RED_GLASS_GRADIENT}
+        locations={[0, 0.45, 0.75, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <SpecularHighlight intensity={0.22} />
+      {children}
+    </BlurView>
+  );
+}
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -298,11 +358,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
           onPressOut={cancelPanic}
           testID="panic-btn"
         >
-          <LinearGradient
-            colors={["#ff6b6b", "#ef4444", "#b91c1c", "#7f1d1d"]}
-            locations={[0, 0.45, 0.75, 1]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
+          <RedGlassSurface
             style={[
               styles.btn,
               { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
@@ -317,7 +373,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
             <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
               {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
             </Text>
-          </LinearGradient>
+          </RedGlassSurface>
         </Pressable>
       </View>
     </>
@@ -333,8 +389,11 @@ const styles = StyleSheet.create({
   },
   btnWrap: {
     borderWidth: 1,
-    borderColor: "#ffffff",
-    boxShadow: boxShadow("#ef4444", 0.45, 16, 0, 4),
+    // Hairline light edge, matching every other glass surface in the app —
+    // the old solid #ffffff outline read as a painted button, not glass.
+    borderColor: "rgba(255,255,255,0.32)",
+    overflow: "hidden",
+    boxShadow: boxShadow("#ef4444", 0.5, 18, 0, 4),
   },
   btn: {
     flexDirection: "row",

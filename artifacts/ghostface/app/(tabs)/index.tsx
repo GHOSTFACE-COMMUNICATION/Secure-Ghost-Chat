@@ -406,10 +406,12 @@ export default function HomeScreen() {
                     menuOpen ? "Hide menu" : "Tap to reveal menu"
                   }
                 >
-                  {/* Outer ambient glow */}
+                  {/* Outer ambient glow — this is what the clear ring of the
+                      coin reads through, so it carries the light rather than
+                      just haloing the edge. */}
                   <View pointerEvents="none" style={styles.globeGlow} />
 
-                  {/* Fake thickness: gold edge band flashes when edge-on */}
+                  {/* Fake thickness: glass edge flashes when edge-on */}
                   <Animated.View
                     pointerEvents="none"
                     style={[
@@ -422,43 +424,76 @@ export default function HomeScreen() {
                     <View style={styles.coinEdgeHighlight} />
                   </Animated.View>
 
-                  {/* Physics-driven spinning coin with metallic rim */}
+                  {/* Physics-driven spinning coin. The disc itself is clear
+                      glass — a faint fill between two hairline rims — with the
+                      logo suspended in the middle as the only opaque part, so
+                      the glow behind shows through the ring around it. */}
                   <Animated.View
                     pointerEvents="none"
                     style={[
-                      styles.coinRim,
+                      styles.coinGlass,
                       {
                         opacity: circleOpacity,
                         transform: coinTransform,
                       },
                     ]}
                   >
-                    <Image
-                      source={require("../../assets/images/ghostface-logo.jpeg")}
-                      resizeMode="cover"
-                      style={styles.coinImage}
-                    />
-                    {/* Motion blur: pre-blurred face crossfades in with boost
-                        velocity so top-speed spins read as a whirl */}
-                    <Animated.Image
-                      source={require("../../assets/images/ghostface-logo.jpeg")}
-                      resizeMode="cover"
-                      blurRadius={18}
-                      style={[styles.coinBlurImage, { opacity: coinBlur }]}
-                    />
-                    {/* Faint horizontal streaks sell the spin direction */}
-                    <Animated.View
-                      pointerEvents="none"
-                      style={[
-                        styles.coinBlurStreaks,
-                        { opacity: Animated.multiply(coinBlur, 0.55) },
-                      ]}
-                    >
-                      <View style={[styles.coinStreak, { top: "28%" }]} />
-                      <View style={[styles.coinStreak, { top: "50%" }]} />
-                      <View style={[styles.coinStreak, { top: "72%" }]} />
-                    </Animated.View>
+                    <View style={styles.coinLens}>
+                      <Image
+                        source={require("../../assets/images/ghostface-logo.jpeg")}
+                        resizeMode="cover"
+                        style={styles.coinImage}
+                      />
+                      {/* Motion blur: pre-blurred face crossfades in with boost
+                          velocity so top-speed spins read as a whirl */}
+                      <Animated.Image
+                        source={require("../../assets/images/ghostface-logo.jpeg")}
+                        resizeMode="cover"
+                        blurRadius={18}
+                        style={[styles.coinBlurImage, { opacity: coinBlur }]}
+                      />
+                      {/* Faint horizontal streaks sell the spin direction */}
+                      <Animated.View
+                        pointerEvents="none"
+                        style={[
+                          styles.coinBlurStreaks,
+                          { opacity: Animated.multiply(coinBlur, 0.55) },
+                        ]}
+                      >
+                        <View style={[styles.coinStreak, { top: "28%" }]} />
+                        <View style={[styles.coinStreak, { top: "50%" }]} />
+                        <View style={[styles.coinStreak, { top: "72%" }]} />
+                      </Animated.View>
+                    </View>
+                    {/* Inner bevel — reads as the far wall of the glass */}
+                    <View pointerEvents="none" style={styles.coinBevel} />
                   </Animated.View>
+
+                  {/* Fixed light. Deliberately a sibling of (and after) the
+                      spinning disc, so it does NOT rotate: a highlight that
+                      stays put while the face turns underneath is what makes
+                      the coin read as a solid object catching light rather
+                      than a picture on a spinning card. */}
+                  <View pointerEvents="none" style={styles.coinSpecularClip}>
+                    <LinearGradient
+                      colors={[
+                        "rgba(255,255,255,0)",
+                        "rgba(255,255,255,0.22)",
+                        "rgba(255,255,255,0)",
+                      ]}
+                      locations={[0.16, 0.32, 0.52]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    {/* Caustic: light pooling along the lower rim */}
+                    <LinearGradient
+                      colors={["rgba(255,255,255,0.16)", "rgba(255,255,255,0)"]}
+                      start={{ x: 0.5, y: 1 }}
+                      end={{ x: 0.5, y: 0.58 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  </View>
                 </Pressable>
 
                 <Animated.Text
@@ -646,6 +681,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  // Ambient light behind the coin. Kept strong on purpose: the coin's outer
+  // ring is clear now, and this glow is the only thing behind it — with
+  // nothing to see through, clear glass on a black screen just renders black
+  // (the same trap GLASS_SOLID_FILL documents in GoldGradient.tsx).
   globeGlow: {
     position: "absolute",
     width: 260,
@@ -653,28 +692,43 @@ const styles = StyleSheet.create({
     top: (196 - 260) / 2,
     left: (196 - 260) / 2,
     borderRadius: 130,
-    backgroundColor: "rgba(245,210,107,0.06)",
-    boxShadow: boxShadow(GOLD, 0.55, 50),
+    backgroundColor: "rgba(245,210,107,0.09)",
+    boxShadow: boxShadow(GOLD, 0.6, 54),
   },
-  // Metallic coin rim — conic-gradient-style gold ring
-  coinRim: {
+  // Clear glass disc. The gold rim that used to live here is gone: the ring
+  // is now a faint fill between two white hairlines (outer border + inner
+  // bevel), so the glow behind reads straight through it. Pure RN styling
+  // rather than GlassView — there is nothing behind this to refract, so the
+  // native effect would render it black and the two platforms would diverge.
+  coinGlass: {
     width: 190,
     height: 190,
     borderRadius: 95,
-    padding: 5,
-    borderWidth: 4,
-    borderColor: "rgba(245,210,107,0.0)", // transparent — visual ring comes from backgroundColor
-    backgroundColor: "#c9971c",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.5)",
+    backgroundColor: "rgba(255,255,255,0.05)",
     alignItems: "center",
     justifyContent: "center",
     boxShadow: [
-      boxShadow(GOLD, 0.7, 18),
-      "inset 0 2px 6px rgba(255,235,120,0.5)",
-      "inset 0 -4px 10px rgba(50,32,0,0.6)",
+      boxShadow("#FFFFFF", 0.18, 16),
+      "inset 0 2px 8px rgba(255,255,255,0.28)",
+      "inset 0 -6px 14px rgba(255,255,255,0.10)",
     ].join(", "),
     overflow: "hidden",
   },
-  // Fake coin thickness — vertical gold band shown when the coin is edge-on
+  // Far wall of the glass — a second hairline inset from the rim gives the
+  // disc thickness from every angle, not just edge-on.
+  coinBevel: {
+    position: "absolute",
+    top: 7,
+    left: 7,
+    right: 7,
+    bottom: 7,
+    borderRadius: 88,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  // Fake coin thickness — glass band shown when the coin is edge-on
   coinEdgeBand: {
     position: "absolute",
     width: 16,
@@ -682,36 +736,60 @@ const styles = StyleSheet.create({
     top: (196 - 190) / 2,
     left: (196 - 16) / 2,
     borderRadius: 8,
-    backgroundColor: "#8a6a12",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
+    backgroundColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
     justifyContent: "center",
     boxShadow: [
-      boxShadow(GOLD, 0.8, 14),
-      "inset 0 0 4px rgba(30,20,0,0.7)",
+      boxShadow("#FFFFFF", 0.35, 12),
+      "inset 0 0 6px rgba(255,255,255,0.22)",
     ].join(", "),
   },
   coinEdgeHighlight: {
-    width: 4,
-    height: 176,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,222,110,0.75)",
+    width: 3,
+    height: 172,
+    borderRadius: 1.5,
+    backgroundColor: "rgba(255,255,255,0.8)",
+  },
+  // The suspended face — the one opaque part of the coin, ringed by its own
+  // hairline so it reads as sitting inside the glass rather than filling it.
+  coinLens: {
+    width: 158,
+    height: 158,
+    borderRadius: 79,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
   coinImage: {
-    width: 176,
-    height: 176,
-    borderRadius: 88,
+    width: 156,
+    height: 156,
+    borderRadius: 78,
   },
   coinBlurImage: {
     position: "absolute",
-    width: 176,
-    height: 176,
-    borderRadius: 88,
+    width: 156,
+    height: 156,
+    borderRadius: 78,
   },
   coinBlurStreaks: {
     position: "absolute",
-    width: 176,
-    height: 176,
-    borderRadius: 88,
+    width: 156,
+    height: 156,
+    borderRadius: 78,
+    overflow: "hidden",
+  },
+  // Clip for the non-rotating highlight layered over the disc
+  coinSpecularClip: {
+    position: "absolute",
+    width: 190,
+    height: 190,
+    top: (196 - 190) / 2,
+    left: (196 - 190) / 2,
+    borderRadius: 95,
     overflow: "hidden",
   },
   coinStreak: {
