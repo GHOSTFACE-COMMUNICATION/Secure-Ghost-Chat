@@ -18,6 +18,7 @@ import { QRScanner, encodeContactQR, encodeInviteQR } from "@/components/QRScann
 import { GoldGradient } from "@/components/GoldGradient";
 import { CODE_REGEX, type RedeemFailReason, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
 import { getApiBase } from "@/lib/apiBase";
+import { type } from "@/constants/typography";
 
 const TIMER_OPTIONS = [
   { label: "10 MIN", ms: 10 * 60 * 1000 },
@@ -275,10 +276,9 @@ export default function GhostInvite() {
     scroll: { flex: 1 },
     content: { padding: 20, gap: 20, paddingBottom: 120 },
     sectionLabel: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 10,
-      fontWeight: "700",
-      letterSpacing: 3,
+      color: colors.mutedForeground,
       marginBottom: 8,
     },
     qrCard: {
@@ -303,10 +303,10 @@ export default function GhostInvite() {
       gap: 6,
     },
     expiredTxt: {
-      color: colors.destructive,
+      ...type.title,
       fontSize: 18,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.destructive,
     },
     codeRow: {
       flexDirection: "row",
@@ -314,11 +314,10 @@ export default function GhostInvite() {
       gap: 12,
     },
     codeText: {
-      color: expired ? colors.mutedForeground : colors.primary,
+      ...type.mono,
       fontSize: 22,
-      fontWeight: "800",
-      letterSpacing: 6,
-      fontFamily: "monospace",
+      letterSpacing: 3,
+      color: expired ? colors.mutedForeground : colors.primary,
     },
     copyBtn: { borderRadius: 8, overflow: "hidden" },
     copyBtnInner: {
@@ -331,11 +330,9 @@ export default function GhostInvite() {
       gap: 6,
     },
     countdownTxt: {
-      color: expired ? colors.destructive : remaining < 60000 ? colors.destructive : colors.mutedForeground,
+      ...type.monoSmall,
       fontSize: 11,
-      fontWeight: "700",
-      letterSpacing: 2,
-      fontFamily: "monospace",
+      color: expired ? colors.destructive : remaining < 60000 ? colors.destructive : colors.mutedForeground,
     },
     selfDestructBadge: {
       flexDirection: "row",
@@ -349,10 +346,8 @@ export default function GhostInvite() {
       paddingVertical: 5,
     },
     selfDestructTxt: {
+      ...type.micro,
       color: colors.destructive,
-      fontSize: 9,
-      fontWeight: "800",
-      letterSpacing: 2,
     },
     timerRow: {
       flexDirection: "row",
@@ -381,10 +376,8 @@ export default function GhostInvite() {
       alignItems: "center",
     },
     timerTxt: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      fontWeight: "700",
-      letterSpacing: 2,
     },
     timerTxtActive: {
       color: colors.destructive,
@@ -402,10 +395,10 @@ export default function GhostInvite() {
       gap: 8,
     },
     regenBtnTxt: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     infoCard: {
       backgroundColor: colors.card,
@@ -421,9 +414,9 @@ export default function GhostInvite() {
       gap: 10,
     },
     infoTxt: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       flex: 1,
       lineHeight: 18,
     },
@@ -436,24 +429,23 @@ export default function GhostInvite() {
       gap: 14,
     },
     redeemTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 13,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     redeemSub: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       marginTop: -6,
     },
     redeemInput: {
+      ...type.mono,
+      fontSize: 20,
+      letterSpacing: 3,
       backgroundColor: colors.muted,
       color: colors.foreground,
-      fontSize: 20,
-      fontWeight: "800",
-      letterSpacing: 6,
-      fontFamily: "monospace",
       borderWidth: 1,
       borderColor: isErrorState(redeemState)
         ? colors.destructive
@@ -470,10 +462,10 @@ export default function GhostInvite() {
       overflow: "hidden",
     },
     redeemBtnTxt: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     redeemFeedback: {
       flexDirection: "row" as const,
@@ -483,9 +475,8 @@ export default function GhostInvite() {
       paddingVertical: 4,
     },
     redeemFeedbackTxt: {
+      ...type.label,
       fontSize: 12,
-      fontWeight: "700",
-      letterSpacing: 2,
     },
     myQrCard: {
       backgroundColor: colors.card,
@@ -497,15 +488,15 @@ export default function GhostInvite() {
       gap: 14,
     },
     myQrAlias: {
-      color: colors.primary,
+      ...type.title,
       fontSize: 20,
-      fontWeight: "800",
-      letterSpacing: 6,
+      letterSpacing: 1.5,
+      color: colors.primary,
     },
     myQrSub: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
       textAlign: "center",
     },
     scanBtn: {
@@ -513,10 +504,10 @@ export default function GhostInvite() {
       overflow: "hidden",
     },
     scanBtnTxt: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     shareRow: {
       flexDirection: "row" as const,
@@ -540,10 +531,9 @@ export default function GhostInvite() {
       borderColor: colors.primary,
     },
     shareBtnTxt: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 10,
-      fontWeight: "700",
-      letterSpacing: 2,
+      color: colors.mutedForeground,
     },
     shareBtnTxtActive: {
       color: colors.primary,

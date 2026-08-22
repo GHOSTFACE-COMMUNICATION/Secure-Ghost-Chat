@@ -13,6 +13,7 @@ import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
 import { Ionicons } from "@expo/vector-icons";
 import { WebQRScanner } from "./WebQRScanner";
+import { type } from "@/constants/typography";
 
 const GHOSTFACE_QR_PREFIX = "ghostface://add/";
 const GHOSTFACE_INVITE_PREFIX = "ghostface://invite/";
@@ -108,10 +109,10 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
       zIndex: 10,
     },
     headerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 14,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     camera: {
       flex: 1,
@@ -136,12 +137,12 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
       height: 28,
     },
     label: {
+      ...type.label,
+      fontSize: 12,
       position: "absolute",
       bottom: 120,
       alignSelf: "center",
       color: colors.foreground,
-      fontSize: 12,
-      letterSpacing: 3,
       opacity: 0.8,
     },
     permBox: {
@@ -151,9 +152,9 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
       gap: 16,
     },
     permTxt: {
-      color: colors.foreground,
+      ...type.body,
       fontSize: 14,
-      letterSpacing: 2,
+      color: colors.foreground,
       textAlign: "center",
       paddingHorizontal: 40,
     },
@@ -166,10 +167,10 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
       paddingVertical: 12,
     },
     permBtnTxt: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     flashOverlay: {
       position: "absolute",

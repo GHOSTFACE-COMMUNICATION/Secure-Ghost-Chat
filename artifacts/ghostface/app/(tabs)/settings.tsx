@@ -42,6 +42,7 @@ import {
   MAX_SMS_FALLBACK_NUMBERS,
   normalizeE164,
 } from "@/lib/smsFallback";
+import { type } from "@/constants/typography";
 
 function getPinStrength(pin: string): { level: 0 | 1 | 2; label: string } | null {
   if (pin.length === 0) return null;
@@ -91,7 +92,7 @@ function PinStrengthIndicator({
       <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: mutedColor, overflow: "hidden" }}>
         <View style={{ width: `${fillPct}%`, height: "100%", backgroundColor: color, borderRadius: 2 }} />
       </View>
-      <Text style={{ color, fontSize: 9, fontWeight: "800" as const, letterSpacing: 2 }}>{strength.label}</Text>
+      <Text style={{ ...type.micro, color }}>{strength.label}</Text>
     </View>
   );
 }
@@ -137,10 +138,8 @@ const pillStyles = StyleSheet.create({
     overflow: "hidden",
   },
   pillText: {
+    ...type.micro,
     color: "#FFFFFF",
-    fontSize: 9,
-    fontWeight: "800" as const,
-    letterSpacing: 2,
   },
 });
 
@@ -632,10 +631,10 @@ export default function SettingsScreen() {
       justifyContent: "space-between",
     },
     headerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800" as const,
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     divider: {
       height: 1,
@@ -646,23 +645,22 @@ export default function SettingsScreen() {
       paddingVertical: 28,
     },
     aliasText: {
-      color: colors.foreground,
+      ...type.title,
       fontSize: 20,
-      fontWeight: "800" as const,
-      letterSpacing: 6,
+      letterSpacing: 1.5,
+      color: colors.foreground,
       marginTop: 12,
     },
     aliasLabel: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 3,
+      color: colors.mutedForeground,
       marginTop: 4,
     },
     sectionLabel: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 10,
-      letterSpacing: 3,
-      fontWeight: "700" as const,
+      color: colors.mutedForeground,
       paddingHorizontal: 20,
       marginTop: 20,
       marginBottom: 8,
@@ -685,11 +683,10 @@ export default function SettingsScreen() {
       justifyContent: "center",
     },
     settingLabel: {
+      ...type.subheading,
+      fontSize: 13,
       flex: 1,
       color: colors.foreground,
-      fontSize: 13,
-      letterSpacing: 2,
-      fontWeight: "600" as const,
     },
     settingDivider: {
       height: 1,
@@ -707,9 +704,9 @@ export default function SettingsScreen() {
       gap: 4,
     },
     versionText: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 3,
+      color: colors.mutedForeground,
     },
     padBottom: { height: 120 },
     modalOverlay: {
@@ -727,17 +724,18 @@ export default function SettingsScreen() {
       paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 24),
     },
     modalTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 13,
-      fontWeight: "800" as const,
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
       marginBottom: 20,
     },
     input: {
+      ...type.body,
+      fontSize: 16,
+      letterSpacing: 0.5,
       backgroundColor: colors.muted,
       color: colors.foreground,
-      fontSize: 16,
-      letterSpacing: 2,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: colors.radius,
@@ -746,16 +744,16 @@ export default function SettingsScreen() {
       marginBottom: 12,
     },
     errorText: {
-      color: colors.destructive,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.destructive,
       marginBottom: 12,
     },
     successText: {
-      color: colors.success,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800" as const,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: colors.success,
       textAlign: "center",
       marginBottom: 8,
     },
@@ -777,19 +775,19 @@ export default function SettingsScreen() {
       borderRadius: colors.radius,
     },
     modalBtnText: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800" as const,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     cancelBtn: {
       alignItems: "center",
       paddingVertical: 12,
     },
     cancelText: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 12,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
     },
     subscriptionCard: {
       borderWidth: 1,
@@ -800,27 +798,24 @@ export default function SettingsScreen() {
       overflow: "hidden",
     },
     subscriptionValue: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
       marginTop: 2,
     },
     settingSubtext: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 2,
       marginTop: 2,
     },
     settingHelperText: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 1.5,
       lineHeight: 14,
     },
     emptyHintText: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 1.5,
       paddingHorizontal: 16,
       paddingVertical: 8,
       textAlign: "center",
@@ -966,10 +961,8 @@ export default function SettingsScreen() {
                     >
                       <Text
                         style={{
+                          ...type.labelStrong,
                           color: selected ? colors.primary : colors.mutedForeground,
-                          fontSize: 11,
-                          fontWeight: "800",
-                          letterSpacing: 2,
                         }}
                       >
                         {opt.label}
@@ -1056,7 +1049,7 @@ export default function SettingsScreen() {
                     {currentGraceLabel} TO CANCEL AFTER ENTRY
                   </Text>
                 </View>
-                <Text style={{ color: colors.destructive, fontSize: 11, letterSpacing: 2, fontWeight: "700" as const }}>
+                <Text style={{ ...type.labelStrong, color: colors.destructive }}>
                   {currentGraceLabel}
                 </Text>
                 <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
@@ -1150,7 +1143,7 @@ export default function SettingsScreen() {
               <Ionicons name="timer-outline" size={18} color={colors.primary} />
             </View>
             <Text style={styles.settingLabel}>AUTO-LOCK</Text>
-            <Text style={{ color: colors.primary, fontSize: 11, letterSpacing: 2, fontWeight: "700" as const }}>
+            <Text style={{ ...type.labelStrong, color: colors.primary }}>
               {currentAutoLockLabel}
             </Text>
             <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
@@ -1173,10 +1166,8 @@ export default function SettingsScreen() {
                 <Text style={styles.settingLabel}>{item.label}</Text>
                 <Text
                   style={{
+                    ...type.labelStrong,
                     color: colors.primary,
-                    fontSize: 11,
-                    letterSpacing: 2,
-                    fontWeight: "700" as const,
                   }}
                 >
                   {item.value}
@@ -1191,7 +1182,7 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.settingLabel}>LANGUAGE</Text>
             <Text style={{ color: colors.primary, fontSize: 13, marginRight: 4 }}>{currentLanguage.flag}</Text>
-            <Text style={{ color: colors.primary, fontSize: 11, letterSpacing: 2, fontWeight: "700" as const }}>
+            <Text style={{ ...type.labelStrong, color: colors.primary }}>
               {currentLanguage.label}
             </Text>
             <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} style={{ marginLeft: 4 }} />
@@ -1216,11 +1207,9 @@ export default function SettingsScreen() {
                 <Text style={styles.settingLabel}>{item.label}</Text>
                 <Text
                   style={{
+                    ...type.labelStrong,
                     color:
                       item.value === "ON" ? colors.success : colors.destructive,
-                    fontSize: 11,
-                    letterSpacing: 2,
-                    fontWeight: "700" as const,
                   }}
                 >
                   {item.value}
@@ -1361,7 +1350,7 @@ export default function SettingsScreen() {
                     mutedColor={colors.border}
                   />
                   {pinSimilar && (
-                    <Text style={{ color: "#F5D26B", fontSize: 9, fontWeight: "800", letterSpacing: 2, marginTop: -8, marginBottom: 10 }}>
+                    <Text style={{ ...type.micro, color: "#F5D26B", marginTop: -8, marginBottom: 10 }}>
                       TOO SIMILAR TO CURRENT PIN
                     </Text>
                   )}
@@ -1724,8 +1713,8 @@ export default function SettingsScreen() {
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                       {recoveryPhraseValue.split(" ").map((word, i) => (
                         <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.muted, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, minWidth: "30%" }}>
-                          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontWeight: "700" as const, width: 14 }}>{i + 1}</Text>
-                          <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "700" as const, letterSpacing: 0.5 }}>{word}</Text>
+                          <Text style={{ ...type.micro, color: colors.mutedForeground, width: 14 }}>{i + 1}</Text>
+                          <Text style={{ ...type.mono, color: colors.foreground }}>{word}</Text>
                         </View>
                       ))}
                     </View>

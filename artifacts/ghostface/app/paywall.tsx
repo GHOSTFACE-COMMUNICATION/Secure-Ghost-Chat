@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostLogo } from "@/components/GhostLogo";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 // Phase 5: RevenueCat paywall — this file is replaced in Phase 5 with the
 // full subscription UI (offerings fetch, SPECTER/PHANTOM cards, restore button,
@@ -26,8 +27,8 @@ export default function PaywallScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  title: { fontSize: 22, fontWeight: "800", letterSpacing: 6 },
-  sub: { fontSize: 11, letterSpacing: 3 },
+  title: { ...type.title, fontSize: 22 },
+  sub: { ...type.label },
   back: { marginTop: 24, paddingVertical: 10, paddingHorizontal: 24 },
-  backTxt: { fontSize: 12, letterSpacing: 3 },
+  backTxt: { ...type.label, fontSize: 12 },
 });

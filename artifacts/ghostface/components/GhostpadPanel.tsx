@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostpadSignal, useApp } from "@/context/AppContext";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 // How long after the last keystroke to relay the buffer to the partner —
 // keeps it feeling live without sending a WS frame per character.
@@ -177,10 +178,10 @@ export default function GhostpadScreen({
       justifyContent: "space-between",
     },
     headerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800" as const,
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     divider: {
       height: 1,
@@ -194,14 +195,15 @@ export default function GhostpadScreen({
       paddingHorizontal: 40,
     },
     emptyTxt: {
-      color: colors.mutedForeground,
+      ...type.heading,
       fontSize: 13,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: colors.mutedForeground,
     },
     emptySub: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       opacity: 0.6,
       textAlign: "center",
     },
@@ -227,35 +229,36 @@ export default function GhostpadScreen({
       alignItems: "center" as const,
     },
     actionBtnText: {
-      color: colors.foreground,
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800" as const,
-      letterSpacing: 2,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     actionBtnTextPrimary: {
       color: "#FFFFFF",
     },
     codeInput: {
+      ...type.mono,
+      fontSize: 22,
+      letterSpacing: 4,
       width: "100%",
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: colors.radius,
       color: colors.foreground,
-      fontSize: 22,
-      letterSpacing: 8,
       textAlign: "center",
       paddingVertical: 14,
     },
     codeDisplay: {
-      color: colors.primary,
+      ...type.mono,
       fontSize: 36,
-      fontWeight: "800" as const,
-      letterSpacing: 10,
+      letterSpacing: 5,
+      color: colors.primary,
     },
     errorText: {
-      color: colors.destructive,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.destructive,
       textAlign: "center",
     },
     shareRow: {
@@ -264,9 +267,10 @@ export default function GhostpadScreen({
       width: "100%",
     },
     pad: {
+      ...type.body,
+      fontSize: 15,
       flex: 1,
       color: colors.foreground,
-      fontSize: 15,
       lineHeight: 22,
       padding: 20,
       textAlignVertical: "top",
@@ -292,10 +296,9 @@ export default function GhostpadScreen({
       borderRadius: colors.radius,
     },
     footerBtnText: {
-      color: colors.mutedForeground,
+      ...type.labelStrong,
       fontSize: 11,
-      letterSpacing: 2,
-      fontWeight: "700" as const,
+      color: colors.mutedForeground,
     },
   });
 

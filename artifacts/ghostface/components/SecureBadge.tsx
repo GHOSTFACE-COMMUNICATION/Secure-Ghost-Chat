@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -86,7 +87,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   label: {
-    fontWeight: "700",
-    letterSpacing: 0.5,
+    ...type.micro,
   },
 });

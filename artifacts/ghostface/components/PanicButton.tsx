@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { boxShadow } from "@/lib/shadow";
+import { type } from "@/constants/typography";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -206,16 +207,17 @@ function GhostWipeScreen({ onDone }: { onDone: () => void }) {
 
 const ss = StyleSheet.create({
   wipedHeading: {
-    color: "#FF3B30",
+    ...type.display,
     fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: 8,
+    letterSpacing: 2,
+    color: "#FF3B30",
     marginTop: 18,
   },
   wipedSub: {
-    color: "#FF3B30",
+    ...type.caption,
     fontSize: 11,
-    letterSpacing: 4,
+    letterSpacing: 1.5,
+    color: "#FF3B30",
     opacity: 0.7,
     marginTop: 6,
   },
@@ -324,8 +326,8 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
 
 const styles = StyleSheet.create({
   label: {
+    ...type.label,
     fontSize: 10,
-    letterSpacing: 3,
     marginBottom: 12,
     textAlign: "center",
   },
@@ -350,9 +352,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.22)",
   },
   btnText: {
-    color: "#ffffff",
+    ...type.labelStrong,
     fontSize: 15,
-    fontWeight: "800" as const,
-    letterSpacing: 5,
+    letterSpacing: 2,
+    color: "#ffffff",
   },
 });

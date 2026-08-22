@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 interface Props {
   visible: boolean;
@@ -114,7 +115,7 @@ export function WebQRScanner({ visible, onClose, onDecoded, flash }: Props) {
       paddingBottom: 16,
       zIndex: 10,
     },
-    headerTitle: { color: colors.foreground, fontSize: 14, fontWeight: "800", letterSpacing: 4 },
+    headerTitle: { ...type.heading, color: colors.foreground, fontSize: 14 },
     body: { flex: 1, justifyContent: "center", alignItems: "center", padding: 20 },
     videoWrap: {
       width: 320,
@@ -126,17 +127,17 @@ export function WebQRScanner({ visible, onClose, onDecoded, flash }: Props) {
       backgroundColor: "#000",
     },
     label: {
+      ...type.label,
+      fontSize: 12,
       marginTop: 16,
       color: colors.foreground,
-      fontSize: 12,
-      letterSpacing: 3,
       opacity: 0.8,
     },
     err: {
+      ...type.caption,
+      fontSize: 12,
       marginTop: 16,
       color: colors.destructive ?? "#ff5577",
-      fontSize: 12,
-      letterSpacing: 1,
       textAlign: "center",
       paddingHorizontal: 24,
     },

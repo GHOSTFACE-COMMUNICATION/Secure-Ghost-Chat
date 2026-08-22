@@ -3,7 +3,6 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,10 +11,10 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 import { GoldGradient } from "@/components/GoldGradient";
 import { ghostDecrypt, ghostEncrypt, stealthDecode, stealthEncode } from "@/lib/stealthCrypto";
 
-const MONO = Platform.OS === "ios" ? "Courier" : "monospace";
 
 export default function EncryptionTools() {
   const colors = useColors();
@@ -40,30 +39,29 @@ export default function EncryptionTools() {
 
   const s = StyleSheet.create({
     body: { padding: 16, gap: 14 },
-    lbl: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 3, fontWeight: "700" },
+    lbl: { ...type.micro, color: colors.mutedForeground, fontSize: 10 },
     input: {
       backgroundColor: colors.card,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: colors.radius,
       color: colors.foreground,
-      fontSize: 13,
+      ...type.mono,
       padding: 12,
-      fontFamily: MONO,
     },
     modeRow: { flexDirection: "row", gap: 8 },
     modeBtn: { flex: 1, borderRadius: colors.radius, overflow: "hidden" as const },
     modeBtnInner: { paddingVertical: 10, alignItems: "center" as const, borderRadius: colors.radius },
-    modeTxt: { fontSize: 11, letterSpacing: 2, fontWeight: "700" },
+    modeTxt: { ...type.labelStrong },
     btn: { borderRadius: colors.radius, overflow: "hidden" },
     btnGold: { borderRadius: colors.radius, paddingVertical: 13, alignItems: "center" },
-    btnTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800", letterSpacing: 3 },
+    btnTxt: { ...type.labelStrong, color: "#FFFFFF", fontSize: 12 },
     out: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: colors.radius, padding: 12 },
-    outTxt: { color: colors.primary, fontSize: 11, fontFamily: MONO },
+    outTxt: { ...type.monoSmall, color: colors.primary },
     copyRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, alignSelf: "flex-end" },
-    copyTxt: { fontSize: 10, letterSpacing: 2 },
+    copyTxt: { ...type.micro, fontSize: 10 },
     info: { flexDirection: "row", gap: 8, backgroundColor: `${colors.primary}12`, borderRadius: colors.radius, padding: 10, borderWidth: 1, borderColor: `${colors.primary}28` },
-    infoTxt: { color: colors.mutedForeground, fontSize: 11, flex: 1, lineHeight: 16 },
+    infoTxt: { ...type.caption, color: colors.mutedForeground, fontSize: 11, flex: 1, lineHeight: 16 },
   });
 
   const renderCopy = (text: string, copied: boolean, done: (v: boolean) => void) => (

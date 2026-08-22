@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
@@ -146,17 +147,15 @@ export default function SmsInboxScreen() {
     },
     headerText: { flex: 1 },
     headerLabel: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      fontWeight: "700",
-      letterSpacing: 3,
       marginBottom: 2,
     },
     headerPhone: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800",
-      letterSpacing: 1,
+      letterSpacing: 0.5,
+      color: colors.foreground,
     },
     divider: { height: 1, backgroundColor: colors.border },
     scroll: { flex: 1 },
@@ -178,15 +177,15 @@ export default function SmsInboxScreen() {
       marginBottom: 4,
     },
     centerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 13,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     centerBody: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       textAlign: "center",
       lineHeight: 18,
       maxWidth: 240,
@@ -198,10 +197,9 @@ export default function SmsInboxScreen() {
       paddingVertical: 10,
     },
     retryBtnText: {
-      color: colors.primary,
+      ...type.labelStrong,
       fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 2,
+      color: colors.primary,
     },
     card: {
       backgroundColor: colors.card,
@@ -231,16 +229,13 @@ export default function SmsInboxScreen() {
       justifyContent: "center",
     },
     fromNumber: {
-      color: colors.primary,
+      ...type.labelStrong,
       fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 1,
+      color: colors.primary,
     },
     timestamp: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 1,
-      fontWeight: "600",
     },
     toRow: {
       flexDirection: "row",
@@ -249,16 +244,12 @@ export default function SmsInboxScreen() {
       marginBottom: 8,
     },
     toLabel: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 2,
-      fontWeight: "600",
     },
     toNumber: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 1,
-      fontWeight: "600",
       flex: 1,
     },
     badgeCurrent: {
@@ -274,22 +265,20 @@ export default function SmsInboxScreen() {
       paddingVertical: 2,
     },
     badgeCurrentText: {
-      color: colors.primary,
+      ...type.micro,
       fontSize: 8,
-      fontWeight: "800",
-      letterSpacing: 1.5,
+      color: colors.primary,
     },
     badgeArchivedText: {
-      color: "#F5D26B",
+      ...type.micro,
       fontSize: 8,
-      fontWeight: "800",
-      letterSpacing: 1.5,
+      color: "#F5D26B",
     },
     body: {
-      color: colors.foreground,
+      ...type.caption,
       fontSize: 13,
+      color: colors.foreground,
       lineHeight: 20,
-      letterSpacing: 0.3,
     },
   });
 

@@ -23,6 +23,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { emitFailedUnlock } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
+import { type } from "@/constants/typography";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -457,16 +458,16 @@ export default function LockScreen() {
     },
     logo: { marginBottom: 12 },
     appName: {
-      color: colors.foreground,
+      ...type.title,
       fontSize: 20,
-      fontWeight: "800" as const,
-      letterSpacing: 6,
+      letterSpacing: 1.5,
+      color: colors.foreground,
       marginBottom: 4,
     },
     tagline: {
-      color: colors.primary,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 4,
+      color: colors.primary,
       marginBottom: 48,
     },
     dotsRow: {
@@ -481,9 +482,9 @@ export default function LockScreen() {
       borderWidth: 1.5,
     },
     scrambleHint: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 8,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
       marginBottom: 32,
       opacity: 0.5,
     },
@@ -504,14 +505,14 @@ export default function LockScreen() {
       justifyContent: "center",
     },
     keyText: {
-      color: colors.foreground,
+      ...type.title,
       fontSize: 22,
-      fontWeight: "600" as const,
+      color: colors.foreground,
     },
     errorText: {
-      color: colors.destructive,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 2,
+      color: colors.destructive,
       marginTop: 16,
     },
     wipeWarning: {
@@ -525,10 +526,9 @@ export default function LockScreen() {
       alignItems: "center",
     },
     wipeWarningText: {
-      color: colors.destructive,
+      ...type.micro,
       fontSize: 10,
-      fontWeight: "800" as const,
-      letterSpacing: 2,
+      color: colors.destructive,
       textAlign: "center",
     },
     biometricBtn: {
@@ -539,9 +539,9 @@ export default function LockScreen() {
       padding: 12,
     },
     biometricText: {
-      color: colors.primary,
+      ...type.label,
       fontSize: 12,
-      letterSpacing: 2,
+      color: colors.primary,
     },
     continueBtn: {
       marginTop: 32,
@@ -552,15 +552,15 @@ export default function LockScreen() {
       alignItems: "center",
     },
     continueBtnText: {
-      color: colors.primaryForeground,
+      ...type.labelStrong,
       fontSize: 13,
-      fontWeight: "800" as const,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: colors.primaryForeground,
     },
     noPinHint: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
       marginTop: 16,
       textAlign: "center",
     },
@@ -604,10 +604,10 @@ export default function LockScreen() {
       borderRadius: colors.radius,
     },
     enterBtnText: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 15,
-      fontWeight: "800" as const,
-      letterSpacing: 6,
+      letterSpacing: 2,
+      color: "#FFFFFF",
     },
     taglineRow: {
       flexDirection: "row",
@@ -616,11 +616,8 @@ export default function LockScreen() {
       marginTop: 30,
     },
     taglineText: {
-      fontFamily: MONO,
+      ...type.monoSmall,
       color: colors.mutedForeground,
-      fontSize: 11,
-      letterSpacing: 3,
-      fontWeight: "700" as const,
     },
 
     // ── Idle cipher seal (hold-to-decrypt) ──────────────────────────────────
@@ -700,10 +697,10 @@ export default function LockScreen() {
       letterSpacing: 4,
     },
     compactName: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800" as const,
-      letterSpacing: 5,
+      letterSpacing: 1.5,
+      color: colors.foreground,
       marginBottom: 24,
     },
     duressBar: {
@@ -733,8 +730,9 @@ export default function LockScreen() {
       paddingVertical: 6,
     },
     duressCountText: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
+      color: colors.mutedForeground,
       fontVariant: ["tabular-nums"],
     },
     fallbackBadge: {
@@ -749,15 +747,13 @@ export default function LockScreen() {
       borderColor: `${colors.mutedForeground}30`,
     },
     fallbackBadgeText: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 2,
-      fontWeight: "700" as const,
     },
     fallbackCarrierNote: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 8,
-      letterSpacing: 1.5,
+      color: colors.mutedForeground,
       marginTop: 2,
       opacity: 0.7,
     },

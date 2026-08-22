@@ -19,6 +19,7 @@ import { getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { normalizeAlias } from "@/utils/alias";
 import { recoveryPhraseToKey } from "@/lib/recoveryPhrase";
+import { type } from "@/constants/typography";
 
 // Larger pool than we ever show at once — the suggestion row rotates through
 // a random slice of this every few seconds so returning users don't see the
@@ -209,32 +210,31 @@ export default function OnboardingScreen() {
       marginBottom: 32,
     },
     tagline: {
-      color: colors.primary,
+      ...type.labelStrong,
       fontSize: 12,
-      letterSpacing: 4,
-      fontWeight: "700" as const,
+      letterSpacing: 1.5,
+      color: colors.primary,
       marginTop: 12,
     },
     appName: {
-      color: colors.foreground,
+      ...type.display,
       fontSize: 28,
-      fontWeight: "800" as const,
-      letterSpacing: 6,
+      letterSpacing: 1,
+      color: colors.foreground,
       marginTop: 8,
     },
     sectionTitle: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 11,
-      letterSpacing: 3,
-      fontWeight: "700" as const,
+      color: colors.mutedForeground,
       marginBottom: 16,
     },
     input: {
+      ...type.title,
+      fontSize: 18,
+      letterSpacing: 1.5,
       backgroundColor: colors.card,
       color: colors.foreground,
-      fontSize: 18,
-      fontWeight: "700" as const,
-      letterSpacing: 3,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: colors.radius,
@@ -243,9 +243,8 @@ export default function OnboardingScreen() {
       marginBottom: 12,
     },
     aliasStatusText: {
+      ...type.label,
       fontSize: 10,
-      letterSpacing: 2,
-      fontWeight: "700" as const,
       marginTop: -6,
       marginBottom: 10,
     },
@@ -264,10 +263,9 @@ export default function OnboardingScreen() {
       justifyContent: "center",
     },
     suggestionText: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 11,
-      letterSpacing: 2,
-      fontWeight: "600" as const,
+      color: colors.mutedForeground,
     },
     confirmBtn: {
       borderRadius: colors.radius,
@@ -285,10 +283,10 @@ export default function OnboardingScreen() {
       opacity: 0.3,
     },
     confirmBtnText: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 13,
-      fontWeight: "800" as const,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     skipBtn: {
       alignItems: "center",
@@ -296,9 +294,9 @@ export default function OnboardingScreen() {
       marginBottom: 8,
     },
     skipText: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 11,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
     },
     disclaimerRow: {
       flexDirection: "row",
@@ -307,14 +305,14 @@ export default function OnboardingScreen() {
       gap: 6,
     },
     disclaimerText: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 0.5,
+      color: colors.mutedForeground,
     },
     errorText: {
-      color: colors.destructive,
+      ...type.caption,
       fontSize: 12,
-      letterSpacing: 1,
+      color: colors.destructive,
       marginBottom: 8,
     },
     restoreLink: {
@@ -322,9 +320,9 @@ export default function OnboardingScreen() {
       paddingVertical: 14,
     },
     restoreLinkText: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 10,
-      letterSpacing: 1.5,
+      color: colors.mutedForeground,
       textAlign: "center",
     },
     phraseBox: {
@@ -351,16 +349,15 @@ export default function OnboardingScreen() {
       minWidth: "30%",
     },
     phraseWordIndex: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 9,
-      fontWeight: "700" as const,
+      color: colors.mutedForeground,
       width: 14,
     },
     phraseWordText: {
-      color: colors.foreground,
+      ...type.mono,
       fontSize: 13,
-      fontWeight: "700" as const,
-      letterSpacing: 0.5,
+      color: colors.foreground,
     },
     recoveryCheckRow: {
       flexDirection: "row",
@@ -369,16 +366,16 @@ export default function OnboardingScreen() {
       marginBottom: 16,
     },
     recoveryCheckText: {
-      color: colors.foreground,
+      ...type.caption,
       fontSize: 12,
-      letterSpacing: 0.5,
+      color: colors.foreground,
       flex: 1,
     },
     phraseInput: {
+      ...type.mono,
+      fontSize: 14,
       minHeight: 90,
       textAlignVertical: "top",
-      fontSize: 14,
-      letterSpacing: 1,
       textTransform: "none" as const,
     },
     backBtn: {
@@ -388,14 +385,14 @@ export default function OnboardingScreen() {
       gap: 6,
     },
     backText: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 13,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
     },
     pinOptionalLabel: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
       textAlign: "center",
       marginBottom: 16,
     },
@@ -423,22 +420,20 @@ export default function OnboardingScreen() {
       flex: 1,
     },
     promoLabel: {
-      color: "#ef4444",
+      ...type.labelStrong,
       fontSize: 10,
-      fontWeight: "800" as const,
-      letterSpacing: 3,
+      color: "#ef4444",
       marginBottom: 2,
     },
     promoHeadline: {
-      color: colors.foreground,
+      ...type.subheading,
       fontSize: 13,
-      fontWeight: "700" as const,
-      letterSpacing: 1,
+      color: colors.foreground,
     },
     promoSub: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 0.5,
+      color: colors.mutedForeground,
       marginTop: 2,
     },
     promoBadge: {
@@ -450,10 +445,8 @@ export default function OnboardingScreen() {
       marginTop: 6,
     },
     promoBadgeText: {
+      ...type.micro,
       color: "#ffffff",
-      fontSize: 9,
-      fontWeight: "800" as const,
-      letterSpacing: 2,
     },
   });
 

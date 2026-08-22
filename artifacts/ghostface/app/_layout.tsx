@@ -29,6 +29,7 @@ import { boxShadow } from "@/lib/shadow";
 import LockScreen from "@/app/lock";
 import OnboardingScreen from "@/app/onboarding";
 import DecoyHomeScreen from "@/app/decoy-home";
+import { type } from "@/constants/typography";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -130,9 +131,9 @@ function IncomingCallOverlay() {
       alignItems: "center", justifyContent: "center",
     },
     info: { flex: 1 },
-    label: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 3, fontWeight: "700" as const },
-    alias: { color: colors.foreground, fontSize: 18, fontWeight: "800" as const, letterSpacing: 3, marginTop: 2 },
-    subLabel: { color: colors.primary, fontSize: 10, letterSpacing: 2, marginTop: 2 },
+    label: { ...type.micro, color: colors.mutedForeground },
+    alias: { ...type.heading, color: colors.foreground, fontSize: 18, marginTop: 2 },
+    subLabel: { ...type.micro, color: colors.primary, fontSize: 10, marginTop: 2 },
     actions: { flexDirection: "row", gap: 10, marginTop: 14, justifyContent: "flex-end" as const },
     declineBtn: {
       flexDirection: "row", alignItems: "center", gap: 6,
@@ -140,13 +141,13 @@ function IncomingCallOverlay() {
       borderRadius: 24, paddingVertical: 10, paddingHorizontal: 18,
       borderWidth: 1, borderColor: colors.destructive,
     },
-    declineTxt: { color: colors.destructive, fontSize: 11, fontWeight: "800" as const, letterSpacing: 2 },
+    declineTxt: { ...type.labelStrong, color: colors.destructive },
     acceptBtn: {
       flexDirection: "row", alignItems: "center", gap: 6,
       backgroundColor: colors.success,
       borderRadius: 24, paddingVertical: 10, paddingHorizontal: 18,
     },
-    acceptTxt: { color: "#000", fontSize: 11, fontWeight: "800" as const, letterSpacing: 2 },
+    acceptTxt: { ...type.labelStrong, color: "#000" },
   });
 
   return (

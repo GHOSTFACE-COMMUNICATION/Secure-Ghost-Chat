@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { GoldGradient } from "@/components/GoldGradient";
 import { boxShadow } from "@/lib/shadow";
+import { type } from "@/constants/typography";
 
 export type ErrorFallbackProps = {
   error: Error;
@@ -189,12 +190,13 @@ const styles = StyleSheet.create({
     maxWidth: 600,
   },
   title: {
+    ...type.display,
     fontSize: 28,
-    fontWeight: "700",
     textAlign: "center",
     lineHeight: 40,
   },
   message: {
+    ...type.body,
     fontSize: 16,
     textAlign: "center",
     lineHeight: 24,
@@ -227,9 +229,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   buttonText: {
-    fontWeight: "600",
-    textAlign: "center",
+    ...type.bodyStrong,
     fontSize: 16,
+    textAlign: "center",
   },
   modalOverlay: {
     flex: 1,
@@ -252,8 +254,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
+    ...type.title,
     fontSize: 20,
-    fontWeight: "600",
   },
   closeButton: {
     width: 44,
@@ -274,6 +276,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   errorText: {
+    ...type.caption,
     fontSize: 12,
     lineHeight: 18,
     width: "100%",

@@ -27,6 +27,7 @@ import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
 import { CODE_REGEX, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
 import { getContrastText, getProfileColor } from "@/lib/chatColors";
+import { type } from "@/constants/typography";
 
 function formatTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -241,10 +242,10 @@ export default function MessagesScreen() {
       paddingBottom: 12,
     },
     headerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     headerRight: {
       flexDirection: "row",
@@ -278,9 +279,8 @@ export default function MessagesScreen() {
       backgroundColor: colors.primary,
     },
     segTxt: {
+      ...type.labelStrong,
       fontSize: 11,
-      fontWeight: "700",
-      letterSpacing: 2,
     },
     item: {
       flexDirection: "row",
@@ -304,15 +304,15 @@ export default function MessagesScreen() {
       justifyContent: "center",
     },
     avatarTxt: {
+      ...type.subheading,
+      fontSize: 15,
+      letterSpacing: 0.5,
       // Fixed neutral text colour rather than the app's gold accent — the
       // fill now varies per-contact (getProfileColor), and near-white reads
       // reliably against any of the palette's dark swatches, whereas a
       // fixed accent colour isn't guaranteed to contrast well against all
       // of them equally.
       color: colors.foreground,
-      fontSize: 15,
-      fontWeight: "800",
-      letterSpacing: 1,
     },
     badge: {
       position: "absolute",
@@ -325,9 +325,9 @@ export default function MessagesScreen() {
       justifyContent: "center",
     },
     badgeTxt: {
-      color: "#FFFFFF",
+      ...type.micro,
       fontSize: 10,
-      fontWeight: "800",
+      color: "#FFFFFF",
     },
     itemBody: {
       flex: 1,
@@ -339,19 +339,19 @@ export default function MessagesScreen() {
       marginBottom: 3,
     },
     alias: {
-      color: colors.foreground,
+      ...type.subheading,
       fontSize: 14,
-      fontWeight: "700",
-      letterSpacing: 2,
+      color: colors.foreground,
     },
     time: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
     },
     preview: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 12,
+      color: colors.mutedForeground,
     },
     itemDivider: {
       height: 1,
@@ -364,14 +364,15 @@ export default function MessagesScreen() {
       gap: 12,
     },
     emptyTxt: {
-      color: colors.mutedForeground,
+      ...type.heading,
       fontSize: 13,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: colors.mutedForeground,
     },
     emptySub: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       opacity: 0.6,
     },
     emptyBtn: {
@@ -385,10 +386,10 @@ export default function MessagesScreen() {
       borderRadius: colors.radius,
     },
     emptyBtnTxt: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     pad: {
       height: 110,
@@ -409,23 +410,23 @@ export default function MessagesScreen() {
       gap: 16,
     },
     sheetTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 13,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     sheetSub: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       marginTop: -8,
     },
     aliasInput: {
+      ...type.title,
+      fontSize: 18,
+      letterSpacing: 1.5,
       backgroundColor: colors.muted,
       color: colors.foreground,
-      fontSize: 18,
-      fontWeight: "700",
-      letterSpacing: 4,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: colors.radius,
@@ -439,19 +440,19 @@ export default function MessagesScreen() {
       alignItems: "center",
     },
     sheetBtnTxt: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
     cancelBtn: {
       alignItems: "center",
       paddingVertical: 10,
     },
     cancelTxt: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 12,
-      letterSpacing: 2,
+      color: colors.mutedForeground,
     },
   });
 
@@ -602,7 +603,7 @@ export default function MessagesScreen() {
                       {item.destroyedAt && (
                         <View style={{ backgroundColor: colors.destructive + "22", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, flexDirection: "row", alignItems: "center", gap: 3 }}>
                           <Ionicons name="skull-outline" size={9} color={colors.destructive} />
-                          <Text style={{ color: colors.destructive, fontSize: 8, fontWeight: "800", letterSpacing: 1.5 }}>SELF-DESTRUCTED</Text>
+                          <Text style={{ ...type.micro, color: colors.destructive, fontSize: 8 }}>SELF-DESTRUCTED</Text>
                         </View>
                       )}
                     </View>

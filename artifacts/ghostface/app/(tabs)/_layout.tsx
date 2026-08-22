@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 // NOTE: Every tab screen added here must wrap its root view in <TabScreenWrapper>
 // (see components/TabScreenWrapper.tsx) to get the consistent slide-up transition.
@@ -76,9 +77,8 @@ export default function TabLayout() {
             />
           ) : null,
         tabBarLabelStyle: {
+          ...type.labelStrong,
           fontSize: 10,
-          letterSpacing: 1,
-          fontWeight: "700",
         },
       }}
     >

@@ -17,6 +17,7 @@ import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { VPN_SERVERS } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
+import { type } from "@/constants/typography";
 
 // The "connecting…" spinner used to run for a fixed, made-up 1500/1200ms —
 // a fake connection time, since there's no real tunnel being negotiated.
@@ -136,10 +137,10 @@ export default function VPNScreen() {
       justifyContent: "space-between",
     },
     headerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800" as const,
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     divider: {
       height: 1,
@@ -158,15 +159,15 @@ export default function VPNScreen() {
       marginBottom: 20,
     },
     statusLabel: {
+      ...type.heading,
       fontSize: 13,
-      fontWeight: "800" as const,
-      letterSpacing: 4,
+      letterSpacing: 1.5,
       marginBottom: 4,
     },
     serverLabel: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 11,
-      letterSpacing: 3,
+      color: colors.mutedForeground,
     },
     statsRow: {
       flexDirection: "row",
@@ -183,20 +184,20 @@ export default function VPNScreen() {
       padding: 14,
     },
     statLabel: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 3,
       marginBottom: 6,
     },
     statValue: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 16,
-      fontWeight: "800" as const,
-      letterSpacing: 1,
+      letterSpacing: 0.5,
+      color: colors.foreground,
     },
     statUnit: {
-      color: colors.mutedForeground,
+      ...type.micro,
       fontSize: 10,
+      color: colors.mutedForeground,
     },
     progressBar: {
       height: 4,
@@ -210,10 +211,9 @@ export default function VPNScreen() {
       borderRadius: 2,
     },
     sectionLabel: {
-      color: colors.mutedForeground,
+      ...type.label,
       fontSize: 10,
-      letterSpacing: 3,
-      fontWeight: "700" as const,
+      color: colors.mutedForeground,
       paddingHorizontal: 20,
       marginBottom: 12,
     },
@@ -233,13 +233,13 @@ export default function VPNScreen() {
       flex: 1,
     },
     serverName: {
+      ...type.subheading,
       fontSize: 13,
-      fontWeight: "700" as const,
-      letterSpacing: 2,
     },
     serverRegion: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
+      color: colors.mutedForeground,
       marginTop: 2,
     },
     serverDivider: {
@@ -258,7 +258,7 @@ export default function VPNScreen() {
         <View style={{ alignItems: "flex-end", gap: 2 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <StatusDot active={vpnConnected || vpnAutoReconnecting} size={6} />
-            <Text style={{ color: vpnAutoReconnecting ? colors.primary : vpnConnected ? colors.foreground : colors.destructive, fontSize: 11, letterSpacing: 2, fontWeight: "700" as const }}>
+            <Text style={{ ...type.labelStrong, color: vpnAutoReconnecting ? colors.primary : vpnConnected ? colors.foreground : colors.destructive }}>
               {vpnAutoReconnecting ? "RECONNECTING…" : vpnConnected ? "CONNECTED" : "DISCONNECTED"}
             </Text>
           </View>
@@ -353,22 +353,20 @@ export default function VPNScreen() {
                 minWidth: 220,
               }}>
                 <Text style={{
+                  ...type.micro,
                   color: colors.mutedForeground,
-                  fontSize: 9,
-                  letterSpacing: 3,
-                  fontWeight: "700",
                   marginBottom: 4,
                 }}>
                   {vpnConnected ? "IP ADDRESS" : "YOUR EXPOSED IP"}
                 </Text>
                 {vpnConnected ? (
-                  <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "800", letterSpacing: 3, fontVariant: ["tabular-nums"] }}>
+                  <Text style={{ ...type.mono, color: colors.foreground, fontSize: 15, fontVariant: ["tabular-nums"] }}>
                     ●●●.●●●.●●●.●●●
                   </Text>
                 ) : ipLoading ? (
                   <Text style={{ color: colors.mutedForeground, fontSize: 13, letterSpacing: 2 }}>DETECTING...</Text>
                 ) : currentIp ? (
-                  <Text style={{ color: colors.destructive, fontSize: 15, fontWeight: "800", letterSpacing: 2, fontVariant: ["tabular-nums"] }}>
+                  <Text style={{ ...type.mono, color: colors.destructive, fontSize: 15, fontVariant: ["tabular-nums"] }}>
                     {currentIp}
                   </Text>
                 ) : (
@@ -431,7 +429,7 @@ export default function VPNScreen() {
                     ]}
                   >
                     {item.name}
-                    <Text style={{ color: colors.mutedForeground, fontWeight: "400" as const }}>{" · "}{item.shortRegion}</Text>
+                    <Text style={{ ...type.body, color: colors.mutedForeground }}>{" · "}{item.shortRegion}</Text>
                   </Text>
                   <Text style={styles.serverRegion}>{item.region}</Text>
                 </View>

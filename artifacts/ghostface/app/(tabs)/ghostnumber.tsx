@@ -20,6 +20,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
+import { type } from "@/constants/typography";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
@@ -273,10 +274,10 @@ export default function GhostNumberScreen() {
       paddingBottom: 16,
     },
     headerTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 14,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     divider: { height: 1, backgroundColor: colors.border },
     scroll: { flex: 1 },
@@ -298,15 +299,15 @@ export default function GhostNumberScreen() {
       marginBottom: 4,
     },
     emptyTitle: {
-      color: colors.foreground,
+      ...type.heading,
       fontSize: 13,
-      fontWeight: "800",
-      letterSpacing: 4,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
     emptyBody: {
-      color: colors.mutedForeground,
+      ...type.caption,
       fontSize: 11,
-      letterSpacing: 1,
+      color: colors.mutedForeground,
       textAlign: "center",
       lineHeight: 18,
       maxWidth: 240,
@@ -341,10 +342,8 @@ export default function GhostNumberScreen() {
       backgroundColor: colors.primary,
     },
     statusText: {
+      ...type.micro,
       color: colors.primary,
-      fontSize: 9,
-      fontWeight: "800",
-      letterSpacing: 2,
     },
     planBadge: {
       backgroundColor: "rgba(138,138,138,0.12)",
@@ -353,10 +352,8 @@ export default function GhostNumberScreen() {
       paddingVertical: 4,
     },
     planText: {
+      ...type.micro,
       color: "#8A8A8A",
-      fontSize: 9,
-      fontWeight: "800",
-      letterSpacing: 2,
     },
     phoneRow: {
       flexDirection: "row",
@@ -365,10 +362,10 @@ export default function GhostNumberScreen() {
       marginBottom: 14,
     },
     phoneNumber: {
-      color: colors.foreground,
+      ...type.display,
       fontSize: 22,
-      fontWeight: "800",
-      letterSpacing: 2,
+      letterSpacing: 0.5,
+      color: colors.foreground,
       flex: 1,
     },
     copyBtn: {},
@@ -381,10 +378,8 @@ export default function GhostNumberScreen() {
       paddingVertical: 7,
     },
     copyBtnText: {
+      ...type.micro,
       color: colors.foreground,
-      fontSize: 9,
-      fontWeight: "700",
-      letterSpacing: 1,
     },
     metaRow: {
       flexDirection: "row",
@@ -402,10 +397,8 @@ export default function GhostNumberScreen() {
       paddingVertical: 3,
     },
     metaChipText: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      letterSpacing: 1,
-      fontWeight: "600",
     },
     inboxBtn: {
       marginTop: 4,
@@ -420,12 +413,10 @@ export default function GhostNumberScreen() {
       borderRadius: 8,
     },
     inboxBtnText: {
+      ...type.labelStrong,
       flex: 1,
       textAlign: "center",
       color: colors.primary,
-      fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 2,
     },
     cardDivider: {
       height: 1,
@@ -433,10 +424,8 @@ export default function GhostNumberScreen() {
       marginBottom: 12,
     },
     rotationLabel: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9,
-      fontWeight: "800",
-      letterSpacing: 2,
       marginBottom: 8,
     },
     rotationRow: {
@@ -456,15 +445,12 @@ export default function GhostNumberScreen() {
       justifyContent: "center",
     },
     rotationChipText: {
+      ...type.labelStrong,
       fontSize: 10,
-      fontWeight: "800",
-      letterSpacing: 1,
     },
     rotationCountdown: {
+      ...type.micro,
       color: colors.primary,
-      fontSize: 9,
-      fontWeight: "700",
-      letterSpacing: 1,
       marginTop: 4,
       marginBottom: 4,
     },
@@ -482,10 +468,9 @@ export default function GhostNumberScreen() {
       borderRadius: colors.radius,
     },
     rotateNowBtnText: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 10,
-      fontWeight: "800",
-      letterSpacing: 2,
+      color: "#FFFFFF",
     },
     releaseBtn: {
       flexDirection: "row",
@@ -498,10 +483,9 @@ export default function GhostNumberScreen() {
       paddingVertical: 10,
     },
     releaseBtnText: {
-      color: colors.destructive,
+      ...type.labelStrong,
       fontSize: 10,
-      fontWeight: "800",
-      letterSpacing: 2,
+      color: colors.destructive,
     },
     footer: {
       position: "absolute",
@@ -533,10 +517,10 @@ export default function GhostNumberScreen() {
       opacity: 0.5,
     },
     acquireBtnText: {
-      color: "#FFFFFF",
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800",
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: "#FFFFFF",
     },
   });
 
@@ -566,7 +550,7 @@ export default function GhostNumberScreen() {
             <GoldGradient
               style={{ borderRadius: colors.radius, paddingHorizontal: 20, paddingVertical: 10 }}
             >
-              <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 2 }}>
+              <Text style={{ ...type.labelStrong, color: colors.primary }}>
                 RETRY
               </Text>
             </GoldGradient>

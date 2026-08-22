@@ -42,6 +42,7 @@ import {
   downloadAndDecryptBlob,
   uploadEncryptedBlob,
 } from "@/lib/blobStore";
+import { type } from "@/constants/typography";
 
 // Allow photos up to ~25 MiB raw. Base64 inflates ~4/3 so the picker
 // returns up to ~34 MB of base64; the encrypted upload itself stays well
@@ -145,7 +146,7 @@ function EncryptedImageView({
       >
         <GoldGradient style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 4 }}>
           <Ionicons name="cloud-download-outline" size={22} color={colors.mutedForeground} />
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, fontWeight: "800" }}>
+          <Text style={{ ...type.micro, color: colors.mutedForeground }}>
             TAP TO FETCH
           </Text>
           <Text style={{ color: colors.mutedForeground, fontSize: 8, letterSpacing: 1 }}>
@@ -794,8 +795,8 @@ export default function ChatScreen() {
       alignItems: "center",
       justifyContent: "center",
     },
-    headerAvatarTxt: { color: colors.foreground, fontSize: 11, fontWeight: "800", letterSpacing: 0.5 },
-    headerAlias: { color: colors.foreground, fontSize: 14, fontWeight: "800", letterSpacing: 3 },
+    headerAvatarTxt: { ...type.labelStrong, color: colors.foreground, letterSpacing: 0.5 },
+    headerAlias: { ...type.subheading, color: colors.foreground, fontSize: 14 },
     headerSub: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
     headerSubText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
     headerTimerBadge: {
@@ -808,9 +809,8 @@ export default function ChatScreen() {
       paddingVertical: 5,
     },
     headerTimerTxt: {
+      ...type.micro,
       fontSize: 10,
-      fontWeight: "800" as const,
-      letterSpacing: 1,
       color: colors.destructive,
     },
     headerActions: { flexDirection: "row", gap: 12, alignItems: "center" },
@@ -836,9 +836,7 @@ export default function ChatScreen() {
       paddingVertical: 3,
     },
     disappearTxt: {
-      fontSize: 9,
-      fontWeight: "800",
-      letterSpacing: 2,
+      ...type.micro,
       color: conv.disappearAfterSec ? colors.destructive : colors.mutedForeground,
     },
     listContent: { paddingHorizontal: 16, paddingVertical: 12 },
@@ -863,9 +861,8 @@ export default function ChatScreen() {
     reactionChipTxt: { fontSize: 12, color: colors.foreground },
     fingerprint: { fontSize: 8, letterSpacing: 1, opacity: 0.5, fontFamily: "monospace" },
     expiryBadge: {
+      ...type.micro,
       fontSize: 8,
-      fontWeight: "800",
-      letterSpacing: 1,
       color: colors.destructive,
     },
     sealedBadge: {
@@ -878,9 +875,8 @@ export default function ChatScreen() {
       paddingVertical: 1,
     },
     sealedTxt: {
+      ...type.micro,
       fontSize: 7,
-      fontWeight: "800" as const,
-      letterSpacing: 1,
       color: colors.primary,
     },
     inputBar: {
@@ -895,10 +891,11 @@ export default function ChatScreen() {
       gap: 8,
     },
     input: {
+      ...type.body,
+      fontSize: 14,
       flex: 1,
       backgroundColor: colors.card,
       color: colors.foreground,
-      fontSize: 14,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 20,
@@ -946,10 +943,14 @@ export default function ChatScreen() {
       backgroundColor: colors.muted,
     },
     attachPreviewLabel: {
-      color: colors.foreground, fontSize: 10, fontWeight: "800", letterSpacing: 2,
+      ...type.labelStrong,
+      fontSize: 10,
+      color: colors.foreground, 
     },
     attachPreviewSub: {
-      color: colors.mutedForeground, fontSize: 10, marginTop: 2,
+      ...type.micro,
+      fontSize: 10,
+      color: colors.mutedForeground, marginTop: 2,
     },
     attachPreviewClose: {
       width: 28, height: 28, borderRadius: 14,
@@ -962,7 +963,9 @@ export default function ChatScreen() {
 
     // Attach sheet options
     attachHint: {
-      color: colors.mutedForeground, fontSize: 11, lineHeight: 16,
+      ...type.caption,
+      fontSize: 11,
+      color: colors.mutedForeground, lineHeight: 16,
     },
     attachOption: { borderRadius: 10, overflow: "hidden" },
     attachOptionInner: {
@@ -976,10 +979,14 @@ export default function ChatScreen() {
       alignItems: "center", justifyContent: "center",
     },
     attachOptionTitle: {
-      color: colors.foreground, fontSize: 11, fontWeight: "800", letterSpacing: 2,
+      ...type.labelStrong,
+      fontSize: 11,
+      color: colors.foreground, 
     },
     attachOptionSub: {
-      color: colors.mutedForeground, fontSize: 10, marginTop: 2,
+      ...type.micro,
+      fontSize: 10,
+      color: colors.mutedForeground, marginTop: 2,
     },
     attachPreviewIconBox: {
       alignItems: "center", justifyContent: "center",
@@ -1000,7 +1007,8 @@ export default function ChatScreen() {
       width: 2, borderRadius: 1, opacity: 0.8,
     },
     audioDuration: {
-      fontSize: 11, fontWeight: "700", letterSpacing: 1,
+      ...type.monoSmall,
+      fontSize: 11,
     },
 
     // In-bubble file chip
@@ -1014,7 +1022,7 @@ export default function ChatScreen() {
       backgroundColor: "rgba(255,255,255,0.18)",
       alignItems: "center", justifyContent: "center",
     },
-    fileName: { fontSize: 12, fontWeight: "700" },
+    fileName: { ...type.bodyStrong, fontSize: 12 },
     fileSize: { fontSize: 10, marginTop: 2 },
 
     // Recorder modal
@@ -1025,18 +1033,25 @@ export default function ChatScreen() {
       padding: 24, alignItems: "center", gap: 18,
     },
     recorderTitle: {
-      color: colors.foreground, fontSize: 12, fontWeight: "800", letterSpacing: 4,
+      ...type.labelStrong,
+      fontSize: 12,
+      letterSpacing: 1.5,
+      color: colors.foreground, 
     },
     recorderDot: {
       width: 12, height: 12, borderRadius: 6,
       backgroundColor: colors.destructive,
     },
     recorderTime: {
-      color: colors.foreground, fontSize: 32, fontWeight: "800",
-      letterSpacing: 4, fontVariant: ["tabular-nums"],
+      ...type.display,
+      fontSize: 32,
+      letterSpacing: 1,
+      color: colors.foreground, 
     },
     recorderHint: {
-      color: colors.mutedForeground, fontSize: 11, textAlign: "center",
+      ...type.caption,
+      fontSize: 11,
+      color: colors.mutedForeground, textAlign: "center",
     },
     recorderRow: {
       flexDirection: "row", gap: 12, marginTop: 4,
@@ -1051,7 +1066,8 @@ export default function ChatScreen() {
       alignItems: "center", justifyContent: "center",
     },
     recorderBtnTxt: {
-      fontSize: 11, fontWeight: "800", letterSpacing: 2,
+      ...type.labelStrong,
+      fontSize: 11,
     },
 
     // Info modal
@@ -1082,7 +1098,7 @@ export default function ChatScreen() {
       paddingHorizontal: 20, paddingVertical: 16,
       borderBottomWidth: 1, borderBottomColor: colors.border,
     },
-    sheetTitle: { color: colors.foreground, fontSize: 13, fontWeight: "800", letterSpacing: 4 },
+    sheetTitle: { ...type.heading, color: colors.foreground, fontSize: 13 },
     sheetBody: { padding: 20, gap: 16 }, // used as ScrollView contentContainerStyle
     emojiRow: {
       flexDirection: "row",
@@ -1101,17 +1117,18 @@ export default function ChatScreen() {
       flexDirection: "row", alignItems: "center", gap: 10,
       paddingVertical: 14,
     },
-    actionRowTxt: { color: colors.foreground, fontSize: 13, fontWeight: "700", letterSpacing: 2 },
+    actionRowTxt: { ...type.bodyStrong, color: colors.foreground, fontSize: 13 },
     safetyRow: {
       backgroundColor: colors.background,
       borderRadius: 12, borderWidth: 1, borderColor: colors.border,
       padding: 16, gap: 8,
     },
-    safetyLabel: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 3 },
+    safetyLabel: { ...type.label, color: colors.mutedForeground, fontSize: 10 },
     safetyNumber: {
+      ...type.mono,
+      fontSize: 16,
+      letterSpacing: 1.5,
       color: colors.success,
-      fontSize: 16, fontWeight: "800", letterSpacing: 4,
-      fontFamily: "monospace",
     },
     safetyNote: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
     infoRow: {
@@ -1119,7 +1136,7 @@ export default function ChatScreen() {
       paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border,
     },
     infoLabel: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 2 },
-    infoValue: { color: colors.foreground, fontSize: 11, fontWeight: "700", letterSpacing: 2 },
+    infoValue: { ...type.labelStrong, color: colors.foreground },
     disappearOptions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
     disappearOpt: {
       borderRadius: 8, overflow: "hidden",
@@ -1127,7 +1144,7 @@ export default function ChatScreen() {
     disappearOptInner: {
       borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
     },
-    disappearOptTxt: { fontSize: 11, fontWeight: "800", letterSpacing: 2 },
+    disappearOptTxt: { ...type.labelStrong },
     bgSwatchRow: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
     bgSwatch: {
       width: 32, height: 32, borderRadius: 16,
@@ -1159,10 +1176,10 @@ export default function ChatScreen() {
       gap: 8,
     },
     clearBtnTxt: {
-      color: colors.destructive,
+      ...type.labelStrong,
       fontSize: 12,
-      fontWeight: "800" as const,
-      letterSpacing: 3,
+      letterSpacing: 1.5,
+      color: colors.destructive,
     },
   });
 
@@ -1220,7 +1237,7 @@ export default function ChatScreen() {
                 testID="lbw-header-badge"
               >
                 <Ionicons name="cellular-outline" size={8} color={colors.primary} />
-                <Text style={{ fontSize: 8, fontWeight: "800", letterSpacing: 1, color: colors.primary }}>
+                <Text style={{ ...type.micro, fontSize: 8, color: colors.primary }}>
                   LO-BW
                 </Text>
               </View>
@@ -1610,7 +1627,7 @@ export default function ChatScreen() {
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Ionicons name="skull-outline" size={14} color={colors.destructive} />
-            <Text style={{ color: colors.destructive, fontSize: 11, fontWeight: "800", letterSpacing: 3 }}>
+            <Text style={{ ...type.labelStrong, color: colors.destructive }}>
               CONTACT SELF-DESTRUCTED
             </Text>
           </View>
@@ -1660,7 +1677,7 @@ export default function ChatScreen() {
               }}
             >
               <Ionicons name="trash-outline" size={13} color={colors.destructive} />
-              <Text style={{ color: colors.destructive, fontSize: 10, fontWeight: "800", letterSpacing: 2 }}>
+              <Text style={{ ...type.micro, color: colors.destructive, fontSize: 10 }}>
                 DELETE SEALED CONVERSATION
               </Text>
             </GoldGradient>
@@ -1904,7 +1921,7 @@ export default function ChatScreen() {
                       {conv.verified && (
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: `${colors.primary}22`, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
                           <Ionicons name="shield-checkmark" size={10} color={colors.primary} />
-                          <Text style={{ color: colors.primary, fontSize: 9, fontWeight: "800", letterSpacing: 2 }}>VERIFIED</Text>
+                          <Text style={{ ...type.micro, color: colors.primary }}>VERIFIED</Text>
                         </View>
                       )}
                     </View>
@@ -2249,7 +2266,7 @@ export default function ChatScreen() {
         }}
       >
         <Ionicons name="time-outline" size={14} color={colors.mutedForeground} />
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, letterSpacing: 1, fontWeight: "600" }}>
+        <Text style={{ ...type.caption, color: colors.mutedForeground, fontSize: 12 }}>
           MESSAGE QUEUED — will send when connected
         </Text>
       </Animated.View>

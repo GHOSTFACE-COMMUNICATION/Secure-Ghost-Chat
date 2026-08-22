@@ -12,6 +12,7 @@ import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { CallLogEntry, useApp } from "@/context/AppContext";
 import { getContrastText, getProfileColor } from "@/lib/chatColors";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 function formatTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -75,7 +76,7 @@ export default function CallScreen() {
       paddingTop: insets.top + 16,
       paddingBottom: 12,
     },
-    headerTitle: { color: colors.foreground, fontSize: 16, fontWeight: "800", letterSpacing: 4 },
+    headerTitle: { ...type.heading, color: colors.foreground },
     headerRight: { flexDirection: "row", alignItems: "center", gap: 14 },
     item: {
       flexDirection: "row",
@@ -93,23 +94,23 @@ export default function CallScreen() {
       alignItems: "center",
       justifyContent: "center",
     },
-    avatarTxt: { color: colors.foreground, fontSize: 15, fontWeight: "800", letterSpacing: 1 },
+    avatarTxt: { ...type.subheading, color: colors.foreground },
     itemBody: { flex: 1 },
     aliasRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-    alias: { color: colors.foreground, fontSize: 14, fontWeight: "700", letterSpacing: 2 },
+    alias: { ...type.subheading, color: colors.foreground, fontSize: 14 },
     aliasMissed: { color: colors.destructive },
     metaRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 },
-    metaTxt: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
+    metaTxt: { ...type.micro, color: colors.mutedForeground, fontSize: 10 },
     metaMissed: { color: colors.destructive },
-    timeTxt: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
+    timeTxt: { ...type.micro, color: colors.mutedForeground, fontSize: 10 },
     actions: { flexDirection: "row", gap: 10 },
     itemDivider: { height: 1, backgroundColor: colors.border, marginLeft: 80 },
     empty: { alignItems: "center", paddingTop: 60, gap: 12 },
-    emptyTxt: { color: colors.mutedForeground, fontSize: 13, letterSpacing: 3 },
-    emptySub: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 1, opacity: 0.6 },
+    emptyTxt: { ...type.label, color: colors.mutedForeground, fontSize: 13 },
+    emptySub: { ...type.caption, color: colors.mutedForeground, fontSize: 11, opacity: 0.6 },
     emptyBtn: { marginTop: 8, borderRadius: colors.radius, overflow: "hidden" },
     emptyBtnInner: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: colors.radius },
-    emptyBtnTxt: { color: "#FFFFFF", fontSize: 12, fontWeight: "800", letterSpacing: 3 },
+    emptyBtnTxt: { ...type.labelStrong, color: "#FFFFFF", fontSize: 12 },
     pad: { height: 110 },
   });
 

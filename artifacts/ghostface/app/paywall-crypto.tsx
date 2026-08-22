@@ -19,6 +19,7 @@ import { GhostLogo } from "@/components/GhostLogo";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
@@ -234,12 +235,12 @@ function SolanaPaywallContent() {
       top: insets.top + (Platform.OS === "web" ? 84 : 28),
     },
     headline: {
-      color: colors.foreground,
+      ...type.display,
       fontSize: 22,
-      fontWeight: "800",
-      letterSpacing: 6,
+      letterSpacing: 1.5,
+      color: colors.foreground,
     },
-    sub: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 3 },
+    sub: { ...type.label, color: colors.mutedForeground },
     networkRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -251,7 +252,7 @@ function SolanaPaywallContent() {
       borderWidth: 1,
       borderColor: "rgba(138,138,138,0.35)",
     },
-    networkTxt: { color: "#8A8A8A", fontSize: 10, fontWeight: "800", letterSpacing: 2 },
+    networkTxt: { ...type.micro, color: "#8A8A8A", fontSize: 10 },
     divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 20 },
     scroll: { flex: 1 },
     plans: { padding: 16, gap: 14, paddingBottom: 40 },
@@ -270,9 +271,9 @@ function SolanaPaywallContent() {
       padding: 16,
       paddingBottom: 12,
     },
-    planName: { fontSize: 18, fontWeight: "800", letterSpacing: 4 },
+    planName: { ...type.heading, fontSize: 18 },
     badge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },
-    badgeTxt: { fontSize: 9, fontWeight: "800", letterSpacing: 2 },
+    badgeTxt: { ...type.micro },
     priceRow: {
       flexDirection: "row",
       alignItems: "baseline",
@@ -280,11 +281,13 @@ function SolanaPaywallContent() {
       gap: 6,
       marginBottom: 14,
     },
-    price: { fontSize: 32, fontWeight: "800", letterSpacing: -1 },
-    currency: { fontSize: 13, fontWeight: "700", letterSpacing: 2 },
+    price: { ...type.display, fontSize: 32, letterSpacing: -1 },
+    currency: { ...type.labelStrong, fontSize: 13 },
     interval: { fontSize: 13, color: colors.mutedForeground },
     freeTxt: {
-      fontSize: 28, fontWeight: "800", letterSpacing: 2,
+      ...type.display,
+      fontSize: 28,
+      letterSpacing: 0.5,
       paddingHorizontal: 16, marginBottom: 14, color: colors.mutedForeground,
     },
     featureList: { paddingHorizontal: 16, paddingBottom: 16, gap: 8 },
@@ -312,7 +315,7 @@ function SolanaPaywallContent() {
       flexDirection: "row",
       gap: 8,
     },
-    ctaTxt: { fontSize: 13, fontWeight: "800", letterSpacing: 3 },
+    ctaTxt: { ...type.labelStrong, fontSize: 13 },
     errorBox: {
       marginHorizontal: 16, marginBottom: 8,
       backgroundColor: "rgba(255,59,48,0.1)",
@@ -321,7 +324,8 @@ function SolanaPaywallContent() {
     },
     errorTxt: { color: colors.destructive, fontSize: 11, letterSpacing: 2, textAlign: "center" },
     footer: {
-      color: colors.mutedForeground, fontSize: 9, letterSpacing: 2,
+      ...type.micro,
+      color: colors.mutedForeground, 
       textAlign: "center", paddingBottom: insets.bottom + 24, opacity: 0.4,
     },
 
@@ -345,11 +349,11 @@ function SolanaPaywallContent() {
       paddingHorizontal: 20, paddingVertical: 16,
       borderBottomWidth: 1, borderBottomColor: colors.border,
     },
-    sheetTitle: { color: colors.foreground, fontSize: 14, fontWeight: "800", letterSpacing: 4 },
+    sheetTitle: { ...type.heading, color: colors.foreground, fontSize: 14 },
     sheetBody: { padding: 20, gap: 16, alignItems: "center", paddingBottom: insets.bottom + 20 },
     planInfo: { alignItems: "center", gap: 4 },
-    planInfoName: { fontSize: 15, fontWeight: "800", letterSpacing: 4 },
-    planInfoPrice: { fontSize: 30, fontWeight: "800" },
+    planInfoName: { ...type.heading, fontSize: 15 },
+    planInfoPrice: { ...type.display, fontSize: 30 },
     planInfoSub: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
     qrWrap: { padding: 14, backgroundColor: "#fff", borderRadius: 14 },
     addrBox: {
@@ -358,8 +362,9 @@ function SolanaPaywallContent() {
       borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12,
     },
     addrTxt: {
+      ...type.monoSmall,
+      fontSize: 10,
       flex: 1, color: colors.mutedForeground,
-      fontSize: 10, letterSpacing: 1, fontFamily: "monospace",
     },
     copyBtn: { borderRadius: 6, overflow: "hidden" },
     copyBtnInner: {
@@ -367,26 +372,26 @@ function SolanaPaywallContent() {
       borderRadius: 6,
       paddingHorizontal: 10, paddingVertical: 5,
     },
-    copyTxt: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 1 },
+    copyTxt: { ...type.micro, color: "#fff" },
     steps: {
       width: "100%", backgroundColor: "rgba(138,138,138,0.07)",
       borderRadius: 12, padding: 14, gap: 10,
     },
     stepRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-    stepNum: { color: "#8A8A8A", fontSize: 11, fontWeight: "800", width: 18 },
+    stepNum: { ...type.labelStrong, color: "#8A8A8A", width: 18 },
     stepTxt: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 1, flex: 1 },
     sentBtn: { width: "100%", borderRadius: colors.radius, overflow: "hidden" },
     sentBtnInner: {
       paddingVertical: 14, alignItems: "center",
     },
-    sentBtnTxt: { color: "#fff", fontSize: 13, fontWeight: "800", letterSpacing: 3 },
+    sentBtnTxt: { ...type.labelStrong, color: "#fff", fontSize: 13 },
     confirmedBox: {
       width: "100%", borderRadius: colors.radius, padding: 16,
       backgroundColor: "rgba(125,211,252,0.07)",
       borderWidth: 1, borderColor: colors.success,
       alignItems: "center", gap: 6,
     },
-    confirmedTxt: { color: colors.success, fontSize: 13, fontWeight: "800", letterSpacing: 3 },
+    confirmedTxt: { ...type.labelStrong, color: colors.success, fontSize: 13 },
     confirmedSub: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2, textAlign: "center" },
     waitingBox: {
       width: "100%", borderRadius: colors.radius, padding: 16,
@@ -394,14 +399,14 @@ function SolanaPaywallContent() {
       borderWidth: 1, borderColor: colors.border,
       alignItems: "center", gap: 6,
     },
-    waitingTxt: { color: "#8A8A8A", fontSize: 13, fontWeight: "800", letterSpacing: 3 },
+    waitingTxt: { ...type.labelStrong, color: "#8A8A8A", fontSize: 13 },
     expiredBox: {
       width: "100%", borderRadius: colors.radius, padding: 16,
       backgroundColor: "rgba(255,59,48,0.07)",
       borderWidth: 1, borderColor: colors.destructive,
       alignItems: "center", gap: 6,
     },
-    expiredTxt: { color: colors.destructive, fontSize: 13, fontWeight: "800", letterSpacing: 3 },
+    expiredTxt: { ...type.labelStrong, color: colors.destructive, fontSize: 13 },
   });
 
   return (

@@ -5,6 +5,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
+import { type } from "@/constants/typography";
 
 interface AuditItem {
   label: string;
@@ -73,10 +74,10 @@ export default function SecurityAuditScreen() {
       borderBottomColor: colors.border,
       gap: 12,
     },
-    title: { color: colors.foreground, fontSize: 16, fontWeight: "800", letterSpacing: 4 },
+    title: { ...type.heading, color: colors.foreground },
     scroll: { flex: 1 },
     section: { paddingHorizontal: 20, marginTop: 24 },
-    sectionLabel: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 3, marginBottom: 12 },
+    sectionLabel: { ...type.label, color: colors.mutedForeground, fontSize: 10, marginBottom: 12 },
     scoreCard: {
       backgroundColor: colors.card,
       borderRadius: 16,
@@ -87,8 +88,8 @@ export default function SecurityAuditScreen() {
       gap: 6,
       marginBottom: 8,
     },
-    scoreNum: { color: colors.success, fontSize: 52, fontWeight: "800", letterSpacing: -2 },
-    scoreLabel: { color: colors.success, fontSize: 12, fontWeight: "800", letterSpacing: 3 },
+    scoreNum: { ...type.display, color: colors.success, fontSize: 52, letterSpacing: -2 },
+    scoreLabel: { ...type.labelStrong, color: colors.success, fontSize: 12 },
     scoreNote: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1 },
     auditRow: {
       flexDirection: "row",
@@ -103,7 +104,7 @@ export default function SecurityAuditScreen() {
     auditLabel: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
     auditDetail: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 1, marginTop: 2, opacity: 0.7 },
     auditRight: { flexDirection: "row", alignItems: "center", gap: 6 },
-    auditValue: { fontSize: 11, fontWeight: "800", letterSpacing: 1 },
+    auditValue: { ...type.labelStrong },
     compareRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -116,7 +117,7 @@ export default function SecurityAuditScreen() {
     compareNote: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 1, marginTop: 2 },
     compareCol: { width: 40, alignItems: "center" },
     compareHead: { width: 40, alignItems: "center" },
-    compareHeadTxt: { fontSize: 9, fontWeight: "800", letterSpacing: 1 },
+    compareHeadTxt: { ...type.micro },
     deviceRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -127,8 +128,8 @@ export default function SecurityAuditScreen() {
     },
     deviceLabel: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 2 },
     footer: {
+      ...type.micro,
       color: colors.mutedForeground,
-      fontSize: 9, letterSpacing: 2,
       textAlign: "center",
       paddingVertical: 24,
       opacity: 0.4,
@@ -179,7 +180,7 @@ export default function SecurityAuditScreen() {
                     size={16}
                     color={item.active ? colors.success : colors.destructive}
                   />
-                  <Text style={{ fontSize: 11, fontWeight: "800", letterSpacing: 2, color: item.active ? colors.success : colors.destructive }}>
+                  <Text style={{ ...type.labelStrong, color: item.active ? colors.success : colors.destructive }}>
                     {item.active ? "ACTIVE" : "INACTIVE"}
                   </Text>
                 </View>

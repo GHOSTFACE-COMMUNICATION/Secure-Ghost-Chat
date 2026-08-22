@@ -20,6 +20,7 @@ import { wasCallEnded } from "@/lib/endedCalls";
 import { GoldGradient } from "@/components/GoldGradient";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
+import { type } from "@/constants/typography";
 import { useApp } from "@/context/AppContext";
 import { notifyCallEnded } from "@/hooks/usePushNotifications";
 
@@ -768,14 +769,14 @@ export default function CallScreen() {
       alignItems: "center", justifyContent: "center",
     },
     avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" },
-    avatarText: { color: colors.primary, fontSize: 32, fontWeight: "800" as const, letterSpacing: 2 },
-    aliasText: { color: colors.foreground, fontSize: 22, fontWeight: "800" as const, letterSpacing: 4 },
+    avatarText: { ...type.title, color: colors.primary, fontSize: 32 },
+    aliasText: { ...type.title, color: colors.foreground, fontSize: 22 },
     statusRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-    statusText: { fontSize: 13, letterSpacing: 3, fontWeight: "600" as const },
-    durationText: { color: colors.mutedForeground, fontSize: 13, letterSpacing: 4, fontWeight: "600" as const },
+    statusText: { ...type.labelStrong, fontSize: 13 },
+    durationText: { ...type.labelStrong, color: colors.mutedForeground, fontSize: 13 },
     encRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6 },
-    encText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 2 },
-    noteText: { color: colors.mutedForeground, fontSize: 10, letterSpacing: 1, textAlign: "center" as const, maxWidth: 240 },
+    encText: { ...type.micro, color: colors.mutedForeground, fontSize: 10 },
+    noteText: { ...type.caption, color: colors.mutedForeground, fontSize: 10, textAlign: "center" as const, maxWidth: 240 },
     bottomSection: { gap: 16 },
     controls: { flexDirection: "row" as const, gap: 20, alignItems: "center" as const, justifyContent: "center" as const },
     ctrlItem: { alignItems: "center" as const },
@@ -790,13 +791,13 @@ export default function CallScreen() {
       alignItems: "center" as const, justifyContent: "center" as const,
     },
     endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.destructive, alignItems: "center" as const, justifyContent: "center" as const },
-    modeLabel: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginTop: 4, textAlign: "center" as const },
+    modeLabel: { ...type.micro, color: colors.mutedForeground, marginTop: 4, textAlign: "center" as const },
     webrtcBadge: {
       flexDirection: "row" as const, alignItems: "center" as const, gap: 4,
       backgroundColor: `${colors.success}18`, borderRadius: 8,
       paddingHorizontal: 10, paddingVertical: 3,
     },
-    webrtcBadgeTxt: { color: colors.success, fontSize: 9, fontWeight: "700" as const, letterSpacing: 2 },
+    webrtcBadgeTxt: { ...type.micro, color: colors.success },
   });
 
   return (
