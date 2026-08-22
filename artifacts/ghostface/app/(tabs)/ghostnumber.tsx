@@ -371,11 +371,11 @@ export default function GhostNumberScreen() {
       letterSpacing: 2,
       flex: 1,
     },
-    copyBtn: {
+    copyBtn: {},
+    copyBtnInner: {
       flexDirection: "row",
       alignItems: "center",
       gap: 4,
-      backgroundColor: colors.muted,
       borderRadius: 6,
       paddingHorizontal: 10,
       paddingVertical: 7,
@@ -408,17 +408,16 @@ export default function GhostNumberScreen() {
       fontWeight: "600",
     },
     inboxBtn: {
+      marginTop: 4,
+      marginBottom: 12,
+    },
+    inboxBtnInner: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: 8,
       paddingVertical: 10,
-      marginTop: 4,
-      marginBottom: 12,
       borderRadius: 8,
-      borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: "rgba(245,210,107,0.08)",
     },
     inboxBtnText: {
       flex: 1,
@@ -447,19 +446,14 @@ export default function GhostNumberScreen() {
     },
     rotationChip: {
       flex: 1,
+      overflow: "hidden",
+      borderRadius: 6,
+    },
+    rotationChipInner: {
       paddingVertical: 8,
       borderRadius: 6,
-      borderWidth: 1,
       alignItems: "center",
       justifyContent: "center",
-    },
-    rotationChipActive: {
-      backgroundColor: "rgba(245,210,107,0.15)",
-      borderColor: colors.primary,
-    },
-    rotationChipInactive: {
-      backgroundColor: "transparent",
-      borderColor: colors.border,
     },
     rotationChipText: {
       fontSize: 10,
@@ -568,20 +562,14 @@ export default function GhostNumberScreen() {
           <Text style={styles.emptyBody}>
             Could not retrieve your ghost numbers. Check your connection and try again.
           </Text>
-          <Pressable
-            style={{
-              marginTop: 16,
-              borderWidth: 1,
-              borderColor: colors.primary,
-              borderRadius: colors.radius,
-              paddingHorizontal: 20,
-              paddingVertical: 10,
-            }}
-            onPress={load}
-          >
-            <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 2 }}>
-              RETRY
-            </Text>
+          <Pressable style={{ marginTop: 16 }} onPress={load}>
+            <GoldGradient
+              style={{ borderRadius: colors.radius, paddingHorizontal: 20, paddingVertical: 10 }}
+            >
+              <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "800", letterSpacing: 2 }}>
+                RETRY
+              </Text>
+            </GoldGradient>
           </Pressable>
         </View>
       ) : (
@@ -637,14 +625,16 @@ export default function GhostNumberScreen() {
                   <View style={styles.phoneRow}>
                     <Text style={styles.phoneNumber}>{n.phoneNumber}</Text>
                     <Pressable style={styles.copyBtn} onPress={() => handleCopy(n)}>
-                      <Ionicons
-                        name={copied === n.id ? "checkmark" : "copy-outline"}
-                        size={12}
-                        color={colors.foreground}
-                      />
-                      <Text style={styles.copyBtnText}>
-                        {copied === n.id ? "COPIED" : "COPY"}
-                      </Text>
+                      <GoldGradient style={styles.copyBtnInner}>
+                        <Ionicons
+                          name={copied === n.id ? "checkmark" : "copy-outline"}
+                          size={12}
+                          color={colors.foreground}
+                        />
+                        <Text style={styles.copyBtnText}>
+                          {copied === n.id ? "COPIED" : "COPY"}
+                        </Text>
+                      </GoldGradient>
                     </Pressable>
                   </View>
 
@@ -676,9 +666,11 @@ export default function GhostNumberScreen() {
                   style={({ pressed }) => [styles.inboxBtn, pressed && { opacity: 0.7 }]}
                   onPress={openInbox}
                 >
-                  <Ionicons name="mail-outline" size={14} color={colors.primary} />
-                  <Text style={styles.inboxBtnText}>VIEW SMS INBOX</Text>
-                  <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                  <GoldGradient style={styles.inboxBtnInner}>
+                    <Ionicons name="mail-outline" size={14} color={colors.primary} />
+                    <Text style={styles.inboxBtnText}>VIEW SMS INBOX</Text>
+                    <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                  </GoldGradient>
                 </Pressable>
 
                 <View style={styles.cardDivider} />
@@ -692,21 +684,22 @@ export default function GhostNumberScreen() {
                     return (
                       <Pressable
                         key={opt.days}
-                        style={[
-                          styles.rotationChip,
-                          isActive ? styles.rotationChipActive : styles.rotationChipInactive,
-                        ]}
+                        style={styles.rotationChip}
                         onPress={() => handleSetRotation(n, opt.days)}
                         disabled={savingRotation === n.id}
                       >
-                        <Text
-                          style={[
-                            styles.rotationChipText,
-                            { color: isActive ? colors.primary : colors.mutedForeground },
-                          ]}
+                        <GoldGradient
+                          style={[styles.rotationChipInner, isActive && { borderColor: colors.primary }]}
                         >
-                          {opt.label}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.rotationChipText,
+                              { color: isActive ? colors.primary : colors.mutedForeground },
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </GoldGradient>
                       </Pressable>
                     );
                   })}

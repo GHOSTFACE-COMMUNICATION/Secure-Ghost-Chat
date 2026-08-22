@@ -77,12 +77,26 @@ export function SpecularHighlight({ intensity = 0.65 }: { intensity?: number }) 
 // as the same "gold liquid glass" surface without call sites needing to know
 // which path rendered. `style` is expected to carry sizing/borderRadius/
 // padding, same as before.
+// Default specular intensity for <GoldGradient> surfaces. Deliberately far
+// lower than SpecularHighlight's own 0.65 default: that value was tuned for
+// the radial menu's 44×44 circular nodes, where a tight diagonal streak
+// reads as light catching a curved glass edge. Stretched across a
+// full-width rectangular button the same streak becomes a bright bar
+// sitting behind the label, and text — especially mutedForeground on
+// inactive/disabled states — loses contrast where it crosses. Keep this low
+// enough that the surface still reads as glass without competing with its
+// own content; pass `specularIntensity` to opt a small//round surface back
+// up if it needs the stronger sheen.
+const WIDE_SURFACE_SPECULAR = 0.22;
+
 export function GoldGradient({
   style,
   children,
+  specularIntensity = WIDE_SURFACE_SPECULAR,
 }: {
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
+  specularIntensity?: number;
 }) {
   if (useNativeGlass) {
     return (
@@ -92,7 +106,7 @@ export function GoldGradient({
         tintColor={GLASS_TINT_BLACK}
         isInteractive
       >
-        <SpecularHighlight />
+        <SpecularHighlight intensity={specularIntensity} />
         {children}
       </GlassView>
     );
@@ -109,7 +123,7 @@ export function GoldGradient({
         end={{ x: 0, y: 1 }}
         style={[{ backgroundColor: "#000000" }, StyleSheet.absoluteFill]}
       />
-      <SpecularHighlight />
+      <SpecularHighlight intensity={specularIntensity} />
       {children}
     </BlurView>
   );

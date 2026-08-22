@@ -493,11 +493,9 @@ export default function LockScreen() {
       width: 72,
       height: 72,
       borderRadius: 36,
-      backgroundColor: colors.card,
       alignItems: "center",
       justifyContent: "center",
-      borderWidth: 1,
-      borderColor: colors.border,
+      overflow: "hidden",
     },
     keyBtnGoldFill: {
       width: "100%",
@@ -825,7 +823,9 @@ export default function LockScreen() {
                   if (k === "del") {
                     return (
                       <Pressable key={ki} style={styles.keyBtn} onPress={handleDelete}>
-                        <Ionicons name="backspace-outline" size={22} color={colors.foreground} />
+                        <GoldGradient style={styles.keyBtnGoldFill}>
+                          <Ionicons name="backspace-outline" size={22} color={colors.foreground} />
+                        </GoldGradient>
                       </Pressable>
                     );
                   }
@@ -852,7 +852,9 @@ export default function LockScreen() {
                       onPress={() => handleKey(k)}
                       testID={`key-${k}`}
                     >
-                      <Text style={styles.keyText}>{k}</Text>
+                      <GoldGradient style={styles.keyBtnGoldFill}>
+                        <Text style={styles.keyText}>{k}</Text>
+                      </GoldGradient>
                     </Pressable>
                   );
                 })}

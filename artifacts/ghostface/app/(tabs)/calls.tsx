@@ -10,7 +10,7 @@ import { GoldGradient } from "@/components/GoldGradient";
 import { SecureBadge } from "@/components/SecureBadge";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { CallLogEntry, useApp } from "@/context/AppContext";
-import { getProfileColor } from "@/lib/chatColors";
+import { getContrastText, getProfileColor } from "@/lib/chatColors";
 import { useColors } from "@/hooks/useColors";
 
 function formatTime(ts: number): string {
@@ -177,7 +177,9 @@ export default function CallScreen() {
               <View>
                 <View style={styles.item}>
                   <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
-                    <Text style={styles.avatarTxt}>{item.alias.slice(0, 2)}</Text>
+                    <Text style={[styles.avatarTxt, { color: getContrastText(getProfileColor(item.alias)) }]}>
+                      {item.alias.slice(0, 2)}
+                    </Text>
                   </View>
                   <View style={styles.itemBody}>
                     <View style={styles.aliasRow}>

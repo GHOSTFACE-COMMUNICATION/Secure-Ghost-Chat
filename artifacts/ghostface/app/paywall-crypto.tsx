@@ -361,9 +361,10 @@ function SolanaPaywallContent() {
       flex: 1, color: colors.mutedForeground,
       fontSize: 10, letterSpacing: 1, fontFamily: "monospace",
     },
-    copyBtn: {
+    copyBtn: { borderRadius: 6, overflow: "hidden" },
+    copyBtnInner: {
       flexDirection: "row", alignItems: "center", gap: 4,
-      backgroundColor: "#8A8A8A", borderRadius: 6,
+      borderRadius: 6,
       paddingHorizontal: 10, paddingVertical: 5,
     },
     copyTxt: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 1 },
@@ -374,10 +375,9 @@ function SolanaPaywallContent() {
     stepRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
     stepNum: { color: "#8A8A8A", fontSize: 11, fontWeight: "800", width: 18 },
     stepTxt: { color: colors.mutedForeground, fontSize: 11, letterSpacing: 1, flex: 1 },
-    sentBtn: {
-      width: "100%", borderRadius: colors.radius,
+    sentBtn: { width: "100%", borderRadius: colors.radius, overflow: "hidden" },
+    sentBtnInner: {
       paddingVertical: 14, alignItems: "center",
-      backgroundColor: "#8A8A8A",
     },
     sentBtnTxt: { color: "#fff", fontSize: 13, fontWeight: "800", letterSpacing: 3 },
     confirmedBox: {
@@ -495,23 +495,21 @@ function SolanaPaywallContent() {
 
                 <Pressable
                   style={({ pressed }) => [
-                    plan.recommended ? s.ctaBtnRec : s.ctaBtn,
-                    !plan.recommended && {
-                      backgroundColor: isPaid ? "#8A8A8A22" : "transparent",
-                      borderWidth: isPaid ? 1 : plan.id === "ghost" ? 1 : 0,
-                      borderColor: plan.id === "ghost" ? plan.color : "#8A8A8A",
-                    },
+                    s.ctaBtnRec,
                     pressed && { opacity: 0.8 },
                     loading !== null && { opacity: 0.6 },
                   ]}
                   onPress={() => handleSelect(plan)}
                   disabled={loading !== null}
                 >
-                  {plan.recommended ? (
-                    <GoldGradient style={s.ctaBtnRecInner}>{ctaInner}</GoldGradient>
-                  ) : (
-                    ctaInner
-                  )}
+                  <GoldGradient
+                    style={[
+                      s.ctaBtnRecInner,
+                      !plan.recommended && plan.id === "ghost" && { borderColor: plan.color },
+                    ]}
+                  >
+                    {ctaInner}
+                  </GoldGradient>
                 </Pressable>
               </View>
             );
@@ -570,12 +568,14 @@ function SolanaPaywallContent() {
                     style={s.copyBtn}
                     onPress={() => copyAddress(activePayment.info.wallet)}
                   >
-                    <Ionicons
-                      name={copied ? "checkmark" : "copy-outline"}
-                      size={12}
-                      color="#fff"
-                    />
-                    <Text style={s.copyTxt}>{copied ? "COPIED" : "COPY"}</Text>
+                    <GoldGradient style={s.copyBtnInner}>
+                      <Ionicons
+                        name={copied ? "checkmark" : "copy-outline"}
+                        size={12}
+                        color="#fff"
+                      />
+                      <Text style={s.copyTxt}>{copied ? "COPIED" : "COPY"}</Text>
+                    </GoldGradient>
                   </Pressable>
                 </View>
 
@@ -610,7 +610,9 @@ function SolanaPaywallContent() {
                         router.back();
                       }}
                     >
-                      <Text style={s.sentBtnTxt}>DONE</Text>
+                      <GoldGradient style={s.sentBtnInner}>
+                        <Text style={s.sentBtnTxt}>DONE</Text>
+                      </GoldGradient>
                     </Pressable>
                   </View>
                 ) : paymentStatus === "expired" ? (
@@ -625,7 +627,9 @@ function SolanaPaywallContent() {
                       style={({ pressed }) => [s.sentBtn, pressed && { opacity: 0.8 }]}
                       onPress={closePayment}
                     >
-                      <Text style={s.sentBtnTxt}>CLOSE</Text>
+                      <GoldGradient style={s.sentBtnInner}>
+                        <Text style={s.sentBtnTxt}>CLOSE</Text>
+                      </GoldGradient>
                     </Pressable>
                   </View>
                 ) : (

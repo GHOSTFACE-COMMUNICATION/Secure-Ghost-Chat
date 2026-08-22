@@ -4,21 +4,20 @@
  * stored on the conversation, a profile colour is a pure hash of the alias
  * computed fresh on every device. Neither is ever transmitted.
  *
- * All entries stay in the same dark luminance range as the app's existing
- * `#000000`/`#0A0A0A` — subtle hue tints, not bright colours — so text
- * already calibrated against near-black (timestamps, the translucent
- * system-message banner, empty-state copy) stays legible without any
- * per-swatch contrast logic.
+ * Unlike the old muted/dark-only palette, these span light and dark swatches
+ * (white and grey included), so nothing here can assume a fixed text colour
+ * reads legibly on top of it — callers must use `getContrastText` for any
+ * text/icon drawn directly on a swatch. Wallpaper use (chat screen
+ * background) instead darkens via a scrim rather than picking text colour
+ * per swatch — see the scrim comment in app/chat/[id].tsx.
  */
 export const CHAT_COLOR_PALETTE: string[] = [
-  "#0A0F16", // slate
-  "#120A1C", // amethyst
-  "#0A1712", // emerald
-  "#1A0A14", // garnet
-  "#160E08", // bronze
-  "#08151A", // petrol
-  "#0A0E1C", // sapphire
-  "#140F1A", // plum
+  "#FFFFFF", // white
+  "#000000", // black
+  "#8E8E93", // grey
+  "#0A84FF", // blue
+  "#FF3B30", // red
+  "#F5D26B", // gold — the app's brand gold, see GoldGradient.tsx
 ];
 
 /**
@@ -32,4 +31,19 @@ export function getProfileColor(alias: string): string {
     hash = (hash * 31 + upper.charCodeAt(i)) | 0; // |0 keeps a 32-bit int, avoids float drift
   }
   return CHAT_COLOR_PALETTE[Math.abs(hash) % CHAT_COLOR_PALETTE.length];
+}
+
+/**
+ * Relative-luminance-based text colour for content drawn directly on a
+ * palette swatch (e.g. avatar initials) — light swatches get dark text,
+ * dark swatches get light text. Not needed for wallpaper use, which relies
+ * on the scrim instead.
+ */
+export function getContrastText(hex: string): string {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.substring(0, 2), 16) / 255;
+  const g = parseInt(clean.substring(2, 4), 16) / 255;
+  const b = parseInt(clean.substring(4, 6), 16) / 255;
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return luminance > 0.5 ? "#0A0A0A" : "#FFFFFF";
 }

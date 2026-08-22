@@ -26,7 +26,7 @@ import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
 import { CODE_REGEX, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
-import { getProfileColor } from "@/lib/chatColors";
+import { getContrastText, getProfileColor } from "@/lib/chatColors";
 
 function formatTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -432,8 +432,8 @@ export default function MessagesScreen() {
       paddingHorizontal: 16,
       paddingVertical: 14,
     },
-    sheetBtn: {
-      backgroundColor: colors.primary,
+    sheetBtn: {},
+    sheetBtnInner: {
       borderRadius: colors.radius,
       paddingVertical: 14,
       alignItems: "center",
@@ -582,7 +582,9 @@ export default function MessagesScreen() {
               >
                 <View style={styles.avatarWrap}>
                   <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
-                    <Text style={styles.avatarTxt}>{item.alias.slice(0, 2)}</Text>
+                    <Text style={[styles.avatarTxt, { color: getContrastText(getProfileColor(item.alias)) }]}>
+                      {item.alias.slice(0, 2)}
+                    </Text>
                   </View>
                   {item.unread > 0 && (
                     <GoldGradient style={styles.badge}>
@@ -631,11 +633,13 @@ export default function MessagesScreen() {
               <Text style={styles.sheetSub}>Scan their QR code or enter alias manually</Text>
 
               <Pressable
-                style={[styles.sheetBtn, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary }]}
+                style={styles.sheetBtn}
                 onPress={() => { setShowNew(false); setTimeout(() => setShowScanner(true), 300); }}
               >
-                <Ionicons name="qr-code-outline" size={16} color={colors.primary} />
-                <Text style={[styles.sheetBtnTxt, { color: colors.primary }]}>SCAN QR CODE</Text>
+                <GoldGradient style={styles.sheetBtnInner}>
+                  <Ionicons name="qr-code-outline" size={16} color={colors.primary} />
+                  <Text style={[styles.sheetBtnTxt, { color: colors.primary }]}>SCAN QR CODE</Text>
+                </GoldGradient>
               </Pressable>
 
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>

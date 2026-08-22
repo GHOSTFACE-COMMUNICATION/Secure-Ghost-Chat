@@ -320,12 +320,10 @@ export default function GhostInvite() {
       letterSpacing: 6,
       fontFamily: "monospace",
     },
-    copyBtn: {
-      backgroundColor: copied ? colors.card : colors.muted,
+    copyBtn: { borderRadius: 8, overflow: "hidden" },
+    copyBtnInner: {
       borderRadius: 8,
       padding: 8,
-      borderWidth: 1,
-      borderColor: copied ? colors.foreground : colors.border,
     },
     countdownRow: {
       flexDirection: "row",
@@ -362,16 +360,25 @@ export default function GhostInvite() {
     },
     timerBtn: {
       flex: 1,
-      paddingVertical: 9,
-      backgroundColor: colors.card,
       borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: colors.border,
+      overflow: "hidden",
+    },
+    timerBtnInner: {
+      paddingVertical: 9,
+      borderRadius: colors.radius,
       alignItems: "center",
     },
-    timerBtnActive: {
+    // Preserved verbatim (unchanged) for the active self-destruct-timer
+    // state — deliberately flat destructive-red, not glass; see the
+    // "flag for design decision" note this came with.
+    timerBtnActiveFull: {
+      flex: 1,
+      paddingVertical: 9,
       backgroundColor: "rgba(255,59,48,0.15)",
+      borderRadius: colors.radius,
+      borderWidth: 1,
       borderColor: colors.destructive,
+      alignItems: "center",
     },
     timerTxt: {
       color: colors.mutedForeground,
@@ -518,18 +525,18 @@ export default function GhostInvite() {
     },
     shareBtn: {
       flex: 1,
+      borderRadius: colors.radius,
+      overflow: "hidden" as const,
+    },
+    shareBtnInner: {
       flexDirection: "row" as const,
       alignItems: "center" as const,
       justifyContent: "center" as const,
       gap: 6,
       paddingVertical: 11,
-      backgroundColor: colors.muted,
       borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: colors.border,
     },
     shareBtnActive: {
-      backgroundColor: "rgba(32,138,239,0.15)",
       borderColor: colors.primary,
     },
     shareBtnTxt: {
@@ -617,11 +624,13 @@ export default function GhostInvite() {
               <Text style={styles.codeText}>{code}</Text>
               {!expired && (
                 <Pressable style={styles.copyBtn} onPress={handleCopy}>
-                  <Ionicons
-                    name={copied ? "checkmark" : "copy-outline"}
-                    size={18}
-                    color={copied ? colors.foreground : colors.mutedForeground}
-                  />
+                  <GoldGradient style={[styles.copyBtnInner, copied && { borderColor: colors.foreground }]}>
+                    <Ionicons
+                      name={copied ? "checkmark" : "copy-outline"}
+                      size={18}
+                      color={copied ? colors.foreground : colors.mutedForeground}
+                    />
+                  </GoldGradient>
                 </Pressable>
               )}
             </View>
@@ -641,22 +650,23 @@ export default function GhostInvite() {
             {/* Copy + Send */}
             {!expired && (
               <View style={styles.shareRow}>
-                <Pressable
-                  style={[styles.shareBtn, copiedShare && styles.shareBtnActive]}
-                  onPress={handleCopyShare}
-                >
-                  <Ionicons
-                    name={copiedShare ? "checkmark" : "copy-outline"}
-                    size={14}
-                    color={copiedShare ? colors.primary : colors.mutedForeground}
-                  />
-                  <Text style={[styles.shareBtnTxt, copiedShare && styles.shareBtnTxtActive]}>
-                    {copiedShare ? "COPIED" : "COPY"}
-                  </Text>
+                <Pressable style={styles.shareBtn} onPress={handleCopyShare}>
+                  <GoldGradient style={[styles.shareBtnInner, copiedShare && styles.shareBtnActive]}>
+                    <Ionicons
+                      name={copiedShare ? "checkmark" : "copy-outline"}
+                      size={14}
+                      color={copiedShare ? colors.primary : colors.mutedForeground}
+                    />
+                    <Text style={[styles.shareBtnTxt, copiedShare && styles.shareBtnTxtActive]}>
+                      {copiedShare ? "COPIED" : "COPY"}
+                    </Text>
+                  </GoldGradient>
                 </Pressable>
                 <Pressable style={styles.shareBtn} onPress={handleSend}>
-                  <Ionicons name="share-outline" size={14} color={colors.mutedForeground} />
-                  <Text style={styles.shareBtnTxt}>SEND</Text>
+                  <GoldGradient style={styles.shareBtnInner}>
+                    <Ionicons name="share-outline" size={14} color={colors.mutedForeground} />
+                    <Text style={styles.shareBtnTxt}>SEND</Text>
+                  </GoldGradient>
                 </Pressable>
               </View>
             )}
@@ -671,12 +681,16 @@ export default function GhostInvite() {
             {TIMER_OPTIONS.map((opt, i) => (
               <Pressable
                 key={opt.label}
-                style={[styles.timerBtn, timerIdx === i && styles.timerBtnActive]}
+                style={timerIdx === i ? styles.timerBtnActiveFull : styles.timerBtn}
                 onPress={() => handleTimer(i)}
               >
-                <Text style={[styles.timerTxt, timerIdx === i && styles.timerTxtActive]}>
-                  {opt.label}
-                </Text>
+                {timerIdx === i ? (
+                  <Text style={[styles.timerTxt, styles.timerTxtActive]}>{opt.label}</Text>
+                ) : (
+                  <GoldGradient style={styles.timerBtnInner}>
+                    <Text style={styles.timerTxt}>{opt.label}</Text>
+                  </GoldGradient>
+                )}
               </Pressable>
             ))}
           </View>

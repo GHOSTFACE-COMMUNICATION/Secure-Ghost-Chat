@@ -781,7 +781,6 @@ export default function CallScreen() {
     ctrlItem: { alignItems: "center" as const },
     ctrlBtn: {
       width: 56, height: 56, borderRadius: 28,
-      backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
       alignItems: "center" as const, justifyContent: "center" as const,
       overflow: "hidden" as const,
     },
@@ -872,14 +871,14 @@ export default function CallScreen() {
         {/* Call controls */}
         <View style={styles.controls}>
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, muted && styles.ctrlBtnActiveWrap]} onPress={toggleMute}>
-              {muted ? (
-                <GoldGradient style={styles.ctrlBtnGoldFill}>
-                  <Ionicons name="mic-off" size={22} color="#FFFFFF" />
-                </GoldGradient>
-              ) : (
-                <Ionicons name="mic" size={22} color={colors.foreground} />
-              )}
+            <Pressable style={styles.ctrlBtn} onPress={toggleMute}>
+              <GoldGradient style={[styles.ctrlBtnGoldFill, muted && styles.ctrlBtnActiveWrap]}>
+                <Ionicons
+                  name={muted ? "mic-off" : "mic"}
+                  size={22}
+                  color={muted ? "#FFFFFF" : colors.foreground}
+                />
+              </GoldGradient>
             </Pressable>
             <Text style={styles.modeLabel}>{muted ? "UNMUTE" : "MUTE"}</Text>
           </View>
@@ -892,14 +891,14 @@ export default function CallScreen() {
           </View>
 
           <View style={styles.ctrlItem}>
-            <Pressable style={[styles.ctrlBtn, speakerOn && styles.ctrlBtnActiveWrap]} onPress={toggleSpeaker}>
-              {speakerOn ? (
-                <GoldGradient style={styles.ctrlBtnGoldFill}>
-                  <Ionicons name="volume-high" size={22} color="#FFFFFF" />
-                </GoldGradient>
-              ) : (
-                <Ionicons name="volume-medium" size={22} color={colors.foreground} />
-              )}
+            <Pressable style={styles.ctrlBtn} onPress={toggleSpeaker}>
+              <GoldGradient style={[styles.ctrlBtnGoldFill, speakerOn && styles.ctrlBtnActiveWrap]}>
+                <Ionicons
+                  name={speakerOn ? "volume-high" : "volume-medium"}
+                  size={22}
+                  color={speakerOn ? "#FFFFFF" : colors.foreground}
+                />
+              </GoldGradient>
             </Pressable>
             <Text style={styles.modeLabel}>SPEAKER</Text>
           </View>
@@ -907,7 +906,9 @@ export default function CallScreen() {
           {isVideo && (
             <View style={styles.ctrlItem}>
               <Pressable style={styles.ctrlBtn} onPress={toggleCamera} testID="flip-camera-btn">
-                <Ionicons name="camera-reverse-outline" size={22} color={colors.foreground} />
+                <GoldGradient style={styles.ctrlBtnGoldFill}>
+                  <Ionicons name="camera-reverse-outline" size={22} color={colors.foreground} />
+                </GoldGradient>
               </Pressable>
               <Text style={styles.modeLabel}>FLIP</Text>
             </View>

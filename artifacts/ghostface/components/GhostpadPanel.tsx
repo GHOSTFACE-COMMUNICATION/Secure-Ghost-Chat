@@ -208,10 +208,13 @@ export default function GhostpadScreen({
     actionBtn: {
       width: "100%",
       borderRadius: colors.radius,
+      overflow: "hidden",
+    },
+    actionBtnGlassInner: {
+      width: "100%",
       paddingVertical: 14,
       alignItems: "center",
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: colors.radius,
     },
     actionBtnPrimary: {
       borderColor: colors.primary,
@@ -277,14 +280,16 @@ export default function GhostpadScreen({
     },
     footerBtn: {
       flex: 1,
+      borderRadius: colors.radius,
+      overflow: "hidden",
+    },
+    footerBtnInner: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: 6,
       paddingVertical: 12,
       borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: colors.border,
     },
     footerBtnText: {
       color: colors.mutedForeground,
@@ -331,7 +336,9 @@ export default function GhostpadScreen({
             onPress={() => setGhostpadMode("joining")}
             disabled={!wsConnected}
           >
-            <Text style={styles.actionBtnText}>JOIN PAD</Text>
+            <GoldGradient style={styles.actionBtnGlassInner}>
+              <Text style={styles.actionBtnText}>JOIN PAD</Text>
+            </GoldGradient>
           </Pressable>
         </View>
       )}
@@ -344,16 +351,20 @@ export default function GhostpadScreen({
               <Text style={styles.codeDisplay}>{code}</Text>
               <View style={styles.shareRow}>
                 <Pressable style={styles.footerBtn} onPress={handleCopy}>
-                  <Ionicons
-                    name={copied ? "checkmark" : "copy-outline"}
-                    size={14}
-                    color={copied ? colors.foreground : colors.mutedForeground}
-                  />
-                  <Text style={styles.footerBtnText}>{copied ? "COPIED" : "COPY"}</Text>
+                  <GoldGradient style={styles.footerBtnInner}>
+                    <Ionicons
+                      name={copied ? "checkmark" : "copy-outline"}
+                      size={14}
+                      color={copied ? colors.foreground : colors.mutedForeground}
+                    />
+                    <Text style={styles.footerBtnText}>{copied ? "COPIED" : "COPY"}</Text>
+                  </GoldGradient>
                 </Pressable>
                 <Pressable style={styles.footerBtn} onPress={handleSend}>
-                  <Ionicons name="share-outline" size={14} color={colors.mutedForeground} />
-                  <Text style={styles.footerBtnText}>SEND</Text>
+                  <GoldGradient style={styles.footerBtnInner}>
+                    <Ionicons name="share-outline" size={14} color={colors.mutedForeground} />
+                    <Text style={styles.footerBtnText}>SEND</Text>
+                  </GoldGradient>
                 </Pressable>
               </View>
               <Text style={styles.emptySub}>Waiting for the other side to join…</Text>
@@ -363,7 +374,9 @@ export default function GhostpadScreen({
             <ActivityIndicator color={colors.primary} />
           )}
           <Pressable style={styles.actionBtn} onPress={handleLeave}>
-            <Text style={styles.actionBtnText}>CANCEL</Text>
+            <GoldGradient style={styles.actionBtnGlassInner}>
+              <Text style={styles.actionBtnText}>CANCEL</Text>
+            </GoldGradient>
           </Pressable>
         </View>
       )}
@@ -391,7 +404,9 @@ export default function GhostpadScreen({
             </GoldGradient>
           </Pressable>
           <Pressable style={styles.actionBtn} onPress={() => setGhostpadMode("idle")}>
-            <Text style={styles.actionBtnText}>CANCEL</Text>
+            <GoldGradient style={styles.actionBtnGlassInner}>
+              <Text style={styles.actionBtnText}>CANCEL</Text>
+            </GoldGradient>
           </Pressable>
         </View>
       )}
@@ -409,12 +424,16 @@ export default function GhostpadScreen({
           />
           <View style={styles.footer}>
             <Pressable style={styles.footerBtn} onPress={handleWipe}>
-              <Ionicons name="sparkles-outline" size={14} color={colors.mutedForeground} />
-              <Text style={styles.footerBtnText}>WIPE</Text>
+              <GoldGradient style={styles.footerBtnInner}>
+                <Ionicons name="sparkles-outline" size={14} color={colors.mutedForeground} />
+                <Text style={styles.footerBtnText}>WIPE</Text>
+              </GoldGradient>
             </Pressable>
             <Pressable style={styles.footerBtn} onPress={handleLeave}>
-              <Ionicons name="exit-outline" size={14} color={colors.mutedForeground} />
-              <Text style={styles.footerBtnText}>LEAVE</Text>
+              <GoldGradient style={styles.footerBtnInner}>
+                <Ionicons name="exit-outline" size={14} color={colors.mutedForeground} />
+                <Text style={styles.footerBtnText}>LEAVE</Text>
+              </GoldGradient>
             </Pressable>
           </View>
         </>

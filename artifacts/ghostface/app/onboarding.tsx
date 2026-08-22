@@ -255,9 +255,8 @@ export default function OnboardingScreen() {
       gap: 8,
       marginBottom: 20,
     },
-    suggestionChip: {
-      borderWidth: 1,
-      borderColor: colors.border,
+    suggestionChip: { borderRadius: colors.radius, overflow: "hidden" },
+    suggestionChipInner: {
       borderRadius: colors.radius,
       paddingHorizontal: 12,
       paddingVertical: 6,
@@ -524,7 +523,9 @@ export default function OnboardingScreen() {
                   style={styles.suggestionChip}
                   onPress={() => pickSuggested(s)}
                 >
-                  <Text style={styles.suggestionText}>{s}</Text>
+                  <GoldGradient style={styles.suggestionChipInner}>
+                    <Text style={styles.suggestionText}>{s}</Text>
+                  </GoldGradient>
                 </Pressable>
               ))}
               <Pressable
@@ -535,7 +536,9 @@ export default function OnboardingScreen() {
                 }}
                 testID="shuffle-suggestions"
               >
-                <Ionicons name="shuffle" size={14} color={colors.primary} />
+                <GoldGradient style={styles.suggestionChipInner}>
+                  <Ionicons name="shuffle" size={14} color={colors.primary} />
+                </GoldGradient>
               </Pressable>
             </View>
 

@@ -59,14 +59,12 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           accessibilityRole="button"
           style={({ pressed }) => [
             styles.topButton,
-            {
-              top: insets.top + 16,
-              backgroundColor: colors.card,
-              opacity: pressed ? 0.8 : 1,
-            },
+            { top: insets.top + 16, opacity: pressed ? 0.8 : 1 },
           ]}
         >
-          <Feather name="alert-circle" size={20} color={colors.foreground} />
+          <GoldGradient style={styles.topButtonInner}>
+            <Feather name="alert-circle" size={20} color={colors.foreground} />
+          </GoldGradient>
         </Pressable>
       ) : null}
 
@@ -207,10 +205,15 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 8,
+    overflow: "hidden",
+    zIndex: 10,
+  },
+  topButtonInner: {
+    width: "100%",
+    height: "100%",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 10,
   },
   button: {
     borderRadius: 8,

@@ -52,7 +52,8 @@ export default function EncryptionTools() {
       fontFamily: MONO,
     },
     modeRow: { flexDirection: "row", gap: 8 },
-    modeBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: colors.radius, borderWidth: 1 },
+    modeBtn: { flex: 1, borderRadius: colors.radius, overflow: "hidden" as const },
+    modeBtnInner: { paddingVertical: 10, alignItems: "center" as const, borderRadius: colors.radius },
     modeTxt: { fontSize: 11, letterSpacing: 2, fontWeight: "700" },
     btn: { borderRadius: colors.radius, overflow: "hidden" },
     btnGold: { borderRadius: colors.radius, paddingVertical: 13, alignItems: "center" },
@@ -125,13 +126,16 @@ export default function EncryptionTools() {
           {(["hide", "reveal"] as const).map((m) => (
             <Pressable
               key={m}
-              style={[s.modeBtn, { borderColor: stealthMode === m ? colors.primary : colors.border, overflow: "hidden" }]}
+              style={s.modeBtn}
               onPress={() => { setStealthMode(m); setStealthOut(""); setStealthError(""); setStealthUsedDefaultKey(false); }}
             >
-              {stealthMode === m && <GoldGradient style={StyleSheet.absoluteFill} />}
-              <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
-                {m === "hide" ? "HIDE MESSAGE" : "REVEAL MESSAGE"}
-              </Text>
+              <GoldGradient
+                style={[s.modeBtnInner, stealthMode === m && { borderColor: colors.primary }]}
+              >
+                <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
+                  {m === "hide" ? "HIDE MESSAGE" : "REVEAL MESSAGE"}
+                </Text>
+              </GoldGradient>
             </Pressable>
           ))}
         </View>

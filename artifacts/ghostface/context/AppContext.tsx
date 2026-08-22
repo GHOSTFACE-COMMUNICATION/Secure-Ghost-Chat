@@ -64,6 +64,16 @@ import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { randomBytes } from "@/lib/csprng";
 import { keyToRecoveryPhrase, recoveryPhraseToKey } from "@/lib/recoveryPhrase";
+// Stricter than the regex this file used to carry: verifies the address
+// actually base58-decodes to 32 bytes, so a well-formed-looking string of the
+// right length but wrong decoded size can't be linked as a wallet.
+import { isValidSolanaAddress } from "@/lib/base58";
+import {
+  createWallet,
+  walletFromPhrase,
+  walletFromPrivateKeyHex,
+  isValidWalletPhrase,
+} from "@/lib/solanaWallet";
 
 const toHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join("");
 const fromHex = (h: string) => Uint8Array.from(h.match(/.{2}/g)!.map(b => parseInt(b, 16)));
@@ -599,7 +609,13 @@ interface AppState {
   fdBalance: number;
   casperBalance: number;
   appTokens: AppToken[];
-  walletAddress: string;
+  /**
+   * The device's own non-custodial Solana address, or null when no wallet has
+   * been created yet. Null is the honest default — this used to hold a
+   * hardcoded "GhFc3...x9mKr4" placeholder that users could copy and hand out
+   * as a receive address, sending real funds nowhere.
+   */
+  walletAddress: string | null;
   transactions: Transaction[];
   connectedWalletAddress: string | null;
   solBalance: number;
@@ -678,6 +694,14 @@ interface AppContextType extends AppState {
   panicWipe: () => Promise<void>;
   connectWallet: (address: string) => Promise<{ error?: string }>;
   disconnectWallet: () => Promise<void>;
+  /**
+   * Create the device's own non-custodial wallet. Returns the 24-word phrase
+   * exactly once — it is never persisted, so this is the only opportunity the
+   * user has to record it. Refuses if a wallet already exists.
+   */
+  createLocalWallet: () => Promise<{ phrase: string } | { error: string }>;
+  /** Restore a wallet from its 24-word phrase, replacing any current one. */
+  restoreLocalWallet: (phrase: string) => Promise<{ error?: string }>;
   refreshAppTokenBalances: () => Promise<void>;
   setAutoLockTimeout: (ms: number | null) => Promise<void>;
   setDuressGracePeriod: (seconds: number) => Promise<void>;
@@ -812,6 +836,12 @@ const MY_SPK_PUB_KEY = "ghostface_my_spk_pub";
 // Alice's handshake ciphertext with this private key.
 const MY_PQKEM_PRIV_KEY = "ghostface_my_pqkem_priv";
 const MY_PQKEM_PUB_KEY = "ghostface_my_pqkem_pub";
+// Non-custodial Solana wallet private key (32-byte ed25519 seed, hex).
+// Written with writeEncryptedString — i.e. encrypted-at-rest in AsyncStorage,
+// NOT SecureStore — so it is wiped via APP_STORAGE_KEYS below rather than
+// secureDelete(). Getting that wrong would leave a funds-bearing key alive
+// after a panic wipe.
+const LOCAL_WALLET_PRIV_KEY = "ghostface_local_wallet_priv";
 const APP_STORAGE_KEYS = [
   "alias",
   "isOnboarded",
@@ -826,11 +856,11 @@ const APP_STORAGE_KEYS = [
   LANGUAGE_KEY,
   LAST_VPN_SERVER_KEY,
   LOW_BW_MODE_KEY,
+  // Destroys the wallet along with everything else. Only the user's written
+  // recovery phrase can bring it back — which is why wallet creation forces
+  // an explicit "I have written this down" acknowledgement.
+  LOCAL_WALLET_PRIV_KEY,
 ] as const;
-
-function isValidSolanaAddress(addr: string): boolean {
-  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr.trim());
-}
 
 /**
  * Load the local OPK private-key store from AsyncStorage.
@@ -1416,7 +1446,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     fdBalance: 0,
     casperBalance: 0,
     appTokens: [],
-    walletAddress: "GhFc3...x9mKr4",
+    walletAddress: null,
     incomingCall: null,
     ghostpad: { mode: "idle", code: null },
     transactions: DEFAULT_TRANSACTIONS,
@@ -1439,7 +1469,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
@@ -1459,7 +1489,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.getItem(LOW_BW_MODE_KEY),
           secureGet(SMS_FALLBACK_NUMBERS_KEY),
           secureGet(SMS_FALLBACK_MESSAGE_KEY),
+          readEncryptedString(LOCAL_WALLET_PRIV_KEY),
         ]);
+
+        // Re-derive the wallet address from the stored private key. If the key
+        // is absent or fails to derive (corrupt/truncated), stay null rather
+        // than showing an address the device cannot actually receive to.
+        const localWallet = localWalletPrivRaw
+          ? walletFromPrivateKeyHex(localWalletPrivRaw)
+          : null;
+        if (localWalletPrivRaw && !localWallet) {
+          console.warn("[AppContext] stored wallet key did not derive — leaving wallet unset");
+        }
 
         const hasPinValue = !!pinValue;
         setHasDuressPin(!!duressValue);
@@ -1609,6 +1650,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           conversations,
           callHistory,
           connectedWalletAddress: connectedWallet ?? null,
+          walletAddress: localWallet?.address ?? null,
           autoLockTimeout,
           duressGracePeriod,
           language,
@@ -3107,6 +3149,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0, fdBalance: 0, casperBalance: 0 }));
   }, []);
 
+  /**
+   * Create the device's own non-custodial Solana wallet.
+   *
+   * Only the private key is persisted — never the phrase. That makes the
+   * returned phrase genuinely single-use: there is no "show it again later"
+   * because the app does not keep it. The caller is responsible for forcing
+   * the user to acknowledge they've written it down.
+   *
+   * Refuses when a wallet already exists. Overwriting silently would strand
+   * any funds held by the existing address behind a phrase nobody recorded.
+   */
+  const createLocalWallet = useCallback(async (): Promise<{ phrase: string } | { error: string }> => {
+    // Re-read storage rather than trusting state — cheaper than reasoning
+    // about whether a concurrent restore has landed since the last render.
+    const existing = await readEncryptedString(LOCAL_WALLET_PRIV_KEY);
+    if (existing) {
+      return { error: "A wallet already exists on this device." };
+    }
+    try {
+      const { wallet, phrase } = createWallet();
+      await writeEncryptedString(LOCAL_WALLET_PRIV_KEY, wallet.privateKeyHex);
+      setState((prev) => ({ ...prev, walletAddress: wallet.address }));
+      return { phrase };
+    } catch (err) {
+      // Deliberately does not echo the error detail — anything thrown from
+      // key generation could carry key material.
+      console.error("[AppContext] Wallet creation failed:", err instanceof Error ? err.message : "unknown");
+      return { error: "Could not create a wallet. Please try again." };
+    }
+  }, []);
+
+  /**
+   * Restore a wallet from its 24-word phrase. Replaces whatever key is
+   * currently stored — the phrase the user just supplied is, by definition,
+   * the one they have a record of.
+   */
+  const restoreLocalWallet = useCallback(async (phrase: string): Promise<{ error?: string }> => {
+    if (!isValidWalletPhrase(phrase)) {
+      return { error: "That doesn't look like a valid 24-word recovery phrase." };
+    }
+    const wallet = walletFromPhrase(phrase);
+    if (!wallet) {
+      return { error: "That doesn't look like a valid 24-word recovery phrase." };
+    }
+    try {
+      await writeEncryptedString(LOCAL_WALLET_PRIV_KEY, wallet.privateKeyHex);
+      setState((prev) => ({ ...prev, walletAddress: wallet.address }));
+      return {};
+    } catch (err) {
+      console.error("[AppContext] Wallet restore failed:", err instanceof Error ? err.message : "unknown");
+      return { error: "Could not save the restored wallet. Please try again." };
+    }
+  }, []);
+
   const setLanguage = useCallback(async (code: string) => {
     const VALID_LANGUAGES = ["en","es","fr","de","ja","zh","ar","pt","ru","ko","hi","it"];
     if (!VALID_LANGUAGES.includes(code)) return;
@@ -3276,7 +3372,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       fdBalance: 0,
       casperBalance: 0,
       appTokens: [],
-      walletAddress: "GhFc3...x9mKr4",
+      walletAddress: null,
       transactions: DEFAULT_TRANSACTIONS,
       connectedWalletAddress: null,
       solBalance: 0,
@@ -4551,6 +4647,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         panicWipe,
         connectWallet,
         disconnectWallet,
+        createLocalWallet,
+        restoreLocalWallet,
         refreshAppTokenBalances,
         setAutoLockTimeout,
         setDuressGracePeriod,

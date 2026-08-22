@@ -48,6 +48,8 @@ export default function WalletScreen() {
     solBalance,
     connectWallet,
     disconnectWallet,
+    createLocalWallet,
+    restoreLocalWallet,
     hasWalletPin,
     walletUnlocked,
     checkWalletPin,
@@ -88,7 +90,73 @@ export default function WalletScreen() {
   const [connectError, setConnectError] = useState("");
   const [disconnecting, setDisconnecting] = useState(false);
 
+  // ── Local (device) wallet creation / restore ──────────────────────────
+  // `backupPhrase` holds the 24 words for exactly as long as the backup modal
+  // is open. It is never persisted and never leaves this component — once the
+  // modal is dismissed the only copy is whatever the user wrote down.
+  const [backupPhrase, setBackupPhrase] = useState<string | null>(null);
+  const [backupConfirmed, setBackupConfirmed] = useState(false);
+  const [phraseCopied, setPhraseCopied] = useState(false);
+  const [creatingWallet, setCreatingWallet] = useState(false);
+  const [showRestore, setShowRestore] = useState(false);
+  const [restoreInput, setRestoreInput] = useState("");
+  const [restoreError, setRestoreError] = useState("");
+  const [restoring, setRestoring] = useState(false);
+
+  const handleCreateWallet = async () => {
+    if (creatingWallet) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setCreatingWallet(true);
+    const result = await createLocalWallet();
+    setCreatingWallet(false);
+    if ("error" in result) {
+      Alert.alert("COULD NOT CREATE WALLET", result.error);
+      return;
+    }
+    setBackupConfirmed(false);
+    setPhraseCopied(false);
+    setBackupPhrase(result.phrase);
+  };
+
+  const handleCopyPhrase = async () => {
+    if (!backupPhrase) return;
+    await Clipboard.setStringAsync(backupPhrase);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setPhraseCopied(true);
+    setTimeout(() => setPhraseCopied(false), 2000);
+  };
+
+  // Clearing state here is the point at which the phrase becomes
+  // unrecoverable, so it only runs behind the explicit confirmation.
+  const dismissBackup = () => {
+    setBackupPhrase(null);
+    setBackupConfirmed(false);
+    setPhraseCopied(false);
+  };
+
+  const handleRestore = async () => {
+    setRestoreError("");
+    if (!restoreInput.trim()) {
+      setRestoreError("Enter your 24-word recovery phrase.");
+      return;
+    }
+    setRestoring(true);
+    const result = await restoreLocalWallet(restoreInput);
+    setRestoring(false);
+    if (result.error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setRestoreError(result.error);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Wipe the input immediately — a recovery phrase sitting in a mounted
+    // TextInput is the same secret as the key it derives.
+    setRestoreInput("");
+    setShowRestore(false);
+  };
+
   const handleCopy = async () => {
+    if (!walletAddress) return;
     await Clipboard.setStringAsync(walletAddress);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setCopied(true);
@@ -133,16 +201,48 @@ export default function WalletScreen() {
     }
   };
 
-  const handleBuy = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const destination = connectedWalletAddress ?? walletAddress;
-    const currency = activeToken === "FD" ? "usdc_sol" : "sol";
+  const openMoonPay = async (currency: "sol" | "usdc_sol", destination: string) => {
     const url = `https://buy.moonpay.com/?defaultCurrencyCode=${currency}&walletAddress=${encodeURIComponent(destination)}`;
     try {
       await WebBrowser.openBrowserAsync(url);
     } catch {
       Alert.alert("BROWSER ERROR", "Could not open the buy page. Try again.");
     }
+  };
+
+  // Funds the wallet with SOL or USDC. Deliberately NOT tied to activeToken:
+  // FZ and CASPER are GHOSTFACE's own SPL tokens and no card on-ramp lists
+  // them, so deriving the purchase currency from the selected tab meant
+  // "BUY" while viewing FZ silently opened a USDC checkout. The asset is now
+  // chosen explicitly.
+  const handleBuy = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Requires a real linked wallet. walletAddress is not a usable
+    // destination — it is a placeholder, so falling back to it would send
+    // the user to a checkout pointed at an address that cannot receive.
+    if (!connectedWalletAddress) {
+      Alert.alert(
+        "LINK A WALLET FIRST",
+        "Funds are sent straight to your own Solana wallet, so one has to be linked before you can buy.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Link Wallet", onPress: () => setShowConnect(true) },
+        ]
+      );
+      return;
+    }
+
+    const destination = connectedWalletAddress;
+    Alert.alert(
+      "FUND WALLET",
+      "Buy with a card. Funds go to your linked Solana wallet.\n\nFZ and CASPER can't be bought with a card — they aren't listed on any on-ramp.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "USDC", onPress: () => void openMoonPay("usdc_sol", destination) },
+        { text: "SOL", onPress: () => void openMoonPay("sol", destination) },
+      ]
+    );
   };
 
   const handleDisconnect = () => {
@@ -261,13 +361,14 @@ export default function WalletScreen() {
       marginTop: 2,
     },
     linkedAddressRow: {
+      marginBottom: 12,
+    },
+    linkedAddressRowInner: {
       flexDirection: "row",
       alignItems: "center",
-      backgroundColor: colors.muted,
       borderRadius: colors.radius,
       padding: 10,
       gap: 8,
-      marginBottom: 12,
     },
     linkedAddress: {
       flex: 1,
@@ -303,8 +404,8 @@ export default function WalletScreen() {
       letterSpacing: 2,
       textAlign: "center",
     },
-    connectBtn: {
-      backgroundColor: "#8A8A8A",
+    connectBtn: {},
+    connectBtnInner: {
       borderRadius: colors.radius,
       paddingVertical: 10,
       paddingHorizontal: 24,
@@ -328,15 +429,11 @@ export default function WalletScreen() {
       paddingVertical: 10,
       borderRadius: colors.radius,
       alignItems: "center",
-      borderWidth: 1,
+      overflow: "hidden",
     },
     tokenTabActive: {
       backgroundColor: colors.primary,
       borderColor: colors.primary,
-    },
-    tokenTabInactive: {
-      backgroundColor: colors.card,
-      borderColor: colors.border,
     },
     tokenTabText: {
       fontSize: 11,
@@ -383,14 +480,13 @@ export default function WalletScreen() {
       letterSpacing: 2,
     },
     addressBar: {
-      flexDirection: "row",
-      alignItems: "center",
       marginHorizontal: 20,
       marginTop: 12,
-      backgroundColor: colors.card,
+    },
+    addressBarInner: {
+      flexDirection: "row",
+      alignItems: "center",
       borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: colors.border,
       padding: 12,
       gap: 8,
     },
@@ -414,18 +510,175 @@ export default function WalletScreen() {
     },
     actionBtn: {
       flex: 1,
+    },
+    actionBtnInner: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: 8,
       paddingVertical: 14,
       borderRadius: colors.radius,
-      borderWidth: 1,
     },
     actionBtnText: {
       fontSize: 12,
       fontWeight: "800" as const,
       letterSpacing: 3,
+    },
+    // Shared dimming for any control gated off (SEND until signing exists,
+    // RECEIVE until a wallet exists, DONE until backup is acknowledged).
+    actionBtnDisabled: {
+      opacity: 0.45,
+    },
+    noWalletCard: {
+      marginHorizontal: 20,
+      marginTop: 16,
+      padding: 20,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      gap: 10,
+    },
+    noWalletTitle: {
+      color: colors.foreground,
+      fontSize: 12,
+      fontWeight: "800" as const,
+      letterSpacing: 3,
+    },
+    noWalletBody: {
+      color: colors.mutedForeground,
+      fontSize: 11,
+      lineHeight: 16,
+      textAlign: "center",
+    },
+    noWalletBtn: {
+      alignSelf: "stretch",
+      marginTop: 4,
+      borderRadius: colors.radius,
+      overflow: "hidden",
+    },
+    noWalletBtnInner: {
+      paddingVertical: 13,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: colors.radius,
+    },
+    noWalletBtnTxt: {
+      color: colors.foreground,
+      fontSize: 12,
+      fontWeight: "800" as const,
+      letterSpacing: 3,
+    },
+    restoreLink: {
+      color: colors.mutedForeground,
+      fontSize: 10,
+      letterSpacing: 2,
+      paddingVertical: 8,
+      textDecorationLine: "underline",
+    },
+    phraseWarnBox: {
+      flexDirection: "row",
+      gap: 8,
+      padding: 12,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.destructive,
+      backgroundColor: `${colors.destructive}12`,
+      marginBottom: 12,
+    },
+    phraseWarnTxt: {
+      flex: 1,
+      color: colors.foreground,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    phraseScroll: {
+      maxHeight: 220,
+      marginBottom: 12,
+    },
+    phraseGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    phraseWordBox: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.muted,
+      minWidth: "30%",
+    },
+    phraseWordNum: {
+      color: colors.mutedForeground,
+      fontSize: 9,
+      minWidth: 14,
+    },
+    phraseWord: {
+      color: colors.foreground,
+      fontSize: 12,
+      fontWeight: "700" as const,
+    },
+    phraseNote: {
+      color: colors.mutedForeground,
+      fontSize: 10,
+      lineHeight: 15,
+      marginBottom: 8,
+    },
+    phraseCopyBtn: {
+      alignSelf: "center",
+      borderRadius: colors.radius,
+      overflow: "hidden",
+      marginBottom: 12,
+    },
+    phraseCopyBtnInner: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+      borderRadius: colors.radius,
+    },
+    phraseCopyTxt: {
+      color: colors.mutedForeground,
+      fontSize: 10,
+      letterSpacing: 2,
+      fontWeight: "700" as const,
+    },
+    phraseConfirmRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingVertical: 12,
+    },
+    phraseConfirmTxt: {
+      color: colors.foreground,
+      fontSize: 12,
+      letterSpacing: 1,
+    },
+    restoreInput: {
+      backgroundColor: colors.muted,
+      color: colors.foreground,
+      fontSize: 12,
+      lineHeight: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: colors.radius,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      minHeight: 96,
+      marginBottom: 8,
+    },
+    restoreError: {
+      color: colors.destructive,
+      fontSize: 11,
+      letterSpacing: 1,
+      marginBottom: 12,
     },
     txSectionLabel: {
       color: colors.mutedForeground,
@@ -536,11 +789,12 @@ export default function WalletScreen() {
       marginBottom: 12,
     },
     modalBtn: {
-      backgroundColor: "#8A8A8A",
+      marginBottom: 8,
+    },
+    modalBtnInner: {
       borderRadius: colors.radius,
       paddingVertical: 14,
       alignItems: "center",
-      marginBottom: 8,
       flexDirection: "row",
       justifyContent: "center",
       gap: 8,
@@ -691,15 +945,17 @@ export default function WalletScreen() {
               <Text style={styles.solLabel}>SOL</Text>
             </View>
             <Pressable style={styles.linkedAddressRow} onPress={handleCopyConnected}>
-              <Ionicons name="wallet-outline" size={12} color="#8A8A8A" />
-              <Text style={styles.linkedAddress}>
-                {truncateAddress(connectedWalletAddress)}
-              </Text>
-              <Ionicons
-                name={copiedConnected ? "checkmark" : "copy-outline"}
-                size={14}
-                color={copiedConnected ? colors.foreground : colors.mutedForeground}
-              />
+              <GoldGradient style={styles.linkedAddressRowInner}>
+                <Ionicons name="wallet-outline" size={12} color="#8A8A8A" />
+                <Text style={styles.linkedAddress}>
+                  {truncateAddress(connectedWalletAddress)}
+                </Text>
+                <Ionicons
+                  name={copiedConnected ? "checkmark" : "copy-outline"}
+                  size={14}
+                  color={copiedConnected ? colors.foreground : colors.mutedForeground}
+                />
+              </GoldGradient>
             </Pressable>
             <Pressable style={styles.disconnectBtn} onPress={handleDisconnect} disabled={disconnecting}>
               <Text style={styles.disconnectText}>
@@ -722,8 +978,10 @@ export default function WalletScreen() {
                 setShowConnect(true);
               }}
             >
-              <Ionicons name="link" size={14} color="#FFFFFF" />
-              <Text style={styles.connectBtnText}>LINK WALLET</Text>
+              <GoldGradient style={styles.connectBtnInner}>
+                <Ionicons name="link" size={14} color="#FFFFFF" />
+                <Text style={styles.connectBtnText}>LINK WALLET</Text>
+              </GoldGradient>
             </Pressable>
           </View>
         )}
@@ -731,16 +989,15 @@ export default function WalletScreen() {
         {/* ── APP TOKENS ─────────────────────────────────── */}
         <View style={styles.tokenSelector}>
           <Pressable
-            style={[
-              styles.tokenTab,
-              activeToken === "FD" ? { borderColor: colors.primary, overflow: "hidden" } : styles.tokenTabInactive,
-            ]}
+            style={styles.tokenTab}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setActiveToken("FD");
             }}
           >
-            {activeToken === "FD" && <GoldGradient style={StyleSheet.absoluteFill} />}
+            <GoldGradient
+              style={[StyleSheet.absoluteFill, activeToken === "FD" && { borderColor: colors.primary }]}
+            />
             <Text
               style={[
                 styles.tokenTabText,
@@ -751,16 +1008,15 @@ export default function WalletScreen() {
             </Text>
           </Pressable>
           <Pressable
-            style={[
-              styles.tokenTab,
-              activeToken === "CASPER" ? { borderColor: colors.primary, overflow: "hidden" } : styles.tokenTabInactive,
-            ]}
+            style={styles.tokenTab}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setActiveToken("CASPER");
             }}
           >
-            {activeToken === "CASPER" && <GoldGradient style={StyleSheet.absoluteFill} />}
+            <GoldGradient
+              style={[StyleSheet.absoluteFill, activeToken === "CASPER" && { borderColor: colors.primary }]}
+            />
             <Text
               style={[
                 styles.tokenTabText,
@@ -784,60 +1040,113 @@ export default function WalletScreen() {
           </View>
         </View>
 
-        <Pressable style={styles.addressBar} onPress={handleCopy}>
-          <Ionicons name="wallet-outline" size={14} color={colors.mutedForeground} />
-          <Text style={styles.addressLabel}>ADDR</Text>
-          <Text style={styles.addressText} numberOfLines={1}>
-            {walletAddress}
-          </Text>
-          <Ionicons
-            name={copied ? "checkmark" : "copy-outline"}
-            size={16}
-            color={copied ? colors.foreground : colors.mutedForeground}
-          />
-        </Pressable>
+        {walletAddress ? (
+          <Pressable style={styles.addressBar} onPress={handleCopy}>
+            <GoldGradient style={styles.addressBarInner}>
+              <Ionicons name="wallet-outline" size={14} color={colors.mutedForeground} />
+              <Text style={styles.addressLabel}>ADDR</Text>
+              <Text style={styles.addressText} numberOfLines={1}>
+                {walletAddress}
+              </Text>
+              <Ionicons
+                name={copied ? "checkmark" : "copy-outline"}
+                size={16}
+                color={copied ? colors.foreground : colors.mutedForeground}
+              />
+            </GoldGradient>
+          </Pressable>
+        ) : (
+          /* No wallet yet. Deliberately renders no address at all rather than
+             a placeholder — a fake address is one users can copy and hand out
+             as a receive address, losing real funds. */
+          <View style={styles.noWalletCard}>
+            <Ionicons name="wallet-outline" size={26} color={colors.mutedForeground} />
+            <Text style={styles.noWalletTitle}>NO WALLET ON THIS DEVICE</Text>
+            <Text style={styles.noWalletBody}>
+              Create a non-custodial Solana wallet. The key is generated on this device
+              and never leaves it — nobody else can recover it for you.
+            </Text>
+            <Pressable
+              style={styles.noWalletBtn}
+              onPress={handleCreateWallet}
+              disabled={creatingWallet}
+              testID="create-wallet-btn"
+            >
+              <GoldGradient style={styles.noWalletBtnInner}>
+                {creatingWallet ? (
+                  <ActivityIndicator size="small" color={colors.foreground} />
+                ) : (
+                  <Text style={styles.noWalletBtnTxt}>CREATE WALLET</Text>
+                )}
+              </GoldGradient>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setRestoreError("");
+                setRestoreInput("");
+                setShowRestore(true);
+              }}
+              testID="restore-wallet-btn"
+            >
+              <Text style={styles.restoreLink}>RESTORE FROM RECOVERY PHRASE</Text>
+            </Pressable>
+          </View>
+        )}
 
         <View style={styles.actions}>
+          {/* SEND is intentionally inert: the handler below never builds,
+              signs, or broadcasts a transaction — it just flashes success.
+              With a real receivable address on screen that would read as a
+              working send and lose funds. Gated until signing lands. */}
           <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: pressed ? colors.muted : colors.card, borderColor: colors.primary },
-            ]}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowSend(true);
-            }}
+            style={[styles.actionBtn, styles.actionBtnDisabled]}
+            disabled
+            testID="send-btn-disabled"
           >
-            <Ionicons name="arrow-up" size={16} color={colors.primary} />
-            <Text style={[styles.actionBtnText, { color: colors.primary }]}>SEND</Text>
+            <GoldGradient style={styles.actionBtnInner}>
+              <Ionicons name="arrow-up" size={16} color={colors.mutedForeground} />
+              <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>SEND</Text>
+            </GoldGradient>
           </Pressable>
+          {/* Receiving needs a real address to show — no wallet, no modal. */}
           <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: pressed ? colors.muted : colors.card, borderColor: colors.success },
-            ]}
+            style={[styles.actionBtn, !walletAddress && styles.actionBtnDisabled]}
+            disabled={!walletAddress}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setShowReceive(true);
             }}
           >
-            <Ionicons name="arrow-down" size={16} color={colors.foreground} />
-            <Text style={[styles.actionBtnText, { color: colors.foreground }]}>RECEIVE</Text>
+            <GoldGradient style={styles.actionBtnInner}>
+              <Ionicons
+                name="arrow-down"
+                size={16}
+                color={walletAddress ? colors.foreground : colors.mutedForeground}
+              />
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  { color: walletAddress ? colors.foreground : colors.mutedForeground },
+                ]}
+              >
+                RECEIVE
+              </Text>
+            </GoldGradient>
           </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: pressed ? colors.muted : colors.card, borderColor: "#8A8A8A" },
-            ]}
-            onPress={handleBuy}
-          >
-            <Ionicons name="card-outline" size={16} color="#8A8A8A" />
-            <Text style={[styles.actionBtnText, { color: "#8A8A8A" }]}>BUY</Text>
+          <Pressable style={styles.actionBtn} onPress={handleBuy}>
+            <GoldGradient style={styles.actionBtnInner}>
+              <Ionicons name="card-outline" size={16} color="#8A8A8A" />
+              <Text style={[styles.actionBtnText, { color: "#8A8A8A" }]}>FUND</Text>
+            </GoldGradient>
           </Pressable>
         </View>
         <Text style={styles.buyHelp}>
-          Buy SOL or USDC with a card. Funds land in your{" "}
-          {connectedWalletAddress ? "linked Solana wallet" : "GHOSTFACE wallet"}.
+          Sending isn&apos;t available yet — this wallet can receive only.
+        </Text>
+        <Text style={styles.buyHelp}>
+          {connectedWalletAddress
+            ? "Buy SOL or USDC with a card — funds go to your linked Solana wallet. FZ and CASPER can't be bought with a card."
+            : "Link a Solana wallet to buy SOL or USDC with a card."}
         </Text>
 
         <Text style={styles.txSectionLabel}>TRANSACTIONS</Text>
@@ -910,6 +1219,7 @@ export default function WalletScreen() {
                 onPress={handleConnect}
                 disabled={!walletInput.trim() || connecting}
               >
+                <GoldGradient style={styles.modalBtnInner}>
                 {connecting ? (
                   <ActivityIndicator size="small" color="#FFF" />
                 ) : (
@@ -918,6 +1228,7 @@ export default function WalletScreen() {
                 <Text style={styles.modalBtnText}>
                   {connecting ? "LINKING..." : "LINK WALLET"}
                 </Text>
+                </GoldGradient>
               </Pressable>
               <Pressable style={styles.cancelBtn} onPress={() => setShowConnect(false)}>
                 <Text style={styles.cancelText}>CANCEL</Text>
@@ -1001,21 +1312,174 @@ export default function WalletScreen() {
               <View style={styles.qrPlaceholder}>
                 <Ionicons name="qr-code" size={80} color={colors.primary} />
               </View>
-              <Pressable style={styles.addressBar} onPress={handleCopy}>
-                <Text style={styles.addressText} numberOfLines={1}>
-                  {walletAddress}
-                </Text>
-                <Ionicons
-                  name={copied ? "checkmark" : "copy-outline"}
-                  size={16}
-                  color={copied ? colors.foreground : colors.mutedForeground}
-                />
-              </Pressable>
+              {walletAddress && (
+                <Pressable style={styles.addressBar} onPress={handleCopy}>
+                  <GoldGradient style={styles.addressBarInner}>
+                    <Text style={styles.addressText} numberOfLines={1}>
+                      {walletAddress}
+                    </Text>
+                    <Ionicons
+                      name={copied ? "checkmark" : "copy-outline"}
+                      size={16}
+                      color={copied ? colors.foreground : colors.mutedForeground}
+                    />
+                  </GoldGradient>
+                </Pressable>
+              )}
               <Pressable style={[styles.cancelBtn, { marginTop: 8 }]} onPress={() => setShowReceive(false)}>
                 <Text style={styles.cancelText}>CLOSE</Text>
               </Pressable>
             </View>
         </View>
+      </Modal>
+
+      {/* ── RECOVERY PHRASE BACKUP MODAL ─────────────────
+          Shown exactly once, immediately after wallet creation. The phrase is
+          not stored anywhere, so there is no way to bring this screen back —
+          hence no dismiss path that isn't behind the confirmation. */}
+      <Modal
+        visible={backupPhrase !== null}
+        transparent
+        animationType="slide"
+        /* No onRequestClose handler: Android back must not silently discard
+           the only copy of the phrase. */
+        onRequestClose={() => {}}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>RECOVERY PHRASE</Text>
+
+            <View style={styles.phraseWarnBox}>
+              <Ionicons name="warning-outline" size={16} color={colors.destructive} />
+              <Text style={styles.phraseWarnTxt}>
+                These 24 words are the ONLY way to recover this wallet. They are shown
+                once and cannot be shown again. Write them down and store them offline.
+              </Text>
+            </View>
+
+            <ScrollView style={styles.phraseScroll} contentContainerStyle={styles.phraseGrid}>
+              {(backupPhrase ?? "").split(" ").map((word, i) => (
+                <View key={`${i}-${word}`} style={styles.phraseWordBox}>
+                  <Text style={styles.phraseWordNum}>{i + 1}</Text>
+                  <Text style={styles.phraseWord}>{word}</Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.phraseNote}>
+              A panic wipe, duress wipe, uninstall, or lost device destroys this wallet.
+              Only this phrase brings it back — GHOSTFACE keeps no copy.
+            </Text>
+            <Text style={styles.phraseNote}>
+              This is NOT the same phrase as the identity recovery phrase in Settings.
+              Keep both, and keep them labelled.
+            </Text>
+
+            <Pressable style={styles.phraseCopyBtn} onPress={handleCopyPhrase}>
+              <GoldGradient style={styles.phraseCopyBtnInner}>
+                <Ionicons
+                  name={phraseCopied ? "checkmark" : "copy-outline"}
+                  size={14}
+                  color={colors.mutedForeground}
+                />
+                <Text style={styles.phraseCopyTxt}>
+                  {phraseCopied ? "COPIED" : "COPY PHRASE"}
+                </Text>
+              </GoldGradient>
+            </Pressable>
+
+            <Pressable
+              style={styles.phraseConfirmRow}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setBackupConfirmed((v) => !v);
+              }}
+              testID="backup-confirm-checkbox"
+            >
+              <Ionicons
+                name={backupConfirmed ? "checkbox" : "square-outline"}
+                size={20}
+                color={backupConfirmed ? colors.primary : colors.mutedForeground}
+              />
+              <Text style={styles.phraseConfirmTxt}>I have written this phrase down</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.modalBtnPrimary, !backupConfirmed && styles.actionBtnDisabled]}
+              disabled={!backupConfirmed}
+              onPress={dismissBackup}
+              testID="backup-done-btn"
+            >
+              <GoldGradient style={styles.modalBtnPrimaryInner}>
+                <Text
+                  style={[
+                    styles.modalBtnText,
+                    { color: backupConfirmed ? colors.foreground : colors.mutedForeground },
+                  ]}
+                >
+                  DONE
+                </Text>
+              </GoldGradient>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── RESTORE FROM PHRASE MODAL ────────────────────── */}
+      <Modal
+        visible={showRestore}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRestore(false)}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.modalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRestore(false)} />
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>RESTORE WALLET</Text>
+              <Text style={styles.phraseNote}>
+                Enter the 24-word recovery phrase for the wallet you want to restore.
+              </Text>
+              <TextInput
+                style={styles.restoreInput}
+                value={restoreInput}
+                onChangeText={(t) => {
+                  setRestoreInput(t);
+                  if (restoreError) setRestoreError("");
+                }}
+                placeholder="word1 word2 word3 ..."
+                placeholderTextColor={colors.mutedForeground}
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="off"
+                textAlignVertical="top"
+                testID="restore-phrase-input"
+              />
+              {!!restoreError && <Text style={styles.restoreError}>{restoreError}</Text>}
+              <Pressable
+                style={styles.modalBtnPrimary}
+                onPress={handleRestore}
+                disabled={restoring}
+                testID="restore-submit-btn"
+              >
+                <GoldGradient style={styles.modalBtnPrimaryInner}>
+                  {restoring ? (
+                    <ActivityIndicator size="small" color={colors.foreground} />
+                  ) : (
+                    <Text style={styles.modalBtnText}>RESTORE</Text>
+                  )}
+                </GoldGradient>
+              </Pressable>
+              <Pressable style={styles.cancelBtn} onPress={() => setShowRestore(false)}>
+                <Text style={styles.cancelText}>CANCEL</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
     </View>

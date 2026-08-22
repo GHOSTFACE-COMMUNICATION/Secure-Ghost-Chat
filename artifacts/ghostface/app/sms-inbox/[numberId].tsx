@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
+import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
@@ -135,7 +136,11 @@ export default function SmsInboxScreen() {
       width: 36,
       height: 36,
       borderRadius: 18,
-      backgroundColor: colors.muted,
+      overflow: "hidden",
+    },
+    backBtnInner: {
+      width: "100%",
+      height: "100%",
       alignItems: "center",
       justifyContent: "center",
     },
@@ -186,10 +191,8 @@ export default function SmsInboxScreen() {
       lineHeight: 18,
       maxWidth: 240,
     },
-    retryBtn: {
-      marginTop: 16,
-      borderWidth: 1,
-      borderColor: colors.primary,
+    retryBtn: { marginTop: 16, borderRadius: colors.radius, overflow: "hidden" },
+    retryBtnInner: {
       borderRadius: colors.radius,
       paddingHorizontal: 20,
       paddingVertical: 10,
@@ -294,7 +297,9 @@ export default function SmsInboxScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={18} color={colors.foreground} />
+          <GoldGradient style={styles.backBtnInner}>
+            <Ionicons name="chevron-back" size={18} color={colors.foreground} />
+          </GoldGradient>
         </Pressable>
         <View style={styles.headerText}>
           <Text style={styles.headerLabel}>SMS INBOX</Text>
@@ -322,7 +327,9 @@ export default function SmsInboxScreen() {
             Could not retrieve messages. Check your connection and try again.
           </Text>
           <Pressable style={styles.retryBtn} onPress={load}>
-            <Text style={styles.retryBtnText}>RETRY</Text>
+            <GoldGradient style={styles.retryBtnInner}>
+              <Text style={styles.retryBtnText}>RETRY</Text>
+            </GoldGradient>
           </Pressable>
         </View>
       ) : (

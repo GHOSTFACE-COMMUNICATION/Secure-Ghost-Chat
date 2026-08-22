@@ -20,13 +20,22 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { GhostLogo } from "@/components/GhostLogo";
-import { GoldGradient } from "@/components/GoldGradient";
+import { GOLD_OUTLINE_COLOR, GoldGradient } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { SecureBadge } from "@/components/SecureBadge";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useScrollPersist } from "@/hooks/useScrollPersist";
+// Read the version from app.json rather than hardcoding it here — the two had
+// already drifted (this screen said 1.0.0 while app.json was on 1.0.2), and a
+// stale version string in Settings is exactly what a tester reports back as a
+// bug. app.json is the same value EAS builds against, so this can't fall out
+// of step again. Imported as JSON (resolveJsonModule is on via
+// expo/tsconfig.base) so no new dependency is needed.
+import appJson from "../../app.json";
+
+const appVersion = appJson.expo.version;
 import {
   DEFAULT_SMS_FALLBACK_MESSAGE,
   MAX_SMS_FALLBACK_MESSAGE_LEN,
@@ -944,27 +953,28 @@ export default function SettingsScreen() {
                         console.warn("[Settings] Failed to set LBW mode:", e),
                       );
                     }}
-                    style={{
-                      flex: 1,
-                      borderRadius: 8,
-                      paddingVertical: 8,
-                      borderWidth: 1,
-                      borderColor: selected ? colors.primary : colors.border,
-                      backgroundColor: selected ? `${colors.primary}18` : "transparent",
-                      alignItems: "center",
-                    }}
+                    style={{ flex: 1 }}
                     testID={`low-bw-${opt.value}`}
                   >
-                    <Text
+                    <GoldGradient
                       style={{
-                        color: selected ? colors.primary : colors.mutedForeground,
-                        fontSize: 11,
-                        fontWeight: "800",
-                        letterSpacing: 2,
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        alignItems: "center",
+                        ...(selected ? { borderColor: GOLD_OUTLINE_COLOR } : null),
                       }}
                     >
-                      {opt.label}
-                    </Text>
+                      <Text
+                        style={{
+                          color: selected ? colors.primary : colors.mutedForeground,
+                          fontSize: 11,
+                          fontWeight: "800",
+                          letterSpacing: 2,
+                        }}
+                      >
+                        {opt.label}
+                      </Text>
+                    </GoldGradient>
                   </Pressable>
                 );
               })}
@@ -1227,7 +1237,7 @@ export default function SettingsScreen() {
 
         <View style={styles.versionSection}>
           <GhostLogo size={50} color={colors.border} />
-          <Text style={styles.versionText}>GHOSTFACE® v1.0.0</Text>
+          <Text style={styles.versionText}>GHOSTFACE® v{appVersion}</Text>
           <Text style={styles.versionText}>NO FACE. NO TRACE.</Text>
         </View>
 
