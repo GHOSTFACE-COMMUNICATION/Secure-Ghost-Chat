@@ -4,10 +4,35 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-20 (Claude Code session — domain-equivalence verified,
-EAS submission 401 root-caused as a client-side polling timeout, alias-
-normalization vulnerability found/fixed/verified, settings page + radial
-menu UI polish, open loops below)
+Last updated: 2026-08-22 (Cowork session — GF-01 US counsel outreach,
+Gmail connector live, Google account recovered, Apple org migration
+in flight)
+
+## 22 Aug session changes
+
+- **GF-01 outreach widened.** Emails sent 22 Aug from benjamin@ghostface.co.nz
+  to two US encryption-export specialists: Olga Torres (olga@torrestradelaw.com,
+  Torres Trade Law) and Lori Scheetz (lscheetz@wiley.law, Wiley Rein). Bounded
+  ask: one-page opinion on §740.17(b)(1) mass-market self-classification vs
+  CCATS re kdfRkPQ, fixed fee requested. MinterEllison (original 19 Aug
+  enquiry) still silent — chase draft sits in Gmail drafts on that thread;
+  one-time Cowork reminder fires Mon 24 Aug 9am NZT to check replies/nudge.
+  (Earlier "chase Mon 25 Aug" was a date error; Monday is the 24th.)
+- ⚠️ Copies of counsel emails were forwarded to jjules@xtra.com and
+  jjules@xtra.co (two spellings). If the intended address is jjules@xtra.co.nz,
+  both may have bounced or reached a stranger — verify.
+- **Google account recovered** (was locked). Gmail connector authorized in
+  Cowork; send-as alias benjamin@ghostface.co.nz confirmed working.
+  Follow-ups from the lockout list still open: Vercel 2nd login method,
+  CrazyDomains recovery, domain-expiry check.
+- **Apple Developer: migrating Individual → Organisation (Ghostface
+  Limited), still processing as of 22 Aug (~1 day).** Once cleared: check
+  whether Team ID `98337579X8` changed and update CLAUDE.md's iOS
+  identifiers; the org D-U-N-S number then also unblocks a Google Play
+  **organisation** developer account (decided: org, matching Apple) —
+  signup deliberately deferred until Apple verification clears.
+- Cowork scheduled tasks created: daily 7am briefing, Monday 8am weekly
+  roadmap, one-shot counsel-chase reminder (Mon 24 Aug).
 
 ## ⏳ OPEN LOOPS (as of last session)
 
