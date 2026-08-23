@@ -512,7 +512,7 @@ export default function HomeScreen() {
                           <Ionicons
                             name={node.icon}
                             size={20}
-                            color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                            color={active ? "#F5D26B" : "rgba(255,255,255,0.88)"}
                           />
                         </GlassView>
                       ) : (
@@ -539,7 +539,7 @@ export default function HomeScreen() {
                           <Ionicons
                             name={node.icon}
                             size={20}
-                            color={active ? "#FFFFFF" : "rgba(255,255,255,0.88)"}
+                            color={active ? "#F5D26B" : "rgba(255,255,255,0.88)"}
                           />
                         </View>
                       )}
@@ -759,7 +759,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   nodeCircleGlassBorderActive: {
-    borderColor: "#FFFFFF",
+    borderColor: "#F5D26B",
   },
   nodeCircleRim: {
     ...StyleSheet.absoluteFillObject,
@@ -768,7 +768,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   nodeCircleRimActive: {
-    borderColor: "rgba(255,255,255,0.6)",
+    borderColor: "rgba(245,210,107,0.85)",
   },
   nodeLockBadge: {
     position: "absolute",
@@ -789,5 +789,5 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     color: "rgba(255,255,255,0.78)",
   },
-  nodeLabelActive: { color: "#ffffff" },
+  nodeLabelActive: { color: "#F5D26B" },
 });
