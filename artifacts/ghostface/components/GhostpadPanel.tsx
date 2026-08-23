@@ -49,8 +49,10 @@ export default function GhostpadScreen({
     setGhostpadMode,
     resetGhostpad,
     wsConnected,
+    themePreference,
   } = useApp();
   const { mode, code } = ghostpad;
+  const isLight = themePreference === "light";
 
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState("");
@@ -235,7 +237,7 @@ export default function GhostpadScreen({
       color: colors.foreground,
     },
     actionBtnTextPrimary: {
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     codeInput: {
       ...type.mono,

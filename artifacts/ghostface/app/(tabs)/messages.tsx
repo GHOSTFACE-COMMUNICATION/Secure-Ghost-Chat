@@ -93,7 +93,8 @@ type PageTab = "messages" | "tools" | "invite";
 export default function MessagesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { conversations, addConversation, deleteConversation, wsConnected, alias } = useApp();
+  const { conversations, addConversation, deleteConversation, wsConnected, alias, themePreference } = useApp();
+  const isLight = themePreference === "light";
 
   // Only show the offline banner after a successful connection has been made and then lost.
   // Avoids alarming users during the normal initial-connect window on app launch.
@@ -327,7 +328,7 @@ export default function MessagesScreen() {
     badgeTxt: {
       ...type.micro,
       fontSize: 10,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     itemBody: {
       flex: 1,
@@ -389,7 +390,7 @@ export default function MessagesScreen() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     pad: {
       height: 110,
@@ -443,7 +444,7 @@ export default function MessagesScreen() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     cancelBtn: {
       alignItems: "center",
@@ -506,9 +507,9 @@ export default function MessagesScreen() {
           <Ionicons
             name="chatbubble-outline"
             size={14}
-            color={pageTab === "messages" ? "#FFFFFF" : colors.mutedForeground}
+            color={pageTab === "messages" ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground}
           />
-          <Text style={[styles.segTxt, { color: pageTab === "messages" ? "#FFFFFF" : colors.mutedForeground }]}>
+          <Text style={[styles.segTxt, { color: pageTab === "messages" ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground }]}>
             MESSAGES
           </Text>
         </Pressable>
@@ -520,9 +521,9 @@ export default function MessagesScreen() {
           <Ionicons
             name="lock-closed-outline"
             size={14}
-            color={pageTab === "tools" ? "#FFFFFF" : colors.mutedForeground}
+            color={pageTab === "tools" ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground}
           />
-          <Text style={[styles.segTxt, { color: pageTab === "tools" ? "#FFFFFF" : colors.mutedForeground }]}>
+          <Text style={[styles.segTxt, { color: pageTab === "tools" ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground }]}>
             TOOLS
           </Text>
         </Pressable>
@@ -534,9 +535,9 @@ export default function MessagesScreen() {
           <Ionicons
             name="qr-code-outline"
             size={14}
-            color={pageTab === "invite" ? "#FFFFFF" : colors.mutedForeground}
+            color={pageTab === "invite" ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground}
           />
-          <Text style={[styles.segTxt, { color: pageTab === "invite" ? "#FFFFFF" : colors.mutedForeground }]}>
+          <Text style={[styles.segTxt, { color: pageTab === "invite" ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground }]}>
             INVITE
           </Text>
         </Pressable>
@@ -638,8 +639,8 @@ export default function MessagesScreen() {
                 onPress={() => { setShowNew(false); setTimeout(() => setShowScanner(true), 300); }}
               >
                 <GoldGradient style={styles.sheetBtnInner}>
-                  <Ionicons name="qr-code-outline" size={16} color={colors.primary} />
-                  <Text style={[styles.sheetBtnTxt, { color: colors.primary }]}>SCAN QR CODE</Text>
+                  <Ionicons name="qr-code-outline" size={16} color={isLight ? colors.primaryForeground : colors.primary} />
+                  <Text style={[styles.sheetBtnTxt, { color: isLight ? colors.primaryForeground : colors.primary }]}>SCAN QR CODE</Text>
                 </GoldGradient>
               </Pressable>
 

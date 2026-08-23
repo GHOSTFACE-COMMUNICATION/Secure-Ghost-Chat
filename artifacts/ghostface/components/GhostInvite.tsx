@@ -74,7 +74,8 @@ type RedeemState = "idle" | "success" | RedeemFailReason;
 
 export default function GhostInvite() {
   const colors = useColors();
-  const { addConversation, alias: myAlias } = useApp();
+  const { addConversation, alias: myAlias, themePreference } = useApp();
+  const isLight = themePreference === "light";
   const [showScanner, setShowScanner] = useState(false);
   const [code, setCode] = useState(genCode);
   const [timerIdx, setTimerIdx] = useState(0);
@@ -398,7 +399,7 @@ export default function GhostInvite() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     infoCard: {
       backgroundColor: colors.card,
@@ -465,7 +466,7 @@ export default function GhostInvite() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     redeemFeedback: {
       flexDirection: "row" as const,
@@ -507,7 +508,7 @@ export default function GhostInvite() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     shareRow: {
       flexDirection: "row" as const,
@@ -536,7 +537,7 @@ export default function GhostInvite() {
       color: colors.mutedForeground,
     },
     shareBtnTxtActive: {
-      color: colors.primary,
+      color: isLight ? colors.primaryForeground : colors.primary,
     },
   });
 
@@ -575,7 +576,7 @@ export default function GhostInvite() {
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setShowScanner(true); }}
         >
           <GoldGradient style={styles.goldBtnInner}>
-            <Ionicons name="qr-code-outline" size={18} color="#FFFFFF" />
+            <Ionicons name="qr-code-outline" size={18} color={isLight ? colors.primaryForeground : "#FFFFFF"} />
             <Text style={styles.scanBtnTxt}>SCAN THEIR QR CODE</Text>
           </GoldGradient>
         </Pressable>
@@ -645,7 +646,7 @@ export default function GhostInvite() {
                     <Ionicons
                       name={copiedShare ? "checkmark" : "copy-outline"}
                       size={14}
-                      color={copiedShare ? colors.primary : colors.mutedForeground}
+                      color={copiedShare ? (isLight ? colors.primaryForeground : colors.primary) : colors.mutedForeground}
                     />
                     <Text style={[styles.shareBtnTxt, copiedShare && styles.shareBtnTxtActive]}>
                       {copiedShare ? "COPIED" : "COPY"}
@@ -692,7 +693,7 @@ export default function GhostInvite() {
           onPress={() => reset()}
         >
           <GoldGradient style={styles.goldBtnInner}>
-            <Ionicons name="refresh-outline" size={16} color="#FFFFFF" />
+            <Ionicons name="refresh-outline" size={16} color={isLight ? colors.primaryForeground : "#FFFFFF"} />
             <Text style={styles.regenBtnTxt}>GENERATE NEW CODE</Text>
           </GoldGradient>
         </Pressable>
@@ -758,7 +759,7 @@ export default function GhostInvite() {
               disabled={redeemInput.length < 12 || redeemState === "success"}
             >
               <GoldGradient style={styles.goldBtnInner}>
-                <Ionicons name="enter-outline" size={16} color="#FFFFFF" />
+                <Ionicons name="enter-outline" size={16} color={isLight ? colors.primaryForeground : "#FFFFFF"} />
                 <Text style={styles.redeemBtnTxt}>ESTABLISH CHANNEL</Text>
               </GoldGradient>
             </Pressable>

@@ -3,6 +3,21 @@ import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { StyleProp, StyleSheet, View, ViewStyle } from "react-native";
+import { useApp } from "@/context/AppContext";
+import { boxShadow } from "@/lib/shadow";
+
+// Light-mode depth treatment. A gold glass surface on a light/white
+// background has no dark backdrop to separate it visually the way it does
+// in dark mode, so it needs an explicit raised look: a soft gold-toned drop
+// shadow underneath, plus a bright inset highlight along the top edge and a
+// faint inset shadow along the bottom — the same "beveled glass" cues used
+// on the coin rim, just gold-toned instead of neutral. Dark mode is left
+// alone; its glass already reads as glass against the black backdrop.
+const LIGHT_DEPTH_SHADOW = [
+  boxShadow("#8a6d1f", 0.28, 10, 0, 4),
+  `inset ${boxShadow("#FFFFFF", 0.85, 0, 0, 1)}`,
+  `inset ${boxShadow("#B8892A", 0.25, 3, 0, -2)}`,
+].join(", ");
 
 // Metallic gold sheen used across the app's gold surfaces (buttons/badges).
 // Pale-gold highlight → bright gold → deep gold → dark edge gives a polished,
@@ -23,6 +38,15 @@ export const GOLD_METALLIC_LOCATIONS = [0, 0.45, 0.75, 1] as const;
 // device). 0.82 is the lowest alpha that still reads unambiguously gold
 // against a black backdrop while keeping some genuine translucency.
 export const GOLD_GLASS_TINT = "rgba(245,210,107,0.82)";
+
+// Light-theme glass tint. A white backdrop has the OPPOSITE problem from
+// black: alpha-compositing gold over white lightens it toward pastel cream
+// rather than muddying it toward brown, so it actually needs a HIGHER alpha
+// than the dark-mode tint to read as true gold rather than a wash — e.g.
+// rgba(245,210,107,0.62) over solid white composites to ~rgb(249,227,163),
+// a pale cream, not gold. 0.85 composites to ~rgb(246,214,118), close to
+// the trademark hex itself.
+export const GOLD_GLASS_TINT_LIGHT = "rgba(245,210,107,0.85)";
 
 // Black liquid-glass tint — MUST match the home screen's radial-menu nodes
 // (NODE_GLASS_TINT in app/(tabs)/index.tsx). Those are the reference
@@ -45,16 +69,27 @@ export const GOLD_OUTLINE_COLOR = "#F5D26B";
 // active states), never in the surface edge. Kept as GOLD_OUTLINE_* names so
 // existing call sites keep working.
 export const GOLD_OUTLINE_COLOR_CLEAR = "rgba(255,255,255,0.18)";
+// Light-theme rim — a white rim on a white/light background would be
+// invisible, so light mode gets a muted gold-brown edge instead.
+export const GOLD_OUTLINE_COLOR_CLEAR_LIGHT = "rgba(217,161,26,0.9)";
 export const GOLD_OUTLINE_WIDTH = 1;
 export const GOLD_OUTLINE_STYLE = {
   borderWidth: GOLD_OUTLINE_WIDTH,
   borderColor: GOLD_OUTLINE_COLOR_CLEAR,
+} as const;
+export const GOLD_OUTLINE_STYLE_LIGHT = {
+  borderWidth: GOLD_OUTLINE_WIDTH,
+  borderColor: GOLD_OUTLINE_COLOR_CLEAR_LIGHT,
 } as const;
 
 // Fallback gradient for platforms without native Liquid Glass. Matches
 // NODE_GLASS_METALLIC_FALLBACK on the home screen. The old top stop (#3c3c40)
 // was lighter and read as a painted metallic panel.
 export const GLASS_METALLIC_BLACK = ["#2a2a2c", "#141416", "#050505", "#000000"] as const;
+// Light-theme fallback gradient — reuses GOLD_METALLIC directly (the same
+// trademark-anchored stops used elsewhere in the app) rather than a paler
+// approximation, so the light-mode fallback reads as the same brand gold.
+export const GLASS_METALLIC_GOLD_LIGHT = GOLD_METALLIC;
 
 /**
  * Fill for glass surfaces that sit on a FLAT BLACK background with nothing
@@ -72,6 +107,9 @@ export const GLASS_METALLIC_BLACK = ["#2a2a2c", "#141416", "#050505", "#000000"]
  * belong to the same family. Use <GoldGradient solid> for these.
  */
 export const GLASS_SOLID_FILL = "rgba(255,255,255,0.07)";
+// Light-theme equivalent — a faint gold fill rather than white-on-white,
+// which would add nothing visible.
+export const GLASS_SOLID_FILL_LIGHT = "rgba(217,161,26,0.32)";
 
 const useNativeGlass = isLiquidGlassAvailable();
 
@@ -81,14 +119,43 @@ const useNativeGlass = isLiquidGlassAvailable();
 // the static approximation both paths render underneath, since neither
 // GlassView's own effect nor the flat metallic fallback has this on its
 // own. Sits above the glass/gradient, below the button's own content.
-export function SpecularHighlight({ intensity = 0.65 }: { intensity?: number }) {
+// `rgb` lets a gold surface use a warm cream highlight instead of pure
+// white, so the streak reads as "light catching gold" rather than a
+// generic glass glare sitting on top of it.
+export function SpecularHighlight({ intensity = 0.65, rgb = "255,255,255" }: { intensity?: number; rgb?: string }) {
   return (
     <LinearGradient
       pointerEvents="none"
-      colors={["rgba(255,255,255,0)", `rgba(255,255,255,${intensity})`, "rgba(255,255,255,0)"]}
+      colors={[`rgba(${rgb},0)`, `rgba(${rgb},${intensity})`, `rgba(${rgb},0)`]}
       locations={[0.15, 0.35, 0.55]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
+      style={StyleSheet.absoluteFill}
+    />
+  );
+}
+
+// Metallic banding for the NATIVE glass path in light mode. The native
+// GlassView only takes a flat tintColor — no gradient — so on its own it
+// reads as a single flat wash of color. This overlays the same
+// light-to-dark gold banding the fallback path gets for free from its
+// LinearGradient fill, translucent enough that the native blur/refraction
+// still shows through underneath. Fallback path doesn't need this — its
+// GLASS_METALLIC_GOLD_LIGHT fill already provides the banding.
+const GOLD_TEXTURE_LIGHT = [
+  "rgba(255,250,235,0.55)",
+  "rgba(245,210,107,0.1)",
+  "rgba(184,137,42,0.4)",
+] as const;
+
+function GoldTexture() {
+  return (
+    <LinearGradient
+      pointerEvents="none"
+      colors={GOLD_TEXTURE_LIGHT}
+      locations={[0, 0.45, 1]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
       style={StyleSheet.absoluteFill}
     />
   );
@@ -129,20 +196,32 @@ export function GoldGradient({
    */
   solid?: boolean;
 }) {
+  const { themePreference } = useApp();
+  const isLight = themePreference === "light";
+  // Light-mode glass needs a stronger sheen than dark mode to read as glass
+  // rather than a flat tinted panel — dark mode relies on the black backdrop
+  // for contrast, light mode doesn't have that crutch.
+  const effectiveSpecular = isLight ? Math.min(1, specularIntensity * 1.8) : specularIntensity;
+  // Warm cream highlight for gold surfaces instead of a plain white glare —
+  // reads as light catching gold rather than glass sitting on top of it.
+  const specularRgb = isLight ? "255,247,222" : "255,255,255";
+
   if (useNativeGlass) {
     return (
       <GlassView
         style={[
           { overflow: "hidden" },
-          GOLD_OUTLINE_STYLE,
-          solid && { backgroundColor: GLASS_SOLID_FILL },
+          isLight ? GOLD_OUTLINE_STYLE_LIGHT : GOLD_OUTLINE_STYLE,
+          isLight && { boxShadow: LIGHT_DEPTH_SHADOW },
+          solid && { backgroundColor: isLight ? GLASS_SOLID_FILL_LIGHT : GLASS_SOLID_FILL },
           style,
         ]}
         glassEffectStyle="clear"
-        tintColor={GLASS_TINT_BLACK}
+        tintColor={isLight ? GOLD_GLASS_TINT_LIGHT : GLASS_TINT_BLACK}
         isInteractive
       >
-        <SpecularHighlight intensity={specularIntensity} />
+        {isLight && <GoldTexture />}
+        <SpecularHighlight intensity={effectiveSpecular} rgb={specularRgb} />
         {children}
       </GlassView>
     );
@@ -150,25 +229,31 @@ export function GoldGradient({
   return (
     <BlurView
       intensity={32}
-      tint="dark"
-      style={[{ overflow: "hidden" }, GOLD_OUTLINE_STYLE, style]}
+      tint={isLight ? "light" : "dark"}
+      style={[
+        { overflow: "hidden" },
+        isLight ? GOLD_OUTLINE_STYLE_LIGHT : GOLD_OUTLINE_STYLE,
+        isLight && { boxShadow: LIGHT_DEPTH_SHADOW },
+        style,
+      ]}
     >
       <LinearGradient
-        colors={GLASS_METALLIC_BLACK}
+        colors={isLight ? GLASS_METALLIC_GOLD_LIGHT : GLASS_METALLIC_BLACK}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
-        style={[{ backgroundColor: "#000000" }, StyleSheet.absoluteFill]}
+        style={[{ backgroundColor: isLight ? "#FFFDF5" : "#000000" }, StyleSheet.absoluteFill]}
       />
       {/* Same reasoning as the native path: without native refraction this
-          gradient bottoms out at pure black, so a surface on a black screen
-          needs the fill to be visible at all. */}
+          gradient bottoms out at pure black (or pale gold, in light mode)
+          on a flat background, so a surface there needs the fill to be
+          visible at all. */}
       {solid && (
         <View
           pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: GLASS_SOLID_FILL }]}
+          style={[StyleSheet.absoluteFill, { backgroundColor: isLight ? GLASS_SOLID_FILL_LIGHT : GLASS_SOLID_FILL }]}
         />
       )}
-      <SpecularHighlight intensity={specularIntensity} />
+      <SpecularHighlight intensity={effectiveSpecular} rgb={specularRgb} />
       {children}
     </BlurView>
   );

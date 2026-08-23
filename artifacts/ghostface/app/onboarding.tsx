@@ -62,7 +62,8 @@ async function checkAliasTaken(alias: string): Promise<boolean | null> {
 export default function OnboardingScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { setAlias, setPin, recoverIdentity, getRecoveryPhrase } = useApp();
+  const { setAlias, setPin, recoverIdentity, getRecoveryPhrase, themePreference } = useApp();
+  const isLight = themePreference === "light";
   const [alias, setAliasText] = useState("");
   const [step, setStep] = useState<"alias" | "pin" | "recovery" | "restore">("alias");
   const [pin, setPinText] = useState("");
@@ -286,7 +287,11 @@ export default function OnboardingScreen() {
       ...type.labelStrong,
       fontSize: 13,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      // Dark mode's glass fill is near-black, so white text reads fine
+      // there. Light mode's glass fill is a saturated gold, so white (or
+      // gold) text on it is nearly illegible — use the token that's
+      // defined as "correct text on a gold surface" instead.
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     skipBtn: {
       alignItems: "center",
@@ -530,7 +535,11 @@ export default function OnboardingScreen() {
                 testID="shuffle-suggestions"
               >
                 <GoldGradient style={styles.suggestionChipInner}>
-                  <Ionicons name="shuffle" size={14} color={colors.primary} />
+                  <Ionicons
+                  name="shuffle"
+                  size={14}
+                  color={isLight ? colors.primaryForeground : colors.primary}
+                />
                 </GoldGradient>
               </Pressable>
             </View>

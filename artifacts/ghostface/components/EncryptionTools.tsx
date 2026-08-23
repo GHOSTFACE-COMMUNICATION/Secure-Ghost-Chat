@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
 import { type } from "@/constants/typography";
 import { GoldGradient } from "@/components/GoldGradient";
 import { ghostDecrypt, ghostEncrypt, stealthDecode, stealthEncode } from "@/lib/stealthCrypto";
@@ -18,6 +19,8 @@ import { ghostDecrypt, ghostEncrypt, stealthDecode, stealthEncode } from "@/lib/
 
 export default function EncryptionTools() {
   const colors = useColors();
+  const { themePreference } = useApp();
+  const isLight = themePreference === "light";
 
   const [stealthMsg, setStealthMsg] = useState("");
   const [stealthKey, setStealthKey] = useState("");
@@ -55,7 +58,7 @@ export default function EncryptionTools() {
     modeTxt: { ...type.labelStrong },
     btn: { borderRadius: colors.radius, overflow: "hidden" },
     btnGold: { borderRadius: colors.radius, paddingVertical: 13, alignItems: "center" },
-    btnTxt: { ...type.labelStrong, color: "#FFFFFF", fontSize: 12 },
+    btnTxt: { ...type.labelStrong, color: isLight ? colors.primaryForeground : "#FFFFFF", fontSize: 12 },
     out: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: colors.radius, padding: 12 },
     outTxt: { ...type.monoSmall, color: colors.primary },
     copyRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, alignSelf: "flex-end" },
@@ -130,7 +133,7 @@ export default function EncryptionTools() {
               <GoldGradient
                 style={[s.modeBtnInner, stealthMode === m && { borderColor: colors.primary }]}
               >
-                <Text style={[s.modeTxt, { color: stealthMode === m ? "#FFFFFF" : colors.mutedForeground }]}>
+                <Text style={[s.modeTxt, { color: stealthMode === m ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground }]}>
                   {m === "hide" ? "HIDE MESSAGE" : "REVEAL MESSAGE"}
                 </Text>
               </GoldGradient>

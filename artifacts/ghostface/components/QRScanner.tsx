@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { GoldGradient } from "@/components/GoldGradient";
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
 import { Ionicons } from "@expo/vector-icons";
 import { WebQRScanner } from "./WebQRScanner";
 import { type } from "@/constants/typography";
@@ -55,6 +56,8 @@ interface QRScannerProps {
 
 export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
   const colors = useColors();
+  const { themePreference } = useApp();
+  const isLight = themePreference === "light";
   const [permission, requestPermission] = useCameraPermissions();
   const scannedRef = useRef(false);
   const [flash, setFlash] = useState(false);
@@ -170,7 +173,7 @@ export function QRScanner({ visible, onClose, onScan }: QRScannerProps) {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     flashOverlay: {
       position: "absolute",

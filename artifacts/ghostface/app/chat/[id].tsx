@@ -268,7 +268,14 @@ export default function ChatScreen() {
     presence,
     subscribePresence,
     unsubscribePresence,
+    themePreference,
   } = useApp();
+  // Light mode's GoldGradient fill is itself saturated gold, so text/icons
+  // that were hardcoded white (or a same-in-both-palettes gold token) to
+  // read against dark mode's near-black glass need to flip to black in
+  // light mode instead — colors.primaryForeground is that token. Dark mode
+  // keeps its original value unchanged.
+  const isLight = themePreference === "light";
   const [text, setText] = useState("");
   const [showInfo, setShowInfo] = useState(false);
   const [showDisappear, setShowDisappear] = useState(false);
@@ -1385,17 +1392,17 @@ export default function ChatScreen() {
                     <Ionicons
                       name={playingId === item.id ? "pause" : "play"}
                       size={16}
-                      color="#FFFFFF"
+                      color={isLight ? colors.primaryForeground : "#FFFFFF"}
                     />
                     <View style={styles.audioBars}>
                       {[6, 12, 9, 14, 8, 11, 7].map((h, i) => (
                         <View
                           key={i}
-                          style={[styles.audioBar, { height: h, backgroundColor: "#FFFFFF" }]}
+                          style={[styles.audioBar, { height: h, backgroundColor: isLight ? colors.primaryForeground : "#FFFFFF" }]}
                         />
                       ))}
                     </View>
-                    <Text style={[styles.audioDuration, { color: "#FFFFFF" }]}>
+                    <Text style={[styles.audioDuration, { color: isLight ? colors.primaryForeground : "#FFFFFF" }]}>
                       {formatDuration(item.attachment.durationMs)}
                     </Text>
                   </GoldGradient>
@@ -1425,14 +1432,14 @@ export default function ChatScreen() {
                     <Ionicons
                       name="document"
                       size={18}
-                      color={item.fromMe ? "#FFFFFF" : colors.primary}
+                      color={item.fromMe ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.primary}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
                       style={[
                         styles.fileName,
-                        { color: item.fromMe ? "#FFFFFF" : colors.foreground },
+                        { color: item.fromMe ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.foreground },
                       ]}
                       numberOfLines={1}
                     >
@@ -1442,7 +1449,7 @@ export default function ChatScreen() {
                       <Text
                         style={[
                           styles.fileSize,
-                          { color: item.fromMe ? "rgba(255,255,255,0.7)" : colors.mutedForeground },
+                          { color: item.fromMe ? (isLight ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)") : colors.mutedForeground },
                         ]}
                       >
                         {formatBytes(item.attachment.size)}
@@ -1455,7 +1462,7 @@ export default function ChatScreen() {
                 <Text
                   style={[
                     styles.msgText,
-                    { color: item.fromMe ? "#FFFFFF" : colors.foreground },
+                    { color: item.fromMe ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.foreground },
                     item.attachment?.kind === "image" && styles.msgTextWithImage,
                   ]}
                 >
@@ -1730,7 +1737,7 @@ export default function ChatScreen() {
               <Ionicons
                 name="send"
                 size={16}
-                color={text.trim() || pendingAttachment ? "#FFFFFF" : colors.mutedForeground}
+                color={text.trim() || pendingAttachment ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground}
               />
             </GoldGradient>
           </Pressable>
@@ -1766,7 +1773,7 @@ export default function ChatScreen() {
                 >
                   <GoldGradient style={styles.attachOptionInner}>
                     <View style={styles.attachIconWrap}>
-                      <Ionicons name="images" size={18} color={colors.primary} />
+                      <Ionicons name="images" size={18} color={isLight ? colors.primaryForeground : colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.attachOptionTitle}>PHOTO LIBRARY</Text>
@@ -1783,7 +1790,7 @@ export default function ChatScreen() {
                 >
                   <GoldGradient style={styles.attachOptionInner}>
                     <View style={styles.attachIconWrap}>
-                      <Ionicons name="camera" size={18} color={colors.primary} />
+                      <Ionicons name="camera" size={18} color={isLight ? colors.primaryForeground : colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.attachOptionTitle}>CAMERA</Text>
@@ -1800,7 +1807,7 @@ export default function ChatScreen() {
                 >
                   <GoldGradient style={styles.attachOptionInner}>
                     <View style={styles.attachIconWrap}>
-                      <Ionicons name="document" size={18} color={colors.primary} />
+                      <Ionicons name="document" size={18} color={isLight ? colors.primaryForeground : colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.attachOptionTitle}>FILE</Text>
@@ -1817,7 +1824,7 @@ export default function ChatScreen() {
                 >
                   <GoldGradient style={styles.attachOptionInner}>
                     <View style={styles.attachIconWrap}>
-                      <Ionicons name="mic" size={18} color={colors.primary} />
+                      <Ionicons name="mic" size={18} color={isLight ? colors.primaryForeground : colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.attachOptionTitle}>VOICE NOTE</Text>
@@ -1837,7 +1844,7 @@ export default function ChatScreen() {
                 >
                   <GoldGradient style={styles.attachOptionInner}>
                     <View style={styles.attachIconWrap}>
-                      <Ionicons name="timer-outline" size={18} color={colors.primary} />
+                      <Ionicons name="timer-outline" size={18} color={isLight ? colors.primaryForeground : colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.attachOptionTitle}>SELF-DESTRUCT TIMER</Text>
@@ -1887,7 +1894,7 @@ export default function ChatScreen() {
                 testID="recorder-stop"
               >
                 <GoldGradient style={styles.recorderBtnGoldFill}>
-                  <Text style={[styles.recorderBtnTxt, { color: "#FFFFFF" }]}>
+                  <Text style={[styles.recorderBtnTxt, { color: isLight ? colors.primaryForeground : "#FFFFFF" }]}>
                     STOP &amp; ATTACH
                   </Text>
                 </GoldGradient>
@@ -2116,9 +2123,9 @@ export default function ChatScreen() {
                     <Ionicons
                       name={conv.verified ? "shield-outline" : "shield-checkmark"}
                       size={14}
-                      color={conv.verified ? colors.mutedForeground : colors.primary}
+                      color={conv.verified ? colors.mutedForeground : (isLight ? colors.primaryForeground : colors.primary)}
                     />
-                    <Text style={[styles.clearBtnTxt, { color: conv.verified ? colors.mutedForeground : colors.primary }]}>
+                    <Text style={[styles.clearBtnTxt, { color: conv.verified ? colors.mutedForeground : (isLight ? colors.primaryForeground : colors.primary) }]}>
                       {conv.verified ? "REMOVE VERIFICATION" : "MARK AS VERIFIED"}
                     </Text>
                   </GoldGradient>
@@ -2173,7 +2180,7 @@ export default function ChatScreen() {
                         >
                           <Text style={[
                             styles.disappearOptTxt,
-                            { color: active ? "#FFFFFF" : colors.mutedForeground },
+                            { color: active ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.mutedForeground },
                           ]}>
                             {opt.label}
                           </Text>

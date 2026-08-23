@@ -31,6 +31,7 @@ import {
   sanitizeFallbackMessage,
 } from "@/lib/smsFallback";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Alert, AppState as RNAppState, Platform } from "react-native";
@@ -622,6 +623,18 @@ interface AppState {
   autoLockTimeout: number | null;
   duressGracePeriod: number;
   language: string;
+  /** Manual override, not tied to the OS's system dark-mode setting. */
+  themePreference: "dark" | "light";
+  /**
+   * Local profile photo for the identity circle in Settings — a file://
+   * URI under the app's own documentDirectory (profile/), copied there at
+   * pick time so the image picker's cache URI can't dangle (same pattern as
+   * Conversation.bgImageUri). Device-local only: never enters an envelope,
+   * never shown to contacts — other screens' avatars are keyed by the
+   * OTHER party's alias, not this device's own. Wiped (state + file) on
+   * panic wipe since a photo is identifying.
+   */
+  profileImageUri: string | null;
   incomingCall: IncomingCall | null;
   ghostpad: GhostpadSession;
   // Satellite low-bandwidth mode (Task #111). `linkQuality` is the
@@ -706,6 +719,9 @@ interface AppContextType extends AppState {
   setAutoLockTimeout: (ms: number | null) => Promise<void>;
   setDuressGracePeriod: (seconds: number) => Promise<void>;
   setLanguage: (code: string) => Promise<void>;
+  setThemePreference: (theme: "dark" | "light") => Promise<void>;
+  /** Pass an already-copied documentDirectory file:// URI, or null to clear. Deletes the previous file best-effort. */
+  setProfileImage: (uri: string | null) => Promise<void>;
   setLowBandwidthMode: (mode: LowBandwidthMode) => Promise<void>;
   setSmsFallbackNumbers: (numbers: string[]) => Promise<void>;
   setSmsFallbackMessage: (message: string) => Promise<void>;
@@ -823,6 +839,8 @@ const DEVICE_TOKEN_KEY = "ghostface_device_token";
 const AUTO_LOCK_TIMEOUT_KEY = "ghostface_auto_lock_timeout";
 const DURESS_GRACE_KEY = "ghostface_duress_grace_period";
 const LANGUAGE_KEY = "ghostface_language";
+const THEME_KEY = "ghostface_theme_preference";
+const PROFILE_IMAGE_KEY = "ghostface_profile_image_uri";
 const LAST_VPN_SERVER_KEY = "ghostface_last_vpn_server_id";
 const LOW_BW_MODE_KEY = "ghostface_low_bandwidth_mode";
 const SMS_FALLBACK_NUMBERS_KEY = "ghostface_sms_fallback_numbers";
@@ -854,6 +872,8 @@ const APP_STORAGE_KEYS = [
   AUTO_LOCK_TIMEOUT_KEY,
   DURESS_GRACE_KEY,
   LANGUAGE_KEY,
+  THEME_KEY,
+  PROFILE_IMAGE_KEY,
   LAST_VPN_SERVER_KEY,
   LOW_BW_MODE_KEY,
   // Destroys the wallet along with everything else. Only the user's written
@@ -1455,6 +1475,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     autoLockTimeout: 5 * 60 * 1000,
     duressGracePeriod: 3,
     language: "en",
+    themePreference: "dark",
+    profileImageUri: null,
     linkQuality: "unknown",
     lowBandwidthMode: "auto",
     // Derive from the classifier so AUTO+UNKNOWN starts active (per task
@@ -1469,7 +1491,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw, themeRaw, profileImageRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
@@ -1490,6 +1512,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           secureGet(SMS_FALLBACK_NUMBERS_KEY),
           secureGet(SMS_FALLBACK_MESSAGE_KEY),
           readEncryptedString(LOCAL_WALLET_PRIV_KEY),
+          AsyncStorage.getItem(THEME_KEY),
+          AsyncStorage.getItem(PROFILE_IMAGE_KEY),
         ]);
 
         // Re-derive the wallet address from the stored private key. If the key
@@ -1605,6 +1629,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const VALID_LANGUAGES = ["en","es","fr","de","ja","zh","ar","pt","ru","ko","hi","it"];
         const language = (languageRaw && VALID_LANGUAGES.includes(languageRaw)) ? languageRaw : "en";
 
+        const themePreference: "dark" | "light" = themeRaw === "light" ? "light" : "dark";
+
         const VALID_LBW_MODES: LowBandwidthMode[] = ["auto", "forceOn", "forceOff"];
         const lowBandwidthMode: LowBandwidthMode =
           lowBwRaw && (VALID_LBW_MODES as string[]).includes(lowBwRaw)
@@ -1654,6 +1680,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           autoLockTimeout,
           duressGracePeriod,
           language,
+          themePreference,
+          profileImageUri: profileImageRaw ?? null,
           vpnServer: restoredVpnServer,
           // Start disconnected; if a server was saved, show reconnecting for 1.5 s then connect
           vpnConnected: false,
@@ -3210,6 +3238,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, language: code }));
   }, []);
 
+  const setThemePreference = useCallback(async (theme: "dark" | "light") => {
+    await AsyncStorage.setItem(THEME_KEY, theme);
+    setState((prev) => ({ ...prev, themePreference: theme }));
+  }, []);
+
+  // Caller must pass an already-copied documentDirectory file:// URI (see
+  // pickProfileImage in settings.tsx) — this only persists the reference
+  // and deletes the previous file, mirroring setConversationBgImage/
+  // removeBgImageFile's split of responsibilities.
+  const setProfileImage = useCallback(async (uri: string | null) => {
+    const previous = latestStateRef.current.profileImageUri;
+    if (previous && previous !== uri) {
+      await FileSystem.deleteAsync(previous, { idempotent: true }).catch(() => {});
+    }
+    if (uri) {
+      await AsyncStorage.setItem(PROFILE_IMAGE_KEY, uri);
+    } else {
+      await AsyncStorage.removeItem(PROFILE_IMAGE_KEY);
+    }
+    setState((prev) => ({ ...prev, profileImageUri: uri }));
+  }, []);
+
   // SILENCE CONTRACT: panicWipe must never produce any haptic or audio
   // feedback. A bystander must not be able to detect that a wipe occurred
   // because of an unexpected vibration or sound. Do not add Haptics calls,
@@ -3319,6 +3369,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // Delete the profile photo FILE itself, not just the AsyncStorage
+    // reference below — a photo is identifying, so self-destruct must
+    // actually remove it from disk, not just forget where it was.
+    {
+      const currentProfileImage = latestStateRef.current.profileImageUri;
+      if (currentProfileImage) {
+        await FileSystem.deleteAsync(currentProfileImage, { idempotent: true }).catch(() => {});
+      }
+    }
+
     try {
       await Promise.all([
         ...APP_STORAGE_KEYS.map((k) => AsyncStorage.removeItem(k)),
@@ -3379,6 +3439,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       autoLockTimeout: 5 * 60 * 1000,
       duressGracePeriod: 3,
       language: "en",
+      themePreference: "dark",
+      profileImageUri: null,
       incomingCall: null,
       ghostpad: { mode: "idle", code: null },
       linkQuality: "unknown",
@@ -4653,6 +4715,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setAutoLockTimeout,
         setDuressGracePeriod,
         setLanguage,
+        setThemePreference,
+        setProfileImage,
         setLowBandwidthMode,
         setSmsFallbackNumbers,
         setSmsFallbackMessage,

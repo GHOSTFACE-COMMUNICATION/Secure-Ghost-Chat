@@ -96,7 +96,12 @@ function shuffleDigits(): string[] {
 export default function LockScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { hasPin, biometricEnabled, duressGracePeriod, smsFallbackNumbers, checkPinWithDuress, setLocked, panicWipe, enterDecoyMode, exitDecoyMode } = useApp();
+  const { hasPin, biometricEnabled, duressGracePeriod, smsFallbackNumbers, checkPinWithDuress, setLocked, panicWipe, enterDecoyMode, exitDecoyMode, themePreference } = useApp();
+  // Light mode's GoldGradient fill is itself a saturated gold, so text/icons
+  // tuned white-on-near-black for dark mode need to flip to black
+  // (colors.primaryForeground) in light mode to stay legible. Dark mode is
+  // untouched. Mirrors the same isLight predicate GoldGradient itself uses.
+  const isLight = themePreference === "light";
   // Count of armed fallback recipients (Task #113). Shown next to the
   // duress countdown bar so the user can confirm at-a-glance whether
   // their out-of-band channel is configured. We deliberately never show
@@ -607,7 +612,7 @@ export default function LockScreen() {
       ...type.labelStrong,
       fontSize: 15,
       letterSpacing: 2,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     taglineRow: {
       flexDirection: "row",
@@ -835,7 +840,11 @@ export default function LockScreen() {
                       >
                         <GoldGradient solid style={StyleSheet.absoluteFill}>
                           <View style={styles.keyBtnGoldFill}>
-                            <Ionicons name="checkmark" size={26} color="#FFFFFF" />
+                            <Ionicons
+                              name="checkmark"
+                              size={26}
+                              color={isLight ? colors.primaryForeground : "#FFFFFF"}
+                            />
                           </View>
                         </GoldGradient>
                       </Pressable>

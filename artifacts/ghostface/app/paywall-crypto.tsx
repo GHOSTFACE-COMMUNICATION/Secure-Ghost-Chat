@@ -108,7 +108,8 @@ function SolanaPaywallContent() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
-  const { alias, deviceToken, refreshEntitlement } = useApp();
+  const { alias, deviceToken, refreshEntitlement, themePreference } = useApp();
+  const isLight = themePreference === "light";
 
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -372,7 +373,7 @@ function SolanaPaywallContent() {
       borderRadius: 6,
       paddingHorizontal: 10, paddingVertical: 5,
     },
-    copyTxt: { ...type.micro, color: "#fff" },
+    copyTxt: { ...type.micro, color: isLight ? colors.primaryForeground : "#fff" },
     steps: {
       width: "100%", backgroundColor: "rgba(138,138,138,0.07)",
       borderRadius: 12, padding: 14, gap: 10,
@@ -384,7 +385,7 @@ function SolanaPaywallContent() {
     sentBtnInner: {
       paddingVertical: 14, alignItems: "center",
     },
-    sentBtnTxt: { ...type.labelStrong, color: "#fff", fontSize: 13 },
+    sentBtnTxt: { ...type.labelStrong, color: isLight ? colors.primaryForeground : "#fff", fontSize: 13 },
     confirmedBox: {
       width: "100%", borderRadius: colors.radius, padding: 16,
       backgroundColor: "rgba(125,211,252,0.07)",
@@ -577,7 +578,7 @@ function SolanaPaywallContent() {
                       <Ionicons
                         name={copied ? "checkmark" : "copy-outline"}
                         size={12}
-                        color="#fff"
+                        color={isLight ? colors.primaryForeground : "#fff"}
                       />
                       <Text style={s.copyTxt}>{copied ? "COPIED" : "COPY"}</Text>
                     </GoldGradient>

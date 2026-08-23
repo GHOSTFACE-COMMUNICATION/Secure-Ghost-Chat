@@ -42,7 +42,8 @@ function formatTime(ts: string): string {
 export default function SmsInboxScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { alias, deviceToken, loaded } = useApp();
+  const { alias, deviceToken, loaded, themePreference } = useApp();
+  const isLight = themePreference === "light";
   const { numberId, phoneNumber, currentMsisdn } = useLocalSearchParams<{
     numberId: string;
     phoneNumber: string;
@@ -199,7 +200,7 @@ export default function SmsInboxScreen() {
     retryBtnText: {
       ...type.labelStrong,
       fontSize: 11,
-      color: colors.primary,
+      color: isLight ? colors.primaryForeground : colors.primary,
     },
     card: {
       backgroundColor: colors.card,

@@ -1,5 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -112,10 +115,18 @@ function StatusPill({
   tone: PillTone;
   colors: ReturnType<typeof useColors>;
 }) {
+  // "secure" is the only tone rendered on a real GoldGradient fill (the
+  // other tones sit on a plain colors.mutedForeground/destructive View).
+  // pillText's white is hardcoded for dark mode's near-black glass; light
+  // mode's gold glass needs colors.primaryForeground (black) instead.
+  const { themePreference } = useApp();
+  const isLight = themePreference === "light";
   if (tone === "secure") {
     return (
       <GoldGradient style={pillStyles.pill}>
-        <Text style={pillStyles.pillText}>{label}</Text>
+        <Text style={[pillStyles.pillText, isLight && { color: colors.primaryForeground }]}>
+          {label}
+        </Text>
       </GoldGradient>
     );
   }
@@ -156,6 +167,8 @@ export default function SettingsScreen() {
     autoLockTimeout,
     duressGracePeriod,
     language,
+    themePreference,
+    setThemePreference,
     lowBandwidthMode,
     lowBandwidthActive,
     linkQuality,
@@ -183,9 +196,80 @@ export default function SettingsScreen() {
     setAutoLockTimeout,
     setDuressGracePeriod,
     setLanguage,
+    profileImageUri,
+    setProfileImage,
   } = useApp();
 
+  // Light mode's GoldGradient fill is itself gold-tinted, so text/icons that
+  // were hardcoded white (or to a color equal in both palettes, e.g.
+  // colors.primary) to read against dark mode's near-black glass go
+  // gold-on-gold / washed-out in light mode. Those spots branch on this to
+  // fall back to colors.primaryForeground (black) in light mode only; dark
+  // mode keeps its original value unchanged.
+  const isLight = themePreference === "light";
+
   const { scrollRef, onScroll } = useScrollPersist<ScrollView>();
+
+  // ── Profile photo ──────────────────────────────────────────────────────
+  // Same pattern as the chat wallpaper picker (app/chat/[id].tsx): the
+  // picker returns a cache URI the OS may clean at any time, so it's
+  // copied into the app's own documentDirectory before being persisted.
+  const pickProfileImage = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "PHOTOS ACCESS DENIED",
+          "Enable photo library access in your device settings to set a profile photo."
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+        exif: false,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const dir = `${FileSystem.documentDirectory}profile/`;
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+      const dest = `${dir}avatar-${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: result.assets[0].uri, to: dest });
+      await setProfileImage(dest);
+    } catch (e) {
+      console.warn("[Settings] Profile photo pick failed:", e);
+      Alert.alert("PHOTO FAILED", "Could not set that photo. Try another image.");
+    }
+  };
+
+  const openAvatarMenu = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const options = profileImageUri
+      ? ["CHOOSE PHOTO", "REMOVE PHOTO", "CANCEL"]
+      : ["CHOOSE PHOTO", "CANCEL"];
+    const cancelButtonIndex = options.length - 1;
+    const destructiveButtonIndex = profileImageUri ? 1 : undefined;
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex, destructiveButtonIndex, title: "PROFILE PHOTO" },
+        (idx) => {
+          if (idx === 0) pickProfileImage();
+          else if (profileImageUri && idx === 1) setProfileImage(null);
+        }
+      );
+    } else {
+      const buttons = [
+        { text: "CHOOSE PHOTO", onPress: pickProfileImage },
+        ...(profileImageUri
+          ? [{ text: "REMOVE PHOTO", onPress: () => setProfileImage(null), style: "destructive" as const }]
+          : []),
+        { text: "CANCEL", style: "cancel" as const },
+      ];
+      Alert.alert("PROFILE PHOTO", undefined, buttons);
+    }
+  };
 
   const AUTO_LOCK_OPTIONS: { label: string; value: number | null }[] = [
     { label: "IMMEDIATELY", value: 0 },
@@ -680,6 +764,24 @@ export default function SettingsScreen() {
       borderWidth: 2,
       borderColor: colors.background,
     },
+    heroEditBadge: {
+      position: "absolute",
+      bottom: -1,
+      left: -1,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.secondary,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    heroAvatarImg: {
+      width: 76,
+      height: 76,
+      borderRadius: 38,
+    },
     heroAlias: {
       ...type.title,
       fontSize: 23,
@@ -980,26 +1082,33 @@ export default function SettingsScreen() {
       >
         {/* ── Identity ─────────────────────────────────────────────── */}
         <View style={styles.hero}>
-          <View>
-            <View
-              style={[
-                styles.heroAvatar,
-                { backgroundColor: getProfileColor(alias ?? "GHOST_00") },
-              ]}
-            >
-              <Text
+          <Pressable onPress={openAvatarMenu}>
+            {profileImageUri ? (
+              <Image source={{ uri: profileImageUri }} style={styles.heroAvatarImg} />
+            ) : (
+              <View
                 style={[
-                  styles.heroAvatarTxt,
-                  { color: getContrastText(getProfileColor(alias ?? "GHOST_00")) },
+                  styles.heroAvatar,
+                  { backgroundColor: getProfileColor(alias ?? "GHOST_00") },
                 ]}
               >
-                {(alias ?? "GH").slice(0, 2)}
-              </Text>
-            </View>
+                <Text
+                  style={[
+                    styles.heroAvatarTxt,
+                    { color: getContrastText(getProfileColor(alias ?? "GHOST_00")) },
+                  ]}
+                >
+                  {(alias ?? "GH").slice(0, 2)}
+                </Text>
+              </View>
+            )}
             <View style={styles.heroBadge}>
               <Ionicons name="shield-checkmark" size={11} color={colors.background} />
             </View>
-          </View>
+            <View style={styles.heroEditBadge}>
+              <Ionicons name="camera" size={11} color={colors.secondaryForeground} />
+            </View>
+          </Pressable>
           <Text style={styles.heroAlias}>{alias ?? "GHOST_00"}</Text>
           <Text style={styles.heroSub}>ANONYMOUS IDENTITY</Text>
         </View>
@@ -1011,7 +1120,11 @@ export default function SettingsScreen() {
         >
           <GoldGradient style={styles.planCardInner}>
             <View style={styles.planIcon}>
-              <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
+              <Ionicons
+                name="shield-checkmark"
+                size={20}
+                color={isLight ? colors.primaryForeground : colors.primary}
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.planLabel}>CURRENT PLAN</Text>
@@ -1031,7 +1144,11 @@ export default function SettingsScreen() {
             }}
           >
             <GoldGradient style={styles.actionTileInner}>
-              <Ionicons name="lock-closed" size={22} color={colors.primary} />
+              <Ionicons
+                name="lock-closed"
+                size={22}
+                color={isLight ? colors.primaryForeground : colors.primary}
+              />
               <Text style={styles.actionTileLabel}>LOCK{"\n"}SESSION</Text>
             </GoldGradient>
           </Pressable>
@@ -1118,7 +1235,7 @@ export default function SettingsScreen() {
               { icon: "lock-closed-outline", label: "E2EE", value: "ON" },
               { icon: "globe-outline", label: "DNS LEAK", value: "ON" },
               { icon: "analytics-outline", label: "TELEMETRY", value: "OFF" },
-              { icon: "moon-outline", label: "THEME", value: "DARK" },
+              { icon: "moon-outline", label: "THEME", value: themePreference.toUpperCase() },
               { icon: "glasses-outline", label: "GHOST MODE", value: "ENABLED" },
             ] as Array<{ icon: React.ComponentProps<typeof Ionicons>["name"]; label: string; value: string }>
           ).map((item) => (
@@ -1343,7 +1460,9 @@ export default function SettingsScreen() {
                           <Text
                             style={{
                               ...type.label,
-                              color: selected ? colors.primary : colors.mutedForeground,
+                              color: selected
+                                ? (isLight ? colors.primaryForeground : colors.primary)
+                                : colors.mutedForeground,
                             }}
                           >
                             {opt.label}
@@ -1368,6 +1487,22 @@ export default function SettingsScreen() {
                 <Text style={styles.rowValue}>{currentLanguage.label}</Text>
                 <Ionicons name="chevron-forward" size={15} color={colors.mutedForeground} />
               </Pressable>
+              <View style={styles.rowDivider} />
+
+              <View style={styles.row}>
+                <View style={styles.rowIcon}>
+                  <Ionicons name="sunny-outline" size={17} color={colors.mutedForeground} />
+                </View>
+                <Text style={styles.rowLabel}>LIGHT MODE</Text>
+                <Switch
+                  value={themePreference === "light"}
+                  onValueChange={(v) => setThemePreference(v ? "light" : "dark")}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor={colors.foreground}
+                  ios_backgroundColor={colors.border}
+                  testID="theme-switch"
+                />
+              </View>
             </>
           )}
         </View>
@@ -1532,7 +1667,7 @@ export default function SettingsScreen() {
                     disabled={newPin.length < 4}
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
-                      <Text style={styles.modalBtnText}>SAVE PIN</Text>
+                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>SAVE PIN</Text>
                     </GoldGradient>
                   </Pressable>
                   <Pressable
@@ -1698,7 +1833,7 @@ export default function SettingsScreen() {
                     testID="decoy-pin-save-btn"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
-                      <Text style={styles.modalBtnText}>SET DECOY PIN</Text>
+                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>SET DECOY PIN</Text>
                     </GoldGradient>
                   </Pressable>
                   {hasDecoyPin && (
@@ -1783,7 +1918,7 @@ export default function SettingsScreen() {
                     testID="wallet-pin-save-btn"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
-                      <Text style={styles.modalBtnText}>SET WALLET PIN</Text>
+                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>SET WALLET PIN</Text>
                     </GoldGradient>
                   </Pressable>
                   {hasWalletPin && (
@@ -1846,7 +1981,7 @@ export default function SettingsScreen() {
                     testID="recovery-pin-submit"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
-                      <Text style={styles.modalBtnText}>REVEAL PHRASE</Text>
+                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>REVEAL PHRASE</Text>
                     </GoldGradient>
                   </Pressable>
                   <Pressable style={styles.cancelBtn} onPress={() => setShowRecoveryPhrase(false)}>
@@ -1878,7 +2013,7 @@ export default function SettingsScreen() {
                     testID="recovery-phrase-done"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
-                      <Text style={styles.modalBtnText}>DONE</Text>
+                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>DONE</Text>
                     </GoldGradient>
                   </Pressable>
                 </>
@@ -1996,7 +2131,7 @@ export default function SettingsScreen() {
                   testID="fallback-add-btn"
                 >
                   <GoldGradient style={[styles.modalBtnGoldInner, { flex: 1, paddingHorizontal: 18, justifyContent: "center" }]}>
-                    <Text style={styles.modalBtnText}>ADD</Text>
+                    <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>ADD</Text>
                   </GoldGradient>
                 </Pressable>
               </View>
@@ -2035,7 +2170,7 @@ export default function SettingsScreen() {
               testID="fallback-save-msg-btn"
             >
               <GoldGradient style={styles.modalBtnGoldInner}>
-                <Text style={styles.modalBtnText}>SAVE MESSAGE</Text>
+                <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>SAVE MESSAGE</Text>
               </GoldGradient>
             </Pressable>
 

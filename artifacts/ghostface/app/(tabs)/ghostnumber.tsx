@@ -69,7 +69,8 @@ function formatTime(ts: string): string {
 export default function GhostNumberScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { alias, deviceToken, loaded } = useApp();
+  const { alias, deviceToken, loaded, themePreference } = useApp();
+  const isLight = themePreference === "light";
 
   const { scrollRef, onScroll } = useScrollPersist<ScrollView>();
 
@@ -416,7 +417,7 @@ export default function GhostNumberScreen() {
       ...type.labelStrong,
       flex: 1,
       textAlign: "center",
-      color: colors.primary,
+      color: isLight ? colors.primaryForeground : colors.primary,
     },
     cardDivider: {
       height: 1,
@@ -470,7 +471,7 @@ export default function GhostNumberScreen() {
     rotateNowBtnText: {
       ...type.labelStrong,
       fontSize: 10,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     releaseBtn: {
       flexDirection: "row",
@@ -520,7 +521,7 @@ export default function GhostNumberScreen() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
   });
 
@@ -550,7 +551,12 @@ export default function GhostNumberScreen() {
             <GoldGradient
               style={{ borderRadius: colors.radius, paddingHorizontal: 20, paddingVertical: 10 }}
             >
-              <Text style={{ ...type.labelStrong, color: colors.primary }}>
+              <Text
+                style={{
+                  ...type.labelStrong,
+                  color: isLight ? colors.primaryForeground : colors.primary,
+                }}
+              >
                 RETRY
               </Text>
             </GoldGradient>
@@ -651,9 +657,17 @@ export default function GhostNumberScreen() {
                   onPress={openInbox}
                 >
                   <GoldGradient style={styles.inboxBtnInner}>
-                    <Ionicons name="mail-outline" size={14} color={colors.primary} />
+                    <Ionicons
+                      name="mail-outline"
+                      size={14}
+                      color={isLight ? colors.primaryForeground : colors.primary}
+                    />
                     <Text style={styles.inboxBtnText}>VIEW SMS INBOX</Text>
-                    <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                    <Ionicons
+                      name="chevron-forward"
+                      size={14}
+                      color={isLight ? colors.primaryForeground : colors.primary}
+                    />
                   </GoldGradient>
                 </Pressable>
 
@@ -678,7 +692,13 @@ export default function GhostNumberScreen() {
                           <Text
                             style={[
                               styles.rotationChipText,
-                              { color: isActive ? colors.primary : colors.mutedForeground },
+                              {
+                                color: isActive
+                                  ? isLight
+                                    ? colors.primaryForeground
+                                    : colors.primary
+                                  : colors.mutedForeground,
+                              },
                             ]}
                           >
                             {opt.label}
@@ -705,10 +725,17 @@ export default function GhostNumberScreen() {
                 >
                   <GoldGradient style={styles.rotateNowBtnInner}>
                     {rotatingNow === n.id ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
+                      <ActivityIndicator
+                        size="small"
+                        color={isLight ? colors.primaryForeground : "#FFFFFF"}
+                      />
                     ) : (
                       <>
-                        <Ionicons name="refresh-outline" size={12} color="#FFFFFF" />
+                        <Ionicons
+                          name="refresh-outline"
+                          size={12}
+                          color={isLight ? colors.primaryForeground : "#FFFFFF"}
+                        />
                         <Text style={styles.rotateNowBtnText}>ROTATE NOW</Text>
                       </>
                     )}
@@ -746,10 +773,14 @@ export default function GhostNumberScreen() {
         >
           <GoldGradient style={styles.acquireBtnInner}>
             {provisioning || !loaded ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={isLight ? colors.primaryForeground : "#FFFFFF"} />
             ) : (
               <>
-                <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" />
+                <Ionicons
+                  name="add-circle-outline"
+                  size={16}
+                  color={isLight ? colors.primaryForeground : "#FFFFFF"}
+                />
                 <Text style={styles.acquireBtnText}>ACQUIRE NUMBER</Text>
               </>
             )}

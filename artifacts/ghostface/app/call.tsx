@@ -149,7 +149,8 @@ export default function CallScreen() {
     callId?: string;
   }>();
 
-  const { sendCallSignal, registerCallListener, wsConnected, logCall } = useApp();
+  const { sendCallSignal, registerCallListener, wsConnected, logCall, themePreference } = useApp();
+  const isLight = themePreference === "light";
 
   const isCaller = (role ?? "caller") === "caller";
   // useMemo so this only runs once on mount even if callId is undefined.
@@ -877,7 +878,7 @@ export default function CallScreen() {
                 <Ionicons
                   name={muted ? "mic-off" : "mic"}
                   size={22}
-                  color={muted ? "#FFFFFF" : colors.foreground}
+                  color={muted ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.foreground}
                 />
               </GoldGradient>
             </Pressable>
@@ -897,7 +898,7 @@ export default function CallScreen() {
                 <Ionicons
                   name={speakerOn ? "volume-high" : "volume-medium"}
                   size={22}
-                  color={speakerOn ? "#FFFFFF" : colors.foreground}
+                  color={speakerOn ? (isLight ? colors.primaryForeground : "#FFFFFF") : colors.foreground}
                 />
               </GoldGradient>
             </Pressable>

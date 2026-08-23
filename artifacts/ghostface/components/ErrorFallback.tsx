@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
 import { GoldGradient } from "@/components/GoldGradient";
 import { boxShadow } from "@/lib/shadow";
 import { type } from "@/constants/typography";
@@ -25,6 +26,8 @@ export type ErrorFallbackProps = {
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { themePreference } = useApp();
+  const isLight = themePreference === "light";
 
   const [isModalVisible, setIsModalVisible] = useState(false);
 
@@ -92,7 +95,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             <Text
               style={[
                 styles.buttonText,
-                { color: "#FFFFFF" },
+                { color: isLight ? colors.primaryForeground : "#FFFFFF" },
               ]}
             >
               Try Again

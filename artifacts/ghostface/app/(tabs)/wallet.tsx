@@ -54,7 +54,9 @@ export default function WalletScreen() {
     hasWalletPin,
     walletUnlocked,
     checkWalletPin,
+    themePreference,
   } = useApp();
+  const isLight = themePreference === "light";
   const { scrollRef, onScroll } = useScrollPersist<ScrollView>();
 
   const [gatePin, setGatePin] = useState("");
@@ -411,7 +413,7 @@ export default function WalletScreen() {
     connectBtnText: {
       ...type.labelStrong,
       fontSize: 11,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     tokenSelector: {
       flexDirection: "row",
@@ -809,7 +811,7 @@ export default function WalletScreen() {
       ...type.labelStrong,
       fontSize: 12,
       letterSpacing: 1.5,
-      color: "#FFFFFF",
+      color: isLight ? colors.primaryForeground : "#FFFFFF",
     },
     cancelBtn: {
       alignItems: "center",
@@ -865,7 +867,7 @@ export default function WalletScreen() {
     error: { ...type.labelStrong, color: colors.destructive },
     unlockBtn: { width: "100%", borderRadius: colors.radius, overflow: "hidden", marginTop: 4 },
     unlockBtnInner: { paddingVertical: 14, alignItems: "center" },
-    unlockBtnTxt: { ...type.labelStrong, color: "#FFFFFF", fontSize: 12 },
+    unlockBtnTxt: { ...type.labelStrong, color: isLight ? colors.primaryForeground : "#FFFFFF", fontSize: 12 },
   });
 
   if (hasWalletPin && !walletUnlocked) {
@@ -897,7 +899,7 @@ export default function WalletScreen() {
           >
             <GoldGradient style={gateStyles.unlockBtnInner}>
               {gateChecking ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={isLight ? colors.primaryForeground : "#FFFFFF"} />
               ) : (
                 <Text style={gateStyles.unlockBtnTxt}>UNLOCK</Text>
               )}
@@ -976,7 +978,7 @@ export default function WalletScreen() {
               }}
             >
               <GoldGradient style={styles.connectBtnInner}>
-                <Ionicons name="link" size={14} color="#FFFFFF" />
+                <Ionicons name="link" size={14} color={isLight ? colors.primaryForeground : "#FFFFFF"} />
                 <Text style={styles.connectBtnText}>LINK WALLET</Text>
               </GoldGradient>
             </Pressable>
@@ -998,7 +1000,14 @@ export default function WalletScreen() {
             <Text
               style={[
                 styles.tokenTabText,
-                { color: activeToken === "FD" ? "#FFFFFF" : colors.mutedForeground },
+                {
+                  color:
+                    activeToken === "FD"
+                      ? isLight
+                        ? colors.primaryForeground
+                        : "#FFFFFF"
+                      : colors.mutedForeground,
+                },
               ]}
             >
               {secondTokenSymbol}
@@ -1017,7 +1026,14 @@ export default function WalletScreen() {
             <Text
               style={[
                 styles.tokenTabText,
-                { color: activeToken === "CASPER" ? "#FFFFFF" : colors.mutedForeground },
+                {
+                  color:
+                    activeToken === "CASPER"
+                      ? isLight
+                        ? colors.primaryForeground
+                        : "#FFFFFF"
+                      : colors.mutedForeground,
+                },
               ]}
             >
               {casperSymbol}
@@ -1218,9 +1234,9 @@ export default function WalletScreen() {
               >
                 <GoldGradient style={styles.modalBtnInner}>
                 {connecting ? (
-                  <ActivityIndicator size="small" color="#FFF" />
+                  <ActivityIndicator size="small" color={isLight ? colors.primaryForeground : "#FFF"} />
                 ) : (
-                  <Ionicons name="link" size={14} color="#FFF" />
+                  <Ionicons name="link" size={14} color={isLight ? colors.primaryForeground : "#FFF"} />
                 )}
                 <Text style={styles.modalBtnText}>
                   {connecting ? "LINKING..." : "LINK WALLET"}
