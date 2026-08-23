@@ -6,3 +6,4 @@ export * from "./invites";
 export * from "./departures";
 export * from "./payments";
 export * from "./reclaim";
+export * from "./vpn";
