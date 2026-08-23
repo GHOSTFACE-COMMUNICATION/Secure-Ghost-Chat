@@ -1374,11 +1374,11 @@ export default function SettingsScreen() {
 
         <Text style={[styles.sectionHeader, { color: colors.destructive }]}>DANGER ZONE</Text>
         <View style={styles.panicSection}>
-          <PanicButton onWipe={handlePanicWipe} />
+          <PanicButton onWipe={handlePanicWipe} scale={0.5} />
         </View>
 
         <View style={styles.versionSection}>
-          <GhostLogo size={50} color={colors.border} />
+          <GhostLogo size={75} color={colors.border} />
           <Text style={styles.versionText}>GHOSTFACE® v{appVersion}</Text>
           <Text style={styles.versionText}>NO FACE. NO TRACE.</Text>
         </View>

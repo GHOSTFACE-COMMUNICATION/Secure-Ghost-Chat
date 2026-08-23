@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -14,7 +15,15 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { boxShadow } from "@/lib/shadow";
+import { SpecularHighlight } from "@/components/GoldGradient";
 import { type } from "@/constants/typography";
+
+// Same reasoning as GoldGradient's GLASS_TINT_BLACK/GOLD_GLASS_TINT: this
+// button's backdrop (Settings' flat black DANGER ZONE section) has nothing
+// behind it to refract, and low-alpha tints read as dead/brown against pure
+// black — so this needs the same high-alpha treatment as gold, just red.
+const RED_GLASS_TINT = "rgba(239,68,68,0.75)";
+const useNativeGlass = isLiquidGlassAvailable();
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -298,26 +307,46 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
           onPressOut={cancelPanic}
           testID="panic-btn"
         >
-          <LinearGradient
-            colors={["#ff6b6b", "#ef4444", "#b91c1c", "#7f1d1d"]}
-            locations={[0, 0.45, 0.75, 1]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={[
-              styles.btn,
-              { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
-            ]}
-          >
-            {panicHeld && (
-              <View
-                style={[styles.progressFill, { width: `${panicProgress}%` }]}
-              />
-            )}
-            <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-            <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
-              {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
-            </Text>
-          </LinearGradient>
+          {useNativeGlass ? (
+            <GlassView
+              style={[
+                styles.btn,
+                { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
+              ]}
+              glassEffectStyle="clear"
+              tintColor={RED_GLASS_TINT}
+              isInteractive
+            >
+              <SpecularHighlight intensity={0.22} />
+              {panicHeld && (
+                <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
+              )}
+              <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
+              <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
+                {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
+              </Text>
+            </GlassView>
+          ) : (
+            <BlurView
+              intensity={32}
+              tint="dark"
+              style={[
+                styles.btn,
+                { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
+              ]}
+            >
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000000" }]} />
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: RED_GLASS_TINT }]} />
+              <SpecularHighlight intensity={0.22} />
+              {panicHeld && (
+                <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
+              )}
+              <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
+              <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
+                {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
+              </Text>
+            </BlurView>
+          )}
         </Pressable>
       </View>
     </>

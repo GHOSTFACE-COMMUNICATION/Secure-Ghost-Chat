@@ -26,23 +26,23 @@ const CRYPTO_SPECS: AuditItem[] = [
   { label: "SEALED SENDER", value: "ACTIVE", status: "pass", detail: "Sender ID hidden inside ciphertext — server sees only recipient" },
 ];
 
-const SIGNAL_COMPARISON: { feature: string; signal: boolean; ghost: boolean; note?: string }[] = [
-  { feature: "End-to-End Encryption", signal: true, ghost: true },
-  { feature: "Authenticated Encryption", signal: true, ghost: true, note: "AEAD via Poly1305" },
-  { feature: "Forward Secrecy", signal: true, ghost: true },
-  { feature: "Disappearing Messages", signal: true, ghost: true },
-  { feature: "Safety Number Verification", signal: true, ghost: true },
-  { feature: "Message Fingerprints", signal: true, ghost: true },
-  { feature: "No Phone Number Required", signal: false, ghost: true, note: "Alias only" },
-  { feature: "Encrypted Invite Codes", signal: false, ghost: true },
-  { feature: "Voice Changer", signal: false, ghost: true },
-  { feature: "Panic Wipe", signal: false, ghost: true },
-  { feature: "PIN + Biometric Lock", signal: true, ghost: true },
-  { feature: "Crypto Wallet", signal: false, ghost: true },
-  { feature: "VPN Dashboard", signal: false, ghost: true },
-  { feature: "Open Source Protocol", signal: true, ghost: false, note: "Proprietary — future roadmap" },
-  { feature: "Sealed Sender", signal: true, ghost: true, note: "Sender identity encrypted inside ciphertext" },
-  { feature: "Full Double Ratchet", signal: true, ghost: true, note: "X3DH handshake + per-message ratchet" },
+const SECURITY_FEATURES: { feature: string; active: boolean; note?: string }[] = [
+  { feature: "End-to-End Encryption", active: true },
+  { feature: "Authenticated Encryption", active: true, note: "AEAD via Poly1305" },
+  { feature: "Forward Secrecy", active: true },
+  { feature: "Disappearing Messages", active: true },
+  { feature: "Safety Number Verification", active: true },
+  { feature: "Message Fingerprints", active: true },
+  { feature: "No Phone Number Required", active: true, note: "Alias only" },
+  { feature: "Encrypted Invite Codes", active: true },
+  { feature: "Voice Changer", active: true },
+  { feature: "Panic Wipe", active: true },
+  { feature: "PIN + Biometric Lock", active: true },
+  { feature: "Crypto Wallet", active: true },
+  { feature: "VPN Dashboard", active: true },
+  { feature: "Open Source Protocol", active: false, note: "Proprietary — future roadmap" },
+  { feature: "Sealed Sender", active: true, note: "Sender identity encrypted inside ciphertext" },
+  { feature: "Full Double Ratchet", active: true, note: "X3DH handshake + per-message ratchet" },
 ];
 
 export default function SecurityAuditScreen() {
@@ -105,19 +105,6 @@ export default function SecurityAuditScreen() {
     auditDetail: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 1, marginTop: 2, opacity: 0.7 },
     auditRight: { flexDirection: "row", alignItems: "center", gap: 6 },
     auditValue: { ...type.labelStrong },
-    compareRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingVertical: 10,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-      gap: 8,
-    },
-    compareFeature: { flex: 1, color: colors.foreground, fontSize: 11, letterSpacing: 1 },
-    compareNote: { color: colors.mutedForeground, fontSize: 9, letterSpacing: 1, marginTop: 2 },
-    compareCol: { width: 40, alignItems: "center" },
-    compareHead: { width: 40, alignItems: "center" },
-    compareHeadTxt: { ...type.micro },
     deviceRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -136,8 +123,8 @@ export default function SecurityAuditScreen() {
     },
   });
 
-  const passCount = SIGNAL_COMPARISON.filter((r) => r.ghost).length;
-  const totalCount = SIGNAL_COMPARISON.length;
+  const passCount = SECURITY_FEATURES.filter((r) => r.active).length;
+  const totalCount = SECURITY_FEATURES.length;
   const score = Math.round((passCount / totalCount) * 100);
 
   return (
@@ -157,7 +144,7 @@ export default function SecurityAuditScreen() {
           <View style={s.scoreCard}>
             <Text style={s.scoreNum}>{score}</Text>
             <Text style={s.scoreLabel}>/ 100</Text>
-            <Text style={s.scoreNote}>{passCount}/{totalCount} FEATURES ACTIVE vs SIGNAL</Text>
+            <Text style={s.scoreNote}>{passCount}/{totalCount} FEATURES ACTIVE</Text>
           </View>
         </View>
 
@@ -206,43 +193,6 @@ export default function SecurityAuditScreen() {
               </View>
             ))}
           </View>
-        </View>
-
-        {/* Signal comparison */}
-        <View style={s.section}>
-          <Text style={s.sectionLabel}>FEATURE COMPARISON: SIGNAL vs GHOSTFACE</Text>
-          {/* Header row */}
-          <View style={[s.compareRow, { borderBottomWidth: 2, borderBottomColor: colors.border }]}>
-            <Text style={[s.compareFeature, { color: colors.mutedForeground, fontSize: 9, letterSpacing: 2 }]}>FEATURE</Text>
-            <View style={s.compareHead}>
-              <Text style={[s.compareHeadTxt, { color: colors.mutedForeground }]}>SIGNAL</Text>
-            </View>
-            <View style={s.compareHead}>
-              <Text style={[s.compareHeadTxt, { color: colors.primary }]}>GHOST</Text>
-            </View>
-          </View>
-          {SIGNAL_COMPARISON.map((row) => (
-            <View key={row.feature} style={s.compareRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.compareFeature}>{row.feature}</Text>
-                {row.note && <Text style={s.compareNote}>{row.note}</Text>}
-              </View>
-              <View style={s.compareCol}>
-                <Ionicons
-                  name={row.signal ? "checkmark-circle" : "remove-circle-outline"}
-                  size={18}
-                  color={row.signal ? colors.success : colors.mutedForeground}
-                />
-              </View>
-              <View style={s.compareCol}>
-                <Ionicons
-                  name={row.ghost ? "checkmark-circle" : "remove-circle-outline"}
-                  size={18}
-                  color={row.ghost ? colors.success : colors.mutedForeground}
-                />
-              </View>
-            </View>
-          ))}
         </View>
 
         <Text style={s.footer}>

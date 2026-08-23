@@ -23,7 +23,6 @@ import { useApp } from "@/context/AppContext";
 import { boxShadow } from "@/lib/shadow";
 
 const BG = "#000";
-const GOLD = "#F5D26B";
 // Real native Liquid Glass (iOS 26+, via expo-glass-effect) for the radial
 // menu nodes where available; older iOS/Android keep the BlurView +
 // gradient approximation below. Black tint (same as every other gold-glass
@@ -406,10 +405,7 @@ export default function HomeScreen() {
                     menuOpen ? "Hide menu" : "Tap to reveal menu"
                   }
                 >
-                  {/* Outer ambient glow */}
-                  <View pointerEvents="none" style={styles.globeGlow} />
-
-                  {/* Fake thickness: gold edge band flashes when edge-on */}
+                  {/* Fake thickness: edge band flashes when edge-on */}
                   <Animated.View
                     pointerEvents="none"
                     style={[
@@ -646,35 +642,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  globeGlow: {
-    position: "absolute",
-    width: 260,
-    height: 260,
-    top: (196 - 260) / 2,
-    left: (196 - 260) / 2,
-    borderRadius: 130,
-    backgroundColor: "rgba(245,210,107,0.06)",
-    boxShadow: boxShadow(GOLD, 0.55, 50),
-  },
-  // Metallic coin rim — conic-gradient-style gold ring
+  // Metallic coin rim — conic-gradient-style white/silver ring
   coinRim: {
     width: 190,
     height: 190,
     borderRadius: 95,
     padding: 5,
     borderWidth: 4,
-    borderColor: "rgba(245,210,107,0.0)", // transparent — visual ring comes from backgroundColor
-    backgroundColor: "#c9971c",
+    borderColor: "rgba(255,255,255,0.0)", // transparent — visual ring comes from backgroundColor
+    backgroundColor: "#d4d4d8",
     alignItems: "center",
     justifyContent: "center",
     boxShadow: [
-      boxShadow(GOLD, 0.7, 18),
-      "inset 0 2px 6px rgba(255,235,120,0.5)",
-      "inset 0 -4px 10px rgba(50,32,0,0.6)",
+      boxShadow("#FFFFFF", 0.45, 18),
+      "inset 0 2px 6px rgba(255,255,255,0.6)",
+      "inset 0 -4px 10px rgba(20,20,24,0.5)",
     ].join(", "),
     overflow: "hidden",
   },
-  // Fake coin thickness — vertical gold band shown when the coin is edge-on
+  // Fake coin thickness — vertical white/silver band shown when the coin is edge-on
   coinEdgeBand: {
     position: "absolute",
     width: 16,
@@ -682,19 +668,19 @@ const styles = StyleSheet.create({
     top: (196 - 190) / 2,
     left: (196 - 16) / 2,
     borderRadius: 8,
-    backgroundColor: "#8a6a12",
+    backgroundColor: "#8a8a92",
     alignItems: "center",
     justifyContent: "center",
     boxShadow: [
-      boxShadow(GOLD, 0.8, 14),
-      "inset 0 0 4px rgba(30,20,0,0.7)",
+      boxShadow("#FFFFFF", 0.5, 14),
+      "inset 0 0 4px rgba(20,20,24,0.7)",
     ].join(", "),
   },
   coinEdgeHighlight: {
     width: 4,
     height: 176,
     borderRadius: 2,
-    backgroundColor: "rgba(255,222,110,0.75)",
+    backgroundColor: "rgba(255,255,255,0.85)",
   },
   coinImage: {
     width: 176,
