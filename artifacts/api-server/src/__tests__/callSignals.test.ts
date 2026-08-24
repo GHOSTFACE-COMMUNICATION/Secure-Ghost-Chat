@@ -148,6 +148,11 @@ function sentOfType(ws: FakeWs, type: string): Record<string, unknown>[] {
 
 async function flush() {
   for (let i = 0; i < 5; i++) await Promise.resolve();
+  // Then yield the macrotask queue once, which drains every microtask still
+  // pending. Counting microtask turns is fragile: it silently breaks whenever
+  // the code under test grows an await, which is exactly what happened when
+  // the WS handlers moved to Redis-backed shared state.
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 function sleep(ms: number) {

@@ -22,6 +22,7 @@ import {
 } from "../utils/delivery";
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
 import { markMessagesDelivered, markDeparturesDelivered } from "../utils/markDelivered";
+import * as shared from "./sharedState";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
 // Compressed frames are an untrusted, attacker-controllable input even
@@ -155,30 +156,17 @@ const CALL_WAKE_POLL_MS = 500;
 // second call-ring for a pair that already has an entry is rejected
 // immediately with a distinct "busy" hangup instead of stacking a parallel
 // attempt on top of the existing one.
-interface ActiveCall {
-  callId: string;
-  caller: string;
-  callee: string;
-  startedAt: number;
-}
-const activeCallsByPair = new Map<string, ActiveCall>();
-
-// Safety valve: if a hangup is ever lost (crash, dropped frame, a future
-// bug in this cleanup) a stuck entry would otherwise block this pair from
-// ever calling each other again. No real call lasts this long, so treat an
-// entry older than this as abandoned and let a new call-ring through.
-const MAX_CALL_AGE_MS = 2 * 60 * 60 * 1000;
+// Call state, ghostpad pairing, deferred hangups and presence all moved to
+// ./sharedState — see the note there. MAX_CALL_AGE_MS is now the TTL on the
+// Redis key, so the "abandoned call" safety valve is enforced by expiry rather
+// than by a comparison on read.
 
 function callPairKey(a: string, b: string): string {
   return [a, b].sort().join(":");
 }
 
-function clearActiveCall(a: string, b: string, callId?: string): void {
-  const key = callPairKey(a, b);
-  const existing = activeCallsByPair.get(key);
-  if (existing && (!callId || existing.callId === callId)) {
-    activeCallsByPair.delete(key);
-  }
+async function clearActiveCall(a: string, b: string, callId?: string): Promise<void> {
+  await shared.clearActiveCall(callPairKey(a, b), callId);
 }
 
 // ── Deferred hangups for offline callees ────────────────────────────────────
@@ -192,28 +180,9 @@ function clearActiveCall(a: string, b: string, callId?: string): void {
 // dismisses the banner and tells CallKit "unanswered". Held per-alias with a
 // short TTL — after the ring has long timed out on its own, a hangup is
 // just noise.
-const PENDING_HANGUP_TTL_MS = 60_000;
-const pendingCallHangups = new Map<string, { from: string; callId?: string; queuedAt: number }[]>();
-
-function queueCallHangup(toAlias: string, from: string, callId?: string): void {
-  const now = Date.now();
-  const list = (pendingCallHangups.get(toAlias) ?? []).filter(
-    (h) => now - h.queuedAt < PENDING_HANGUP_TTL_MS,
-  );
-  // One pending hangup per callId is enough; duplicates add nothing.
-  if (!list.some((h) => h.callId === callId)) {
-    list.push({ from, callId, queuedAt: now });
-  }
-  pendingCallHangups.set(toAlias, list);
-}
-
-function deliverPendingCallHangups(alias: string, ws: WebSocket): void {
-  const list = pendingCallHangups.get(alias);
-  if (!list?.length) return;
-  pendingCallHangups.delete(alias);
-  const now = Date.now();
+async function deliverPendingCallHangups(alias: string, ws: WebSocket): Promise<void> {
+  const list = await shared.takePendingCallHangups(alias);
   for (const h of list) {
-    if (now - h.queuedAt >= PENDING_HANGUP_TTL_MS) continue;
     ws.send(JSON.stringify({ type: "call-hangup", from: h.from, callId: h.callId }));
     logger.debug({ alias, from: h.from, callId: h.callId }, "Deferred call-hangup delivered on reconnect");
   }
@@ -234,39 +203,14 @@ async function waitForReconnect(alias: string, timeoutMs: number): Promise<Authe
 // wipe events relay directly between them (same shape as CALL_SIGNAL_TYPES
 // above) and never touch the database. Both maps are pure in-memory routing
 // state — they hold no content, only which alias is waiting/paired with whom.
-const GHOSTPAD_CODE_TTL_MS = 5 * 60_000;
-const ghostpadCodes = new Map<string, { alias: string; expiresAt: number }>();
-const ghostpadPartners = new Map<string, string>(); // alias -> paired alias
-
-// ── Presence: online/offline for an explicitly-opened conversation ─────────
-// Same "less metadata-blind" tier as call signalling above (which already
-// puts to/from aliases on the wire) — this is not a new category of leak,
-// just extending that tier to cover presence. Subscriptions are purely
-// in-memory and scoped to "which alias is watching which alias", never
-// persisted, and torn down on unsubscribe or disconnect.
-//
-// Mutual-only by design: there's deliberately no server-side contacts/
-// relationship table anywhere in this app (POST /invites/:code/consume
-// never even records who redeemed a code) — the server is never supposed
-// to learn who talks to whom. So presence can't be gated on "are these two
-// actually in a conversation" the way a normal app would. Instead, alias A
-// only ever learns alias B's online status once B has *also* subscribed to
-// A — a one-directional subscribe (watching someone who doesn't know it)
-// delivers nothing. In practice this only lights up between two people who
-// both have each other's chat open, which is what legitimate use looks
-// like, without the server needing to persist a social graph to enforce it.
-const presenceSubscribers = new Map<string, Set<string>>(); // target alias -> watcher aliases
 const MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET = 200;
 
-function mutuallySubscribed(a: string, b: string): boolean {
-  return !!presenceSubscribers.get(a)?.has(b) && !!presenceSubscribers.get(b)?.has(a);
-}
-
-function notifyPresence(alias: string, online: boolean): void {
-  const watchers = presenceSubscribers.get(alias);
-  if (!watchers || watchers.size === 0) return;
+async function notifyPresence(alias: string, online: boolean): Promise<void> {
+  const watchers = await shared.getWatchers(alias);
+  if (watchers.length === 0) return;
   for (const watcherAlias of watchers) {
-    if (!mutuallySubscribed(alias, watcherAlias)) continue;
+    // Mutual-only, unchanged: a one-directional subscribe reveals nothing.
+    if (!(await shared.mutuallySubscribed(alias, watcherAlias))) continue;
     const watcher = connectedClients.get(watcherAlias);
     if (watcher && watcher.ws.readyState === WebSocket.OPEN) {
       watcher.ws.send(JSON.stringify({ type: "presence", from: alias, online }));
@@ -274,37 +218,13 @@ function notifyPresence(alias: string, online: boolean): void {
   }
 }
 
-function generateGhostpadCode(): string {
-  let code: string;
-  do {
-    code = String(Math.floor(100000 + Math.random() * 900000));
-  } while (ghostpadCodes.has(code));
-  return code;
-}
-
-function sweepExpiredGhostpadCodes(): void {
-  const now = Date.now();
-  for (const [code, entry] of ghostpadCodes) {
-    if (entry.expiresAt <= now) ghostpadCodes.delete(code);
-  }
-}
-
 /** Tear down alias's pairing (if any) and tell the partner it ended. */
-function endGhostpadSession(alias: string): void {
-  const partnerAlias = ghostpadPartners.get(alias);
+async function endGhostpadSession(alias: string): Promise<void> {
+  const partnerAlias = await shared.clearGhostpadPair(alias);
   if (!partnerAlias) return;
-  ghostpadPartners.delete(alias);
-  ghostpadPartners.delete(partnerAlias);
   const partner = connectedClients.get(partnerAlias);
   if (partner && partner.ws.readyState === WebSocket.OPEN) {
     partner.ws.send(JSON.stringify({ type: "ghostpad-ended" }));
-  }
-}
-
-/** Drop any pending (unredeemed) code this alias created. */
-function revokeGhostpadCode(alias: string): void {
-  for (const [code, entry] of ghostpadCodes) {
-    if (entry.alias === alias) ghostpadCodes.delete(code);
   }
 }
 
@@ -400,13 +320,26 @@ export function createWsServer(wss: WebSocketServer): void {
       ws.isAlive = false;
       ws.ping();
     });
+
+    // Refresh presence for everyone this replica holds. PRESENCE_TTL_MS is 3x
+    // this interval, so two missed refreshes are tolerated before a live user
+    // reads as offline — at 1x, a slightly late tick would flicker them off
+    // and fire spurious presence events at every watcher.
+    void (async () => {
+      for (const [alias, client] of connectedClients) {
+        if (client.ws.readyState !== WebSocket.OPEN) continue;
+        try {
+          await shared.setPresence(alias);
+        } catch (err) {
+          logger.warn({ err, alias }, "presence refresh failed");
+        }
+      }
+    })();
   }, 30_000);
 
-  const ghostpadSweepInterval = setInterval(sweepExpiredGhostpadCodes, 60_000);
 
   wss.on("close", () => {
     clearInterval(heartbeatInterval);
-    clearInterval(ghostpadSweepInterval);
   });
 
   wss.on("connection", (rawWs: WebSocket, _req: IncomingMessage) => {
@@ -418,30 +351,31 @@ export function createWsServer(wss: WebSocketServer): void {
     let authedDeliveryId: string | null = null;
     const myPresenceSubscriptions = new Set<string>(); // targets this socket is watching
 
-    const cleanup = () => {
-      if (authedAlias) {
-        connectedClients.delete(authedAlias);
+    const cleanup = async () => {
+      if (!authedAlias) return;
+      const alias = authedAlias;
+      connectedClients.delete(alias);
+      try {
+        // Presence goes first: everything below is best-effort, and a watcher
+        // seeing a stale "online" is the most visible failure here.
+        await shared.clearPresence(alias);
         // A dropped connection mid-call must release its pair lock too,
         // otherwise this alias can never call (or be called by) the other
-        // party again until the stale entry ages out.
-        for (const [pairKey, call] of activeCallsByPair) {
-          if (call.caller === authedAlias || call.callee === authedAlias) {
-            activeCallsByPair.delete(pairKey);
-          }
-        }
-        revokeGhostpadCode(authedAlias);
-        endGhostpadSession(authedAlias);
-        for (const target of myPresenceSubscriptions) {
-          presenceSubscribers.get(target)?.delete(authedAlias);
-        }
-        notifyPresence(authedAlias, false);
+        // party again until the entry ages out.
+        await shared.clearCallsForAlias(alias);
+        await shared.revokeGhostpadCode(alias);
+        await endGhostpadSession(alias);
+        await shared.clearSubscriptions(alias);
+        await notifyPresence(alias, false);
+      } catch (err) {
+        logger.warn({ err, alias }, "WS cleanup failed");
       }
     };
 
-    ws.on("close", cleanup);
+    ws.on("close", () => void cleanup());
     ws.on("error", (err) => {
       logger.warn({ err }, "WebSocket error");
-      cleanup();
+      void cleanup();
     });
 
     ws.on("message", async (raw: Buffer | string) => {
@@ -487,11 +421,12 @@ export function createWsServer(wss: WebSocketServer): void {
         if (authedDeliveryId) deliveryIdToAlias.set(authedDeliveryId, authedAlias);
         ws.send(JSON.stringify({ type: "ack", alias: authedAlias }));
         logger.info({ alias: authedAlias }, "WS client authenticated");
-        notifyPresence(authedAlias, true);
+        await shared.setPresence(authedAlias);
+        await notifyPresence(authedAlias, true);
 
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
-        deliverPendingCallHangups(authedAlias, ws);
+        await deliverPendingCallHangups(authedAlias, ws);
         return;
       }
 
@@ -564,8 +499,8 @@ export function createWsServer(wss: WebSocketServer): void {
 
         if (msg.type === "call-ring") {
           const pairKey = callPairKey(authedAlias, toAlias);
-          const existingCall = activeCallsByPair.get(pairKey);
-          if (existingCall && Date.now() - existingCall.startedAt < MAX_CALL_AGE_MS) {
+          const existingCall = await shared.getActiveCall(pairKey);
+          if (existingCall && Date.now() - existingCall.startedAt < shared.MAX_CALL_AGE_MS) {
             // This pair already has a call ringing or in progress (its own
             // callId, tracked separately) — reject this one immediately
             // rather than sending a second independent VoIP push/CallKit
@@ -584,14 +519,14 @@ export function createWsServer(wss: WebSocketServer): void {
             );
             return;
           }
-          activeCallsByPair.set(pairKey, {
+          await shared.setActiveCall(pairKey, {
             callId: msg.callId ?? "",
             caller: authedAlias,
             callee: toAlias,
             startedAt: Date.now(),
           });
         } else if (msg.type === "call-hangup") {
-          clearActiveCall(authedAlias, toAlias, msg.callId);
+          await clearActiveCall(authedAlias, toAlias, msg.callId);
         }
 
         // Callee isn't connected — before giving up, try to wake their device
@@ -661,7 +596,7 @@ export function createWsServer(wss: WebSocketServer): void {
         // duplicate if the deferred-hangup queue already delivered one —
         // notifyCallEnded is idempotent client-side).
         if (msg.type === "call-ring") {
-          const parked = activeCallsByPair.get(callPairKey(authedAlias, toAlias));
+          const parked = await shared.getActiveCall(callPairKey(authedAlias, toAlias));
           if (!parked || parked.callId !== (msg.callId ?? "")) {
             if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
               recipient.ws.send(
@@ -684,7 +619,7 @@ export function createWsServer(wss: WebSocketServer): void {
           // dropping it (see pendingCallHangups above). This is the caller
           // hanging up while the callee's phone is still ringing from the
           // VoIP push: the hangup must survive until that device connects.
-          queueCallHangup(toAlias, authedAlias, msg.callId);
+          await shared.queueCallHangup(toAlias, authedAlias, msg.callId);
           logger.debug(
             { from: authedAlias, to: toAlias, callId: msg.callId },
             "call-hangup queued for offline callee",
@@ -702,16 +637,22 @@ export function createWsServer(wss: WebSocketServer): void {
             }),
           );
           logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
-          clearActiveCall(authedAlias, toAlias, msg.callId);
+          await clearActiveCall(authedAlias, toAlias, msg.callId);
         }
         return;
       }
 
       // ── Ghostpad — ephemeral shared scratchpad, never persisted ─────────────
       if (msg.type === "ghostpad-create") {
-        revokeGhostpadCode(authedAlias); // one pending code per alias at a time
-        const code = generateGhostpadCode();
-        ghostpadCodes.set(code, { alias: authedAlias, expiresAt: Date.now() + GHOSTPAD_CODE_TTL_MS });
+        await shared.revokeGhostpadCode(authedAlias); // one pending code per alias
+        // Claimed atomically (SET NX): with more than one replica a local
+        // uniqueness check would let two processes mint the same code, and a
+        // duplicate would pair a joiner with the wrong person.
+        const code = await shared.claimGhostpadCode(authedAlias);
+        if (!code) {
+          ws.send(JSON.stringify({ type: "ghostpad-error", text: "Could not create a code, try again" }));
+          return;
+        }
         ws.send(JSON.stringify({ type: "ghostpad-created", code }));
         return;
       }
@@ -721,25 +662,23 @@ export function createWsServer(wss: WebSocketServer): void {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "Code required" }));
           return;
         }
-        const entry = ghostpadCodes.get(msg.code);
-        if (!entry || entry.expiresAt <= Date.now()) {
-          ghostpadCodes.delete(msg.code);
+        // Redeemed with GETDEL — single-use, and two joiners racing the same
+        // code cannot both win.
+        const creatorAlias = await shared.redeemGhostpadCode(msg.code);
+        if (!creatorAlias) {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "Code expired or invalid" }));
           return;
         }
-        if (entry.alias === authedAlias) {
+        if (creatorAlias === authedAlias) {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "Cannot pair with yourself" }));
           return;
         }
-        ghostpadCodes.delete(msg.code); // single-use
-        const creatorAlias = entry.alias;
         const creator = connectedClients.get(creatorAlias);
         if (!creator || creator.ws.readyState !== WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "The other side disconnected" }));
           return;
         }
-        ghostpadPartners.set(authedAlias, creatorAlias);
-        ghostpadPartners.set(creatorAlias, authedAlias);
+        await shared.setGhostpadPair(authedAlias, creatorAlias);
         ws.send(JSON.stringify({ type: "ghostpad-paired" }));
         creator.ws.send(JSON.stringify({ type: "ghostpad-paired" }));
         logger.debug({ a: authedAlias, b: creatorAlias }, "Ghostpad paired");
@@ -747,7 +686,7 @@ export function createWsServer(wss: WebSocketServer): void {
       }
 
       if (msg.type === "ghostpad-text" || msg.type === "ghostpad-wipe") {
-        const partnerAlias = ghostpadPartners.get(authedAlias);
+        const partnerAlias = await shared.getGhostpadPartner(authedAlias);
         const partner = partnerAlias ? connectedClients.get(partnerAlias) : undefined;
         if (partner && partner.ws.readyState === WebSocket.OPEN) {
           partner.ws.send(JSON.stringify({ type: msg.type, text: msg.text }));
@@ -756,7 +695,7 @@ export function createWsServer(wss: WebSocketServer): void {
       }
 
       if (msg.type === "ghostpad-leave") {
-        endGhostpadSession(authedAlias);
+        await endGhostpadSession(authedAlias);
         return;
       }
 
@@ -784,16 +723,15 @@ export function createWsServer(wss: WebSocketServer): void {
         if (myPresenceSubscriptions.size >= MAX_PRESENCE_SUBSCRIPTIONS_PER_SOCKET) return;
         const targetAlias = normalizeAlias(msg.to);
         if (!targetAlias) return;
-        if (!presenceSubscribers.has(targetAlias)) presenceSubscribers.set(targetAlias, new Set());
-        presenceSubscribers.get(targetAlias)!.add(authedAlias);
+        await shared.addSubscription(authedAlias, targetAlias);
         myPresenceSubscriptions.add(targetAlias);
         // Mutual-only (see comment on presenceSubscribers above) — a
         // one-directional subscribe reveals nothing. Once this subscribe
         // completes reciprocity, tell both sides each other's status; the
         // other side may have been sitting on a one-directional subscribe
         // of their own for a while, waiting for exactly this.
-        if (mutuallySubscribed(authedAlias, targetAlias)) {
-          ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: connectedClients.has(targetAlias) }));
+        if (await shared.mutuallySubscribed(authedAlias, targetAlias)) {
+          ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: await shared.isOnline(targetAlias) }));
           const target = connectedClients.get(targetAlias);
           if (target && target.ws.readyState === WebSocket.OPEN) {
             target.ws.send(JSON.stringify({ type: "presence", from: authedAlias, online: true }));
@@ -806,7 +744,7 @@ export function createWsServer(wss: WebSocketServer): void {
         if (!msg.to) return;
         const targetAlias = normalizeAlias(msg.to);
         if (!targetAlias) return;
-        presenceSubscribers.get(targetAlias)?.delete(authedAlias);
+        await shared.removeSubscription(authedAlias, targetAlias);
         myPresenceSubscriptions.delete(targetAlias);
         return;
       }
