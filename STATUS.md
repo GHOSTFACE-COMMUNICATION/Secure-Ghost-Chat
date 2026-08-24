@@ -4,9 +4,233 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-22 (Cowork session — GF-01 US counsel outreach,
-Gmail connector live, Google account recovered, Apple org migration
-in flight)
+Last updated: 2026-08-24 (Claude Code session — VPN health check found the
+peer agent hard-wedged and the box unfirewalled: see ACTIVE INCIDENT below.
+Earlier the same day: WireGuard native client — PacketTunnelProvider.swift +
+native bridge module both written; full-app build blocked by an unrelated
+fmt/Clang compiler bug — needs Benji's call on how to proceed)
+
+## 🔴 ACTIVE INCIDENT — VPN peer agent down, box unfirewalled (24 Aug)
+
+Found by a read-only health check on 24 Aug ~08:50 UTC. **Nothing was changed
+or fixed** — report-before-code. Full writeup was in the session scratchpad;
+the substance is here.
+
+**P0 — `vpn-agent` on `ghostface-vpn-eu1` is hard-wedged, and has never once
+served a successful request.** systemd reports `active (running)`, so nothing
+alerts, but the process answers nothing.
+- pid 3443 is single-threaded (`nlwp 1`) and blocked in `tcp_recvmsg` /
+  `sk_wait_data` reading fd 4 — an ESTAB connection from 129.213.151.234
+  (Oracle Cloud, unrecognised). Listener sits at `Recv-Q 6 / Send-Q 5`: the
+  accept queue is saturated past its backlog, so new SYNs are dropped and the
+  port reads as "filtered" from outside. Six more conns from that same IP are
+  in CLOSE-WAIT with 1780 unread bytes each. A TLS handshake from *localhost*
+  times out, so this is the process, not the network.
+- Never succeeded since its 23 Aug 07:19:57 start: `/etc/wireguard/wg0.conf`
+  has mtime 23 Aug 06:58:36 — 21 min *before* the agent started — and holds 0
+  `[Peer]` blocks; `wg show` lists no peers. Every successful POST /peer would
+  have rewritten that file. **Any agent testing after 23 Aug 07:19 silently
+  failed.**
+- Root cause in `/etc/vpn-agent/agent.py`: `http.server.HTTPServer` is
+  single-threaded with default `request_queue_size = 5`; no socket or handler
+  timeout is set anywhere; and `ctx.wrap_socket(server.socket, server_side=True)`
+  wraps the *listening* socket, putting the TLS handshake inline in the accept
+  loop. One client that connects and stalls blocks the server forever. Not
+  self-healing — `Restart=` never fires because the process never dies.
+- Zero observability by design: `log_message` is overridden to `pass` (to keep
+  the bearer token out of logs), so there is no request log and no liveness
+  signal. Whatever replaces this needs a `GET /healthz`.
+- Blast radius: all `POST`/`DELETE /vpn/:userId/register` fail. `callAgent`'s
+  `timeout: 8_000` means prod fails cleanly rather than hanging Node — that
+  part is correct. `GET` still works (DB-only). No user impact today: there is
+  no working client yet. No DB/interface drift is possible either, because
+  `POST` calls the agent *before* writing the DB, so a wedged agent inserts
+  nothing. (`select count(*) from vpn_peers` was not run — should be 0.)
+
+**P1 — the box has no firewall at all.** `ufw` is `inactive`; `nft` has no
+`inet filter` table, only NAT/masquerade and a `policy accept` forward chain.
+Ports 22 and 8443 were confirmed reachable from an unprivileged home IP.
+(51820/udp unverified — WireGuard is silent to unauthenticated packets, so no
+reply proves nothing.) This is not a host-vs-Hetzner-Cloud-firewall
+distinction: the Oracle Cloud IP established a TCP connection to 8443, so
+nothing upstream filters it either. That is how it reached and wedged the
+agent. The bearer secret and pinned cert still gate *actions* — this is a
+pre-auth availability hole, not peer injection.
+
+**Verified healthy:** `wg-quick@wg0` active + enabled, wg0 = 10.66.0.1/24 +
+fd66::1/64 on 51820; `ip_forward = 1`; NAT masquerade present (v4 + v6);
+`GET /api/healthz` -> 200; VPN routes mounted with correct auth (401 no token,
+403 bad token); all 5 `VPN_*` env vars present on Railway api-server prod.
+
+**Fix order when Benji calls it:** (1) restart `vpn-agent` — seconds to
+restore, but it will wedge again on the next stalled connection; (2) firewall
+8443 to Railway egress only; (3) fix the agent properly —
+`ThreadingHTTPServer`, per-connection timeout, wrap the socket per-connection
+rather than the listener, add `GET /healthz`.
+
+**Not done:** no live register -> verify -> delete round-trip. It is a prod
+write (inserts `vpn_peers`, mutates `wg0`) and cannot pass until the agent is
+unwedged — ask for it explicitly.
+
+**Bearing on the Mullvad decision: end-to-end is NOT achieved.** Control plane
+up != tunnel works. Do not cancel or downgrade Mullvad.
+
+## 24 Aug session changes (cont.)
+
+- **Native bridge module written, but exposed a second unrelated compiler
+  bug that now blocks the full app build.** `native/vpn-tunnel/` (new dir,
+  survives `expo prebuild --clean` same as `targets/`) holds
+  `VPNTunnelModule.swift` + `.m` — a classic RN native module (`RCTEventEmitter`
+  + `RCT_EXTERN_MODULE`, no new dependency: `expo-modules-core`'s presence
+  was checked but this uses the plain React Native bridge module pattern
+  instead, matching how `react-native-callkeep` etc. already work in this
+  app) exposing `connect(config)`/`disconnect()`/`getStatus()`/`getLastError()`/
+  `getRuntimeConfiguration()` plus a `VPNTunnelStatusDidChange` event, driving
+  `NETunnelProviderManager` from the main app. `lib/vpnTunnelModule.ts` is
+  the typed JS wrapper. `scripts/link-wireguard-kit.mjs` now also links
+  `native/vpn-tunnel/` into the `GHOSTFACE` target as a synchronized group
+  (Xcode 16's folder-reference mechanism, same one `@bacons/apple-targets`
+  already uses for `targets/network-packet-tunnel/`) — verified correct via
+  direct `.pbxproj` inspection (group created, added to `mainGroup`, added to
+  the target's `fileSystemSynchronizedGroups`). tsc clean.
+  - **New blocker, confirmed real via a controlled isolation test (2/2 both
+    ways):** adding this module to the `GHOSTFACE` target's build graph
+    causes `fmt` (pinned to `11.0.2` by RN 0.81's `RCT-Folly` podspec) to be
+    compiled from source instead of coming from React Native's prebuilt
+    `ReactNativeDependencies.xcframework` — and that from-source compile
+    fails deterministically: `error: call to consteval function ... is not a
+    constant expression` in `fmt/format-inl.h`. Root cause understood
+    precisely: `fmt`'s own `base.h` decides whether to trust `consteval`
+    based on `__apple_build_version__ >= 14000029` (a hardcoded "Apple Clang
+    14+ has working consteval" assumption) — true for this machine's
+    bleeding-edge Xcode/Clang, but the assumption is wrong for whatever
+    specific Clang build ships with it. **Not fixable via a build-setting
+    override** — confirmed by testing (`-D FMT_CONSTEVAL=` had zero effect;
+    traced why: `fmt`'s header unconditionally `#define`s `FMT_USE_CONSTEVAL`/
+    `FMT_CONSTEVAL` itself with no `#ifndef` guard, so any externally-injected
+    value gets silently clobbered). A real fix needs either patching `fmt`'s
+    header (via a `Podfile` `post_install` hook — `ios/Podfile` is
+    regenerated every `expo prebuild`, so this would need a config plugin,
+    not a one-off edit) or undefining a libc++ feature-test macro build-wide
+    (`-U__cpp_lib_is_constant_evaluated`), which has a blast radius well
+    past this one library. **Deliberately not applied without asking** — this
+    is the *second* unrelated toolchain bug surfaced by this pre-release
+    macOS 27 + stable Xcode 26.6 combination (first was the Explicit Modules
+    `.pcm` cache bug, see above), and whether to keep patching around this
+    specific OS or wait for a stable release is Benji's call, not mine to
+    make unilaterally.
+  - Not yet root-caused *why* adding one Objective-C-visible native module
+    changes whether `fmt` gets pulled in from source at all — plausible but
+    unconfirmed hypothesis: RN's New Architecture interop layer for legacy
+    bridge modules pulls in Folly-dependent codegen output that the prebuilt
+    binary doesn't cover. Untested whether a TurboModule (proper Codegen'd
+    native module, not the legacy `RCT_EXTERN_MODULE` pattern) would avoid
+    this.
+  - `lib/wireguard.ts` (on-device keypair generation — `@noble/curves`
+    already has `x25519`, no new dependency needed) and wiring
+    `AppContext.tsx`'s mock `connectVPN()`/`disconnectVPN()` to this module
+    are still not started.
+
+## 24 Aug session changes
+
+- **WireGuard native client: full local build now succeeds end-to-end.**
+  Continuing the 23 Aug native-client work below. `networkpackettunnel`
+  (the app extension) now compiles and links cleanly against the real
+  `WireGuardKit`/`WireGuardKitC`/`WireGuardKitGo` core, producing a valid
+  `networkpackettunnel.appex`, via one reproducible command:
+  `npx expo prebuild -p ios --clean && node scripts/link-wireguard-kit.mjs
+  && pnpm run ios:sim:build` (new npm script, `artifacts/ghostface/`).
+  - **Root cause of the prior blocker**: Xcode's Explicit Modules build path
+    hit a non-deterministic "module file ... not found" fatal error compiling
+    `WireGuardKitC`'s C sources — traced to running stable Xcode 26.6 on
+    pre-release macOS 27 (Homebrew itself flags this OS as unsupported).
+    Neither of Benji's two suggestions ("delete xcode better" / "or
+    rocketship") was the actual cause — confirmed via `xcodebuild -version`
+    (genuinely stable 26.6, not a beta) and RocketSim only touching the
+    Simulator runtime, not Xcode's build-time compiler.
+  - **Fix**: `CLANG_ENABLE_EXPLICIT_MODULES=NO SWIFT_ENABLE_EXPLICIT_MODULES=NO`.
+    This does NOT propagate through project.pbxproj-level build settings to
+    the SPM package graph (confirmed empirically — a project-level-only
+    version of the fix still failed) — it must be passed as an `xcodebuild`
+    command-line override, which is why it's baked into the new
+    `ios:sim:build` npm script rather than the linking script.
+  - Also fixed along the way: an all-architectures build (arm64 + x86_64)
+    fails on x86_64 alone — `libwg-go.a`'s Go runtime references
+    `_fdopendir$INODE64`/`_readdir_r$INODE64`, symbols recent SDKs dropped
+    for the Intel simulator slice. `ios:sim:build` forces `ARCHS=arm64
+    ONLY_ACTIVE_ARCH=YES` (correct anyway on this Apple Silicon Mac).
+  - **Workflow constraint confirmed**: only `expo prebuild --clean` is safe
+    before `link-wireguard-kit.mjs` — a non-clean prebuild on top of the
+    script's manual `project.pbxproj` mutations crashes
+    `@bacons/apple-targets`' own diffing logic
+    (`withIosXcodeProjectBeta2BaseMod: Cannot read properties of undefined`).
+  - **Not yet done**: `targets/network-packet-tunnel/PacketTunnelProvider.swift`
+    is still the unedited scaffold stub — the actual tunnel logic (wiring
+    `WireGuardAdapter` to the `api-server` `/vpn/:userId/register` config)
+    hasn't been written, nor has the main-app native bridge module for
+    `NETunnelProviderManager` start/stop. EAS cloud build support (Go
+    toolchain on EAS's build servers) also still outstanding — this build
+    fix is proven locally only so far.
+  - No git commit yet for any of this (`app.json`, `targets/`,
+    `scripts/link-wireguard-kit.mjs`, `package.json` script + new
+    devDependencies) — per this repo's report-before-code convention,
+    holding until asked.
+
+## 23 Aug session changes
+
+- **GF-01: MinterEllison replied, held off pending US firms.** Partner in
+  MinterEllisonRuddWatts' International Trade and Regulatory team responded
+  to the 19 Aug enquiry with a proposal: written opinion covering BOTH the
+  US EAR mass-market/CCATS question AND the NZ strategic goods/cryptography
+  exemption question, $4,000–$7,000 NZD + GST + office services charge,
+  5 business days. Explicitly excludes engaging US counsel themselves unless
+  their review says otherwise — i.e. their estimate assumes they answer the
+  US question in-house too, which overlaps with the two US-specialist
+  enquiries (Torres Trade Law, Wiley Rein) already in flight from 22 Aug.
+  **Decision: held off, waiting for Torres/Wiley to reply first** — Benji's
+  read is the crypto stack already meets mass-market self-classification
+  guidelines, so paying MinterEllison now would mainly be paying for
+  confirmation of a foregone conclusion. If the US firms come back with
+  anything short of a clean opinion, MinterEllison's NZ-side coverage is
+  still on the table — no reply sent to them yet, no engagement declined.
+  Chase-Monday reminder from the prior update is now moot (they replied).
+
+- **Self-hosted WireGuard VPN — infra and control-plane live, native client
+  blocked on Go toolchain wiring.** Real (not mock) VPN, replacing the
+  previous cosmetic `connectVPN()`/`disconnectVPN()` state-flip in
+  `AppContext.tsx`:
+  - Hetzner VPS `ghostface-vpn-eu1` (Nuremberg, cpx22) — WireGuard server on
+    `wg0`. ⚠️ **This entry originally claimed the box was "firewalled to
+    SSH(22)/WireGuard(51820 udp)/agent(8443 tcp) only" — that is not true
+    of the running box; corrected 24 Aug, see ACTIVE INCIDENT above.**
+    A small Python-stdlib peer-management agent runs on it (bearer-secret +
+    pinned self-signed TLS), adding/removing WireGuard peers.
+  - `api-server`: `POST/GET/DELETE /vpn/:userId/register` (live in prod) —
+    device generates its own keypair, sends only the public key; server
+    allocates a 10.66.0.0/24 tunnel IP, persists to a new `vpn_peers` table
+    (`lib/db/src/schema/vpn.ts`), and calls the box's agent.
+  - Apple Developer portal: `com.ghostface.app` and new
+    `com.ghostface.app.tunnel` (extension) App IDs both have Network
+    Extensions + Personal VPN capabilities enabled. **Still needed**: the
+    separate formal Network Extension entitlement request via
+    https://developer.apple.com/contact/request/network-extension/ — has
+    its own days/weeks approval lag, not yet submitted.
+  - Mobile: `targets/network-packet-tunnel/` extension target scaffolded via
+    `@bacons/apple-targets` (new devDependency, approved) + `@bacons/xcode`
+    (also added). `scripts/link-wireguard-kit.mjs` links WireGuard's
+    official `wireguard-apple` SPM package into the target as a
+    post-prebuild step (config-plugin mod ordering made this unworkable as
+    a plugin — see the script's own comments).
+  - **Blocker**: official `WireGuardKit` needs a Go toolchain to compile its
+    `wireguard-go-bridge` core via a manually-wired Xcode "External Build
+    System" target — not something SPM or `@bacons/apple-targets` automates.
+    Go 1.27.0 now installed locally (`brew install go`). EAS's cloud build
+    servers do NOT have Go by default — a custom EAS build hook will be
+    needed before cloud builds work, separate from local build support.
+  - Old fake VPN UI already reworked: radial-menu VPN node turns gold
+    (`#F5D26B`) when `vpnConnected`, was previously a no-op.
+  - Do not cancel/downgrade any existing third-party VPN (e.g. Mullvad) —
+    explicitly told to hold off until GHOSTFACE's VPN is tested end-to-end.
 
 ## 22 Aug session changes
 
@@ -15,9 +239,7 @@ in flight)
   Torres Trade Law) and Lori Scheetz (lscheetz@wiley.law, Wiley Rein). Bounded
   ask: one-page opinion on §740.17(b)(1) mass-market self-classification vs
   CCATS re kdfRkPQ, fixed fee requested. MinterEllison (original 19 Aug
-  enquiry) still silent — chase draft sits in Gmail drafts on that thread;
-  one-time Cowork reminder fires Mon 24 Aug 9am NZT to check replies/nudge.
-  (Earlier "chase Mon 25 Aug" was a date error; Monday is the 24th.)
+  enquiry) replied 23 Aug — see above.
 - Copies of counsel emails were forwarded to jjules@ — Benji's mother, an
   intended recipient, not a leak. ⚠️ However the two spellings used were
   `xtra.com` and `xtra.co`, while NZ Xtra addresses are `@xtra.co.nz`. Both
