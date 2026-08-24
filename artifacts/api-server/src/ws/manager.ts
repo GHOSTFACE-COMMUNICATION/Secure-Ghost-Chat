@@ -21,6 +21,7 @@ import {
   clearExpoPushTokenForDeliveryId,
 } from "../utils/delivery";
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
+import { markMessagesDelivered, markDeparturesDelivered } from "../utils/markDelivered";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
 // Compressed frames are an untrusted, attacker-controllable input even
@@ -346,12 +347,7 @@ async function deliverPending(deliveryId: string, ws: WebSocket): Promise<void> 
     }
 
     if (pending.length > 0) {
-      const ids = pending.map((m) => m.id);
-      await Promise.all(
-        ids.map((id) =>
-          db.update(messagesTable).set({ delivered: true }).where(eq(messagesTable.id, id)),
-        ),
-      );
+      await markMessagesDelivered(pending.map((m) => m.id));
       logger.info({ count: pending.length }, "Delivered pending messages");
     }
   } catch (err) {
@@ -376,11 +372,7 @@ async function deliverPendingDepartures(alias: string, ws: WebSocket): Promise<v
     }
 
     if (pending.length > 0) {
-      await Promise.all(
-        pending.map((row) =>
-          db.update(departuresTable).set({ delivered: true }).where(eq(departuresTable.id, row.id)),
-        ),
-      );
+      await markDeparturesDelivered(pending.map((row) => row.id));
       logger.info({ alias, count: pending.length }, "Delivered pending departures");
     }
   } catch (err) {

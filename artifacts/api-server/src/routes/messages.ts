@@ -5,6 +5,7 @@ import { createHash } from "crypto";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
+import { markMessagesDelivered } from "../utils/markDelivered";
 import { ensureDeliveryId } from "../utils/delivery";
 
 const router: IRouter = Router();
@@ -96,13 +97,7 @@ router.get("/messages/pending", async (req: Request, res: Response) => {
       .from(messagesTable)
       .where(and(eq(messagesTable.toDeliveryId, deliveryId), eq(messagesTable.delivered, false)));
 
-    if (pending.length > 0) {
-      await Promise.all(
-        pending.map((m) =>
-          db.update(messagesTable).set({ delivered: true }).where(eq(messagesTable.id, m.id)),
-        ),
-      );
-    }
+    await markMessagesDelivered(pending.map((m) => m.id));
 
     return res.json({ messages: pending });
   } catch (err) {

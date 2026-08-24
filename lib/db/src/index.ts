@@ -14,9 +14,34 @@ if (!process.env.DATABASE_URL) {
 // 'verify-full' (rejects self-signed chains). We control SSL via Pool config.
 const connectionString = process.env.DATABASE_URL.replace(/([?&])sslmode=[^&]*/g, "$1").replace(/[?&]$/, "");
 
+// pg defaults `max` to 10, which was the API's real concurrency limit for
+// every request and WebSocket handler in the process — small enough that a
+// single client returning to a large backlog could starve live traffic.
+//
+// Raising it is safe here because DATABASE_URL points at PgBouncer
+// (transaction pooling, DEFAULT_POOL_SIZE=300, MAX_CLIENT_CONN=1000 across two
+// replicas) in front of a Postgres with max_connections=500 — so this is a
+// client-side cap well inside the pooler's budget, not a direct claim on
+// backend connections. Keep it that way: if the pooler is ever bypassed, this
+// number multiplied by the replica count has to stay under max_connections.
+const DEFAULT_POOL_MAX = 30;
+
+function poolMax(): number {
+  const raw = process.env.DB_POOL_MAX?.trim();
+  if (!raw) return DEFAULT_POOL_MAX;
+  const n = Number(raw);
+  // Fall back rather than throw — a bad value should not stop the API booting.
+  if (!Number.isInteger(n) || n < 1) {
+    console.warn(`[db] Ignoring invalid DB_POOL_MAX=${raw}; using ${DEFAULT_POOL_MAX}`);
+    return DEFAULT_POOL_MAX;
+  }
+  return n;
+}
+
 export const pool = new Pool({
   connectionString,
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
+  max: poolMax(),
   // Fail fast into the retry loop below instead of hanging past the client's
   // own request timeout — pg's default is 0 (wait forever).
   connectionTimeoutMillis: 5000,
