@@ -5,12 +5,72 @@ before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
 Last updated: 2026-08-24 (Claude Code session — VPN health check found the
-peer agent hard-wedged and the box unfirewalled: see ACTIVE INCIDENT below.
+VPN P0 RESOLVED: agent unwedged, 8443 firewalled to Railway static egress,
+agent rewritten so a stalled client cannot wedge it, and the first successful
+peer registration ever, verified end to end. See RESOLVED INCIDENT below.
 Earlier the same day: WireGuard native client — PacketTunnelProvider.swift +
 native bridge module both written; full-app build blocked by an unrelated
 fmt/Clang compiler bug — needs Benji's call on how to proceed)
 
-## 🔴 ACTIVE INCIDENT — VPN peer agent down, box unfirewalled (24 Aug)
+## ✅ RESOLVED INCIDENT — VPN peer agent down, box unfirewalled (24 Aug)
+
+**Closed 24 Aug.** All three steps of the recorded fix order are done and the
+control plane is verified end to end — for the first time since it was built.
+
+**Resolution:**
+1. **Unwedged.** Dropped the stalling host (`129.213.151.234`) *before*
+   restarting, not after — the recorded order restarted first, which would
+   have let the same still-connected client re-wedge the fresh process within
+   seconds. New pid, `Recv-Q` back to 0, the six CLOSE-WAIT sockets gone,
+   localhost answering in 5ms.
+2. **Firewalled.** `infra/vpn-agent/firewall.sh` restricts tcp/8443 to the
+   api-server's three Railway static outbound IPs plus localhost, via its own
+   `VPNAGENT` chain — SSH, WireGuard and the INPUT policy untouched, so no
+   lockout risk and `ufw` stays off. Static Outbound IPs had to be enabled on
+   the Railway service first (they were off; Pro feature). Persisted across
+   reboot by `vpn-agent-firewall.service`, ordered after `wg-quick@wg0`.
+   Verified from an outside IP: 8443 now times out; SSH, api and coturn
+   unaffected.
+3. **Rewritten.** `infra/vpn-agent/agent.py` — now in the repo rather than
+   only on the box. TLS moved off the accept loop (the root cause), threaded,
+   backlog 5 -> 128, timeouts on handshake/request/`wg`, bounded
+   Content-Length, and a `GET /healthz`. Reproduced the exact attack (7
+   concurrent stalled TLS connections) against production: `/healthz` kept
+   answering throughout.
+
+**Two pre-existing bugs found while testing the rewrite locally, both latent
+only because no peer had ever registered successfully:**
+- `remove_peer_from_conf` corrupted `wg0.conf`. `re.split` consumes the
+  newline before each `[Peer]` and `"".join(kept)` never restored it, welding
+  sections together (`ListenPort = 51820[Peer]`) into a file `wg-quick` cannot
+  parse. It corrupts from the **second** peer onward — it would have hit the
+  day the VPN started working, and looked nothing like the agent.
+- Making the server threaded turns that read-modify-write into a race. Config
+  mutation is now serialised under a lock, and writes are atomic
+  (temp + `os.replace`) so a crash cannot truncate the file `wg-quick` reads
+  at boot.
+
+**End-to-end verified** (throwaway alias `ZZVPNTEST1`, entirely through the
+app's own API, no hand-written DB rows): register -> `200` in 1.15s returning a
+full client config with `tunnelIp 10.66.0.2`; GET confirmed persistence; DELETE
+removed the peer; identity deleted; alias confirmed gone. Prod left as found.
+That `200` also proves the allowlist is correct — the api-server really does
+egress from one of those three static IPs, which no label could confirm.
+
+⚠️ **Standing coupling:** Railway reassigns static outbound IPs when a service
+changes region, and api-server moved `sfo` -> `us-west2`. Another move breaks
+peer registration silently and will look exactly like this incident. Re-run
+`firewall.sh` with fresh values from
+`railway outbound-network static-ip status --service api-server`.
+
+**Still true: end-to-end tunnel is NOT achieved.** The control plane works; the
+*client* does not exist yet (`lib/wireguard.ts` and AppContext wiring not
+started, Network Extension entitlement not requested, EAS lacks a Go
+toolchain). **Do not cancel or downgrade Mullvad.**
+
+<details>
+<summary>Original incident report (24 Aug) — kept for the diagnosis</summary>
+
 
 Found by a read-only health check on 24 Aug ~08:50 UTC. **Nothing was changed
 or fixed** — report-before-code. Full writeup was in the session scratchpad;
@@ -74,6 +134,8 @@ unwedged — ask for it explicitly.
 
 **Bearing on the Mullvad decision: end-to-end is NOT achieved.** Control plane
 up != tunnel works. Do not cancel or downgrade Mullvad.
+
+</details>
 
 ## 24 Aug session changes (cont.)
 
