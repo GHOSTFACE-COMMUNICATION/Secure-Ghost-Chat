@@ -25,16 +25,16 @@ import {
 const router: IRouter = Router();
 
 // 10 payment intents per 10 minutes per IP.
-const intentLimiter = new RateLimiter({ windowMs: 10 * 60_000, max: 10 });
+const intentLimiter = new RateLimiter({ windowMs: 10 * 60_000, max: 10, prefix: "intent" });
 // 60 status polls per minute per IP (client polls every few seconds).
-const statusLimiter = new RateLimiter({ windowMs: 60_000, max: 60 });
+const statusLimiter = new RateLimiter({ windowMs: 60_000, max: 60, prefix: "status" });
 
 // Failed-auth gate, per IP. A coarse per-IP request ceiling sized to survive
 // carrier NAT would have to be so high it protects nothing, so only requests
 // that FAIL authentication charge this bucket: legitimate NATed users never
 // touch it, while an unauthenticated flood is cut off before the device-token
 // lookup. The quotas above are charged to the authenticated alias instead.
-const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30 });
+const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "authFail" });
 
 
 // The ghost_payments and ghost_entitlements tables are provisioned through the
@@ -113,7 +113,7 @@ function entitlementPayload(plan: string, activeUntil: Date) {
 router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
   try {
     const ipKey = getIpKey(req);
-    if (!authFailureGate.allowed(ipKey)) {
+    if (!(await authFailureGate.allowed(ipKey))) {
       return res.status(429).json({ error: "Too many requests" });
     }
     if (!isWalletConfigured()) {
@@ -123,10 +123,10 @@ router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
     }
     const alias = await getAuthedAlias(req);
     if (!alias) {
-      authFailureGate.record(ipKey);
+      await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
     }
-    if (!intentLimiter.check(alias)) {
+    if (!(await intentLimiter.check(alias))) {
       return res.status(429).json({ error: "Too many payment requests. Try again shortly." });
     }
 
@@ -184,15 +184,15 @@ router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
 router.get("/crypto/payment-status", async (req: Request, res: Response) => {
   try {
     const ipKey = getIpKey(req);
-    if (!authFailureGate.allowed(ipKey)) {
+    if (!(await authFailureGate.allowed(ipKey))) {
       return res.status(429).json({ error: "Too many requests" });
     }
     const alias = await getAuthedAlias(req);
     if (!alias) {
-      authFailureGate.record(ipKey);
+      await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
     }
-    if (!statusLimiter.check(alias)) {
+    if (!(await statusLimiter.check(alias))) {
       return res.status(429).json({ error: "Too many status checks. Slow down." });
     }
 

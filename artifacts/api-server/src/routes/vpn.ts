@@ -16,7 +16,7 @@ function hashToken(token: string): string {
 
 // See messages.ts for the reasoning: only failed auth charges this, so carrier
 // NAT and our own VPN egress cannot make real users share one budget.
-const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30 });
+const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "authFail" });
 
 /** Same bearer-device-token-vs-path-userId check used by push.ts/prekeys.ts. */
 async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {
@@ -27,13 +27,13 @@ async function requireDeviceAuth(req: Request, res: Response, next: () => void):
   // below, so an unauthenticated flood cannot drive DB load. Only failures
   // charge it — see the note on authFailureGate.
   const ipKey = getIpKey(req);
-  if (!authFailureGate.allowed(ipKey)) {
+  if (!(await authFailureGate.allowed(ipKey))) {
     res.status(429).json({ error: "Too many requests" });
     return;
   }
 
   if (!token) {
-    authFailureGate.record(ipKey);
+    await authFailureGate.record(ipKey);
     res.status(401).json({ error: "Authorization: Bearer <token> header required" });
     return;
   }
@@ -52,7 +52,7 @@ async function requireDeviceAuth(req: Request, res: Response, next: () => void):
     .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
 
   if (!row) {
-    authFailureGate.record(ipKey);
+    await authFailureGate.record(ipKey);
     res.status(403).json({ error: "Invalid or mismatched device token for userId" });
     return;
   }
@@ -67,7 +67,7 @@ const TUNNEL_SUBNET_PREFIX = "10.66.0."; // .1 is the server itself; peers get .
 const TUNNEL_SUBNET_MIN = 2;
 const TUNNEL_SUBNET_MAX = 254;
 
-const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 30 });
+const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 30, prefix: "vpnRegister" });
 
 
 // Uses Node's built-in `https` module directly rather than global fetch —
@@ -159,7 +159,7 @@ function buildConfigResponse(tunnelIp: string): VpnConfigResponse | null {
 router.post("/vpn/:userId/register", requireDeviceAuth, async (req: Request, res: Response) => {
   // requireDeviceAuth has already proved the bearer token belongs to this
   // userId, so key the quota on the user rather than their address.
-  if (!limiter.check(req.params["userId"] as string)) {
+  if (!(await limiter.check(req.params["userId"] as string))) {
     res.status(429).json({ error: "Too many requests" });
     return;
   }

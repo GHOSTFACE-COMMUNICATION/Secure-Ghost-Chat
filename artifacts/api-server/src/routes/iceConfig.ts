@@ -35,10 +35,10 @@ let cached: CachedConfig | null = null;
 // through our account. 600 requests / hour / IP covers normal call usage
 // (including client reconnect/retry bursts around CallKit answer/WS
 // re-auth) while still bounding scraping.
-const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 6_000 });
+const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 6_000, prefix: "iceConfig" });
 // This hands out Twilio TURN credentials, so the cost is ours. Per-IP cannot
 // discriminate under carrier NAT; the global cap is what actually bounds spend.
-const globalLimiter = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 30_000 });
+const globalLimiter = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 30_000, prefix: "iceConfigGlobal" });
 
 // Literal, pre-issued static credentials — only reached when TURN_SECRET
 // isn't set (see coturnConfig below, which takes priority when it is).
@@ -147,7 +147,7 @@ async function twilioConfig(): Promise<IceConfigResponse | null> {
 }
 
 router.get("/ice-config", async (req: Request, res: Response) => {
-  if (!limiter.check(getIpKey(req)) || !globalLimiter.check()) {
+  if (!(await limiter.check(getIpKey(req))) || !(await globalLimiter.check())) {
     res.status(429).json({ error: "Too many requests" });
     return;
   }

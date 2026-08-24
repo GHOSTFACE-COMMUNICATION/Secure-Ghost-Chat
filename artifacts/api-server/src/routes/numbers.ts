@@ -14,17 +14,17 @@ import { performRotation, MS_PER_DAY } from "../lib/rotationScheduler";
 const router: IRouter = Router();
 
 // 3 number provisions per hour per IP — prevents abuse of paid Vonage API
-const provisionLimiter = new RateLimiter({ windowMs: 60 * 60_000, max: 3 });
+const provisionLimiter = new RateLimiter({ windowMs: 60 * 60_000, max: 3, prefix: "provision" });
 
 // 30 SMS inbox fetches per minute per IP
-const smsInboxLimiter = new RateLimiter({ windowMs: 60_000, max: 30 });
+const smsInboxLimiter = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "smsInbox" });
 
 // Failed-auth gate, per IP. A coarse per-IP request ceiling sized to survive
 // carrier NAT would have to be so high it protects nothing, so only requests
 // that FAIL authentication charge this bucket: legitimate NATed users never
 // touch it, while an unauthenticated flood is cut off before the device-token
 // lookup. The quotas above are charged to the authenticated alias instead.
-const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30 });
+const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "authFail" });
 
 
 // The ghost_numbers, ghost_sms and user_rotation_limits tables are provisioned
@@ -95,16 +95,16 @@ router.get("/numbers", async (req: Request, res: Response) => {
 // GET /api/numbers/:id/sms — inbox for a ghost number
 router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
   const ipKey = getIpKey(req);
-  if (!authFailureGate.allowed(ipKey)) {
+  if (!(await authFailureGate.allowed(ipKey))) {
     return res.status(429).json({ error: "Too many requests" });
   }
   try {
     const alias = await getAuthedAlias(req);
     if (!alias) {
-      authFailureGate.record(ipKey);
+      await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
     }
-    if (!smsInboxLimiter.check(alias)) {
+    if (!(await smsInboxLimiter.check(alias))) {
       return res.status(429).json({ error: "Too many requests" });
     }
 
@@ -130,18 +130,18 @@ router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
 // POST /api/numbers/provision — rent a ghost number
 router.post("/numbers/provision", async (req: Request, res: Response) => {
   const ipKey = getIpKey(req);
-  if (!authFailureGate.allowed(ipKey)) {
+  if (!(await authFailureGate.allowed(ipKey))) {
     return res.status(429).json({ error: "Too many requests" });
   }
   try {
     const alias = await getAuthedAlias(req);
     if (!alias) {
-      authFailureGate.record(ipKey);
+      await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
     }
     // Per alias, not per IP: this one spends real money on Vonage, and an IP
     // key meant every subscriber behind a carrier NAT shared one 3/hour budget.
-    if (!provisionLimiter.check(alias)) {
+    if (!(await provisionLimiter.check(alias))) {
       return res
         .status(429)
         .json({ error: "Too many requests. Ghost number provisioning is limited to 3 per hour." });

@@ -9,11 +9,11 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 // 20 invite creations per IP per 10 minutes
-const createLimiter = new RateLimiter({ windowMs: 10 * 60_000, max: 200 });
-const createGlobal = new GlobalLimiter({ windowMs: 10 * 60_000, max: 2_000 });
+const createLimiter = new RateLimiter({ windowMs: 10 * 60_000, max: 200, prefix: "inviteCreate" });
+const createGlobal = new GlobalLimiter({ windowMs: 10 * 60_000, max: 2_000, prefix: "inviteCreateGlobal" });
 // 60 redemption attempts per IP per minute
-const redeemLimiter = new RateLimiter({ windowMs: 60_000, max: 600 });
-const redeemGlobal = new GlobalLimiter({ windowMs: 60_000, max: 6_000 });
+const redeemLimiter = new RateLimiter({ windowMs: 60_000, max: 600, prefix: "inviteRedeem" });
+const redeemGlobal = new GlobalLimiter({ windowMs: 60_000, max: 6_000, prefix: "inviteRedeemGlobal" });
 
 const CODE_REGEX = /^GF-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
 
@@ -24,7 +24,7 @@ const CODE_REGEX = /^GF-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
  * Responds 201 on success, 400 on bad input, 409 if code already exists.
  */
 router.post("/invites", async (req: Request, res: Response) => {
-  if (!createLimiter.check(getIpKey(req)) || !createGlobal.check()) {
+  if (!(await createLimiter.check(getIpKey(req))) || !(await createGlobal.check())) {
     return res.status(429).json({ error: "Too many requests" });
   }
 
@@ -86,7 +86,7 @@ router.post("/invites", async (req: Request, res: Response) => {
  * Does NOT consume the code. Consume requires a separate POST /invites/:code/consume.
  */
 router.get("/invites/:code", async (req: Request, res: Response) => {
-  if (!redeemLimiter.check(getIpKey(req)) || !redeemGlobal.check()) {
+  if (!(await redeemLimiter.check(getIpKey(req))) || !(await redeemGlobal.check())) {
     return res.status(429).json({ error: "Too many requests" });
   }
 
@@ -127,7 +127,7 @@ router.get("/invites/:code", async (req: Request, res: Response) => {
  * Single conditional UPDATE — one concurrent winner, zero rows = already used/expired.
  */
 router.post("/invites/:code/consume", async (req: Request, res: Response) => {
-  if (!redeemLimiter.check(getIpKey(req)) || !redeemGlobal.check()) {
+  if (!(await redeemLimiter.check(getIpKey(req))) || !(await redeemGlobal.check())) {
     return res.status(429).json({ error: "Too many requests" });
   }
 

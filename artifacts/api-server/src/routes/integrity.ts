@@ -10,8 +10,8 @@ const router: IRouter = Router();
 
 // One verification per device per minute is plenty — this only needs to run
 // occasionally (app open / sensitive action), not on every request.
-const verifyLimiter = new RateLimiter({ windowMs: 60_000, max: 200 });
-const verifyGlobal = new GlobalLimiter({ windowMs: 60_000, max: 2_000 });
+const verifyLimiter = new RateLimiter({ windowMs: 60_000, max: 200, prefix: "integrityVerify" });
+const verifyGlobal = new GlobalLimiter({ windowMs: 60_000, max: 2_000, prefix: "integrityVerifyGlobal" });
 
 // Set in Play Console → your app → Setup → App integrity, once a Cloud
 // project is linked. Must match the packageName the client's cloud project
@@ -41,7 +41,7 @@ function getAuth(): GoogleAuth {
 // binding lives in the requestHash the client hashed the token against
 // (see lib/deviceIntegrity.ts on the mobile side).
 router.post("/integrity/verify", async (req: Request, res: Response) => {
-  if (!verifyLimiter.check(getIpKey(req)) || !verifyGlobal.check()) {
+  if (!(await verifyLimiter.check(getIpKey(req))) || !(await verifyGlobal.check())) {
     return res.status(429).json({ error: "Too many integrity checks. Try again shortly." });
   }
 

@@ -1,3 +1,6 @@
+import { getRedis, isRedisHealthy } from "./redis";
+import { logger } from "./logger";
+
 interface RateLimitEntry {
   count: number;
   resetAt: number;
@@ -6,42 +9,102 @@ interface RateLimitEntry {
 interface RateLimiterOptions {
   windowMs: number;
   max: number;
+  /** Redis key namespace. Must be stable and unique across limiters. */
+  prefix: string;
 }
 
 export class RateLimiter {
   private store = new Map<string, RateLimitEntry>();
   private windowMs: number;
   private max: number;
+  private prefix: string;
 
-  constructor({ windowMs, max }: RateLimiterOptions) {
+  constructor({ windowMs, max, prefix }: RateLimiterOptions) {
     this.windowMs = windowMs;
     this.max = max;
+    // Namespaces the Redis key. Two limiters with different windows must not
+    // share a bucket, and the same limiter must resolve to the same key on
+    // every replica — so this is passed in explicitly rather than derived.
+    this.prefix = prefix;
 
-    // Periodically prune expired entries to prevent unbounded memory growth
+    // Periodically prune expired entries to prevent unbounded memory growth.
+    // Only used by the in-memory path; Redis expires its own keys.
     setInterval(() => this.prune(), windowMs * 2);
   }
 
+  private redisKey(key: string): string {
+    return `rl:${this.prefix}:${key}`;
+  }
+
   /** Returns true if the request is allowed, false if rate-limited. */
-  check(key: string): boolean {
-    if (!this.allowed(key)) return false;
-    this.record(key);
+  async check(key: string): Promise<boolean> {
+    const redis = isRedisHealthy() ? getRedis() : null;
+    if (redis) {
+      try {
+        // Fixed window, incremented and expired in one round trip. INCR is
+        // atomic, so concurrent replicas cannot both read an under-limit count
+        // and both admit the request — which a GET-then-SET would allow.
+        const k = this.redisKey(key);
+        const count = await redis.incr(k);
+        if (count === 1) await redis.pexpire(k, this.windowMs);
+        return count <= this.max;
+      } catch (err) {
+        logger.warn({ err, prefix: this.prefix }, "[ratelimit] redis failed — using local bucket");
+      }
+    }
+    if (!this.allowedLocal(key)) return false;
+    this.recordLocal(key);
     return true;
   }
 
   /**
    * Peek without consuming budget. Split out from `check` so a caller can gate
    * on prior failures *before* doing expensive work, and only charge the key
-   * once it knows the request was actually abusive — see `recordFailure` use in
-   * the authenticated routes.
+   * once it knows the request was actually abusive — see the authFailureGate
+   * use in the authenticated routes.
    */
-  allowed(key: string): boolean {
+  async allowed(key: string): Promise<boolean> {
+    const redis = isRedisHealthy() ? getRedis() : null;
+    if (redis) {
+      try {
+        const raw = await redis.get(this.redisKey(key));
+        return raw === null || Number(raw) < this.max;
+      } catch (err) {
+        logger.warn({ err, prefix: this.prefix }, "[ratelimit] redis failed — using local bucket");
+      }
+    }
+    return this.allowedLocal(key);
+  }
+
+  /** Consume one unit of budget for `key`. */
+  async record(key: string): Promise<void> {
+    const redis = isRedisHealthy() ? getRedis() : null;
+    if (redis) {
+      try {
+        const k = this.redisKey(key);
+        const count = await redis.incr(k);
+        if (count === 1) await redis.pexpire(k, this.windowMs);
+        return;
+      } catch (err) {
+        logger.warn({ err, prefix: this.prefix }, "[ratelimit] redis failed — using local bucket");
+      }
+    }
+    this.recordLocal(key);
+  }
+
+  // ── Per-process fallback ───────────────────────────────────────────────────
+  // Used when REDIS_URL is unset (dev, tests) or Redis is mid-outage. Falling
+  // back to a local bucket rather than failing open matters for the scarce
+  // limiters — provisionLimiter spends real money — so a Redis outage makes
+  // limits per-replica, never absent.
+
+  private allowedLocal(key: string): boolean {
     const entry = this.store.get(key);
     if (!entry || Date.now() > entry.resetAt) return true;
     return entry.count < this.max;
   }
 
-  /** Consume one unit of budget for `key`. */
-  record(key: string): void {
+  private recordLocal(key: string): void {
     const now = Date.now();
     const entry = this.store.get(key);
     if (!entry || now > entry.resetAt) {
@@ -77,7 +140,7 @@ export class GlobalLimiter {
     this.limiter = new RateLimiter(opts);
   }
 
-  check(): boolean {
+  check(): Promise<boolean> {
     return this.limiter.check(GlobalLimiter.KEY);
   }
 }
