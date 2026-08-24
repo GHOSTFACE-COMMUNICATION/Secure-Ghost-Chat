@@ -686,7 +686,7 @@ export default function OnboardingScreen() {
           <>
             <Text style={styles.sectionTitle}>YOUR RECOVERY PHRASE</Text>
             <Text style={styles.pinOptionalLabel}>
-              WRITE THIS DOWN — IT'S THE ONLY WAY TO RECOVER YOUR IDENTITY IF YOU LOSE THIS DEVICE. WE NEVER STORE IT AND CANNOT SHOW IT TO YOU AGAIN.
+              WRITE THIS DOWN — IT'S THE ONLY WAY TO RECOVER YOUR IDENTITY IF YOU LOSE THIS DEVICE. WE NEVER STORE IT, SO IF THE PHRASE AND THIS DEVICE ARE BOTH GONE, SO IS YOUR ALIAS. YOU CAN VIEW IT AGAIN IN SETTINGS WHILE YOU STILL HAVE THIS DEVICE.
             </Text>
 
             <View style={styles.phraseBox}>
