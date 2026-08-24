@@ -8,7 +8,7 @@ import {
   departuresTable,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
@@ -23,6 +23,7 @@ import {
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
 import { markMessagesDelivered, markDeparturesDelivered } from "../utils/markDelivered";
 import * as shared from "./sharedState";
+import * as router from "./router";
 
 // ── msg-z (compressed frame) safety limits ──────────────────────────────
 // Compressed frames are an untrusted, attacker-controllable input even
@@ -93,6 +94,8 @@ type LiveSocket = WebSocket & { isAlive: boolean };
 interface AuthedSocket {
   ws: LiveSocket;
   alias: string;
+  /** Identifies this particular connection, so a kick can spare the newest one. */
+  connId: string;
 }
 
 const connectedClients = new Map<string, AuthedSocket>();
@@ -143,6 +146,10 @@ const CALL_SIGNAL_TYPES = new Set([
 // seconds under call.tsx's 30s caller-side ring timeout so this bounce
 // fires first rather than racing it.
 const CALL_WAKE_GRACE_MS = 25_000;
+// ws invokes send's callback reliably; this only exists so a pathological
+// socket cannot wedge a message handler indefinitely.
+const SEND_CONFIRM_TIMEOUT_MS = 5_000;
+
 const CALL_WAKE_POLL_MS = 500;
 
 // Call signalling has no concept of "this pair already has a call in
@@ -188,14 +195,18 @@ async function deliverPendingCallHangups(alias: string, ws: WebSocket): Promise<
   }
 }
 
-async function waitForReconnect(alias: string, timeoutMs: number): Promise<AuthedSocket | null> {
+/**
+ * Wait for the woken callee to come back. Checks shared presence rather than
+ * this replica's socket map — after a VoIP wake the device may reconnect to a
+ * different replica entirely, which a local check would never see.
+ */
+async function waitForReconnect(alias: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = connectedClients.get(alias);
-    if (client && client.ws.readyState === WebSocket.OPEN) return client;
+    if (await shared.isOnline(alias)) return true;
     await new Promise((resolve) => setTimeout(resolve, CALL_WAKE_POLL_MS));
   }
-  return connectedClients.get(alias) ?? null;
+  return shared.isOnline(alias);
 }
 
 // ── Ghostpad: live shared scratchpad, never persisted ───────────────────────
@@ -211,10 +222,7 @@ async function notifyPresence(alias: string, online: boolean): Promise<void> {
   for (const watcherAlias of watchers) {
     // Mutual-only, unchanged: a one-directional subscribe reveals nothing.
     if (!(await shared.mutuallySubscribed(alias, watcherAlias))) continue;
-    const watcher = connectedClients.get(watcherAlias);
-    if (watcher && watcher.ws.readyState === WebSocket.OPEN) {
-      watcher.ws.send(JSON.stringify({ type: "presence", from: alias, online }));
-    }
+    await router.sendToAlias(watcherAlias, { type: "presence", from: alias, online });
   }
 }
 
@@ -222,10 +230,7 @@ async function notifyPresence(alias: string, online: boolean): Promise<void> {
 async function endGhostpadSession(alias: string): Promise<void> {
   const partnerAlias = await shared.clearGhostpadPair(alias);
   if (!partnerAlias) return;
-  const partner = connectedClients.get(partnerAlias);
-  if (partner && partner.ws.readyState === WebSocket.OPEN) {
-    partner.ws.send(JSON.stringify({ type: "ghostpad-ended" }));
-  }
+  await router.sendToAlias(partnerAlias, { type: "ghostpad-ended" });
 }
 
 function hashToken(token: string): string {
@@ -301,6 +306,15 @@ async function deliverPendingDepartures(alias: string, ws: WebSocket): Promise<v
 }
 
 export function createWsServer(wss: WebSocketServer): void {
+  // A newer connection for the same alias authenticated on another replica —
+  // drop ours so the single-socket invariant holds cluster-wide.
+  router.onKick((alias, connId) => {
+    const held = connectedClients.get(alias);
+    if (!held || held.connId === connId) return;
+    logger.info({ alias }, "Closing superseded socket — same alias authenticated elsewhere");
+    held.ws.close(4002, "Superseded by a newer connection");
+  });
+
   // ── Protocol-level heartbeat ─────────────────────────────────────────────
   // Every 30 s the server sends a native WebSocket ping frame to every client.
   // Clients that fail to respond with a pong within the next interval are
@@ -349,12 +363,14 @@ export function createWsServer(wss: WebSocketServer): void {
 
     let authedAlias: string | null = null;
     let authedDeliveryId: string | null = null;
+    const connId = randomUUID();
     const myPresenceSubscriptions = new Set<string>(); // targets this socket is watching
 
     const cleanup = async () => {
       if (!authedAlias) return;
       const alias = authedAlias;
       connectedClients.delete(alias);
+      await router.unregisterLocal(alias);
       try {
         // Presence goes first: everything below is best-effort, and a watcher
         // seeing a stale "online" is the most visible failure here.
@@ -414,7 +430,37 @@ export function createWsServer(wss: WebSocketServer): void {
         }
 
         authedAlias = normalizedAuthAlias;
-        connectedClients.set(authedAlias, { ws, alias: authedAlias });
+        connectedClients.set(authedAlias, { ws, alias: authedAlias, connId });
+        // Writes to this socket, confirming via ws.send's callback — the only
+        // place that confirmation is possible, since it cannot cross a process.
+        await router.registerLocal(authedAlias, (frame: string) =>
+          new Promise<boolean>((resolve) => {
+            if (ws.readyState !== WebSocket.OPEN) return resolve(false);
+            // Bound the wait. ws always invokes this callback, but an
+            // unbounded promise here would stall the entire message handler
+            // for this socket if it ever didn't — and every frame routed to
+            // this alias queues behind it. Timing out as "not delivered" is
+            // the safe direction: the caller falls back to a wake push, and a
+            // spurious wake is far cheaper than a dropped message.
+            let settled = false;
+            const timer = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              logger.warn({ alias: authedAlias }, "ws.send callback never fired — treating as undelivered");
+              resolve(false);
+            }, SEND_CONFIRM_TIMEOUT_MS);
+            ws.send(frame, (err) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              resolve(!err);
+            });
+          }),
+        );
+        // One device per user (deviceTokensTable.userId is unique). Within one
+        // process the Map.set above was enough to supersede an older socket;
+        // across replicas it is not, so tell the others to drop theirs.
+        await router.kickOtherHolders(authedAlias, connId);
         // Resolve (and warm the cache for) this user's opaque delivery token so
         // pending messages addressed to it can be routed back to this socket.
         authedDeliveryId = await ensureDeliveryId(authedAlias);
@@ -495,7 +541,7 @@ export function createWsServer(wss: WebSocketServer): void {
         if (!msg.to) return;
         const toAlias = normalizeAlias(msg.to);
         if (!toAlias) return;
-        let recipient: AuthedSocket | null | undefined = connectedClients.get(toAlias);
+        let recipientOnline = await shared.isOnline(toAlias);
 
         if (msg.type === "call-ring") {
           const pairKey = callPairKey(authedAlias, toAlias);
@@ -534,7 +580,7 @@ export function createWsServer(wss: WebSocketServer): void {
         // and give it a short window to reconnect. If neither push token is
         // registered this resolves immediately and falls straight through to
         // the existing offline bounce, unchanged.
-        if ((!recipient || recipient.ws.readyState !== WebSocket.OPEN) && msg.type === "call-ring") {
+        if (!recipientOnline && msg.type === "call-ring") {
           // Best-effort: if the push_token columns aren't migrated yet on this
           // deployment (or the push send throws for any other reason), fall
           // straight through to the existing offline bounce below rather than
@@ -575,7 +621,7 @@ export function createWsServer(wss: WebSocketServer): void {
               logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake push skipped — no push token on file");
             }
             if (sentOk) {
-              recipient = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
+              recipientOnline = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
             }
           } catch (err) {
             logger.warn({ err, from: authedAlias, to: toAlias }, "Call-wake push attempt failed");
@@ -598,11 +644,11 @@ export function createWsServer(wss: WebSocketServer): void {
         if (msg.type === "call-ring") {
           const parked = await shared.getActiveCall(callPairKey(authedAlias, toAlias));
           if (!parked || parked.callId !== (msg.callId ?? "")) {
-            if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
-              recipient.ws.send(
-                JSON.stringify({ type: "call-hangup", from: authedAlias, callId: msg.callId }),
-              );
-            }
+            await router.sendToAlias(toAlias, {
+              type: "call-hangup",
+              from: authedAlias,
+              callId: msg.callId,
+            });
             logger.debug(
               { from: authedAlias, to: toAlias, callId: msg.callId },
               "Stale call-ring dropped: call ended while waiting for callee wake",
@@ -611,8 +657,12 @@ export function createWsServer(wss: WebSocketServer): void {
           }
         }
 
-        if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
-          recipient.ws.send(JSON.stringify({ ...msg, from: authedAlias }));
+        // Branch on whether the frame was actually written to a socket, not on
+        // a readyState read — readyState lies for tens of seconds after a
+        // backgrounded client's socket dies (see the note in the msg path), and
+        // it cannot see a socket held by another replica at all.
+        const relayed = await router.sendToAlias(toAlias, { ...msg, from: authedAlias });
+        if (relayed) {
           logger.debug({ type: msg.type, from: authedAlias, to: toAlias }, "Call signal relayed");
         } else if (msg.type === "call-hangup") {
           // Callee offline — hold it for their next connect instead of
@@ -673,23 +723,21 @@ export function createWsServer(wss: WebSocketServer): void {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "Cannot pair with yourself" }));
           return;
         }
-        const creator = connectedClients.get(creatorAlias);
-        if (!creator || creator.ws.readyState !== WebSocket.OPEN) {
+        if (!(await shared.isOnline(creatorAlias))) {
           ws.send(JSON.stringify({ type: "ghostpad-error", text: "The other side disconnected" }));
           return;
         }
         await shared.setGhostpadPair(authedAlias, creatorAlias);
         ws.send(JSON.stringify({ type: "ghostpad-paired" }));
-        creator.ws.send(JSON.stringify({ type: "ghostpad-paired" }));
+        await router.sendToAlias(creatorAlias, { type: "ghostpad-paired" });
         logger.debug({ a: authedAlias, b: creatorAlias }, "Ghostpad paired");
         return;
       }
 
       if (msg.type === "ghostpad-text" || msg.type === "ghostpad-wipe") {
         const partnerAlias = await shared.getGhostpadPartner(authedAlias);
-        const partner = partnerAlias ? connectedClients.get(partnerAlias) : undefined;
-        if (partner && partner.ws.readyState === WebSocket.OPEN) {
-          partner.ws.send(JSON.stringify({ type: msg.type, text: msg.text }));
+        if (partnerAlias) {
+          await router.sendToAlias(partnerAlias, { type: msg.type, text: msg.text });
         }
         return;
       }
@@ -708,12 +756,11 @@ export function createWsServer(wss: WebSocketServer): void {
         if (!msg.to) return;
         const toAlias = normalizeAlias(msg.to);
         if (!toAlias) return;
-        const recipient = connectedClients.get(toAlias);
-        if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
-          recipient.ws.send(
-            JSON.stringify({ type: "disappear-timer", from: authedAlias, seconds: msg.seconds ?? null }),
-          );
-        }
+        await router.sendToAlias(toAlias, {
+          type: "disappear-timer",
+          from: authedAlias,
+          seconds: msg.seconds ?? null,
+        });
         return;
       }
 
@@ -732,10 +779,7 @@ export function createWsServer(wss: WebSocketServer): void {
         // of their own for a while, waiting for exactly this.
         if (await shared.mutuallySubscribed(authedAlias, targetAlias)) {
           ws.send(JSON.stringify({ type: "presence", from: targetAlias, online: await shared.isOnline(targetAlias) }));
-          const target = connectedClients.get(targetAlias);
-          if (target && target.ws.readyState === WebSocket.OPEN) {
-            target.ws.send(JSON.stringify({ type: "presence", from: authedAlias, online: true }));
-          }
+          await router.sendToAlias(targetAlias, { type: "presence", from: authedAlias, online: true });
         }
         return;
       }
@@ -798,8 +842,7 @@ export function createWsServer(wss: WebSocketServer): void {
             logger.warn({ err, msgId: stored.id }, "Message-wake push attempt failed");
           }
         };
-        const recipient = recipientAlias ? connectedClients.get(recipientAlias) : undefined;
-        if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
+        if (recipientAlias) {
           const wire: WireMessage = {
             type: "msg",
             msgId: stored.id,
@@ -810,20 +853,18 @@ export function createWsServer(wss: WebSocketServer): void {
           // backgrounded/closed client's socket has actually gone dead (the
           // heartbeat only detects this every ~30-60s — see the interval
           // above) — so a send failure here is expected, not exceptional.
-          // Confirm the write actually succeeded via ws.send's callback
-          // before treating this as delivered; on failure, fall back to
-          // push exactly as if the socket had never been open at all.
-          const sendError = await new Promise<Error | undefined>((resolve) => {
-            recipient.ws.send(JSON.stringify(wire), (err) => resolve(err));
-          });
-          if (!sendError) {
+          // sendToAlias confirms the write via ws.send's callback on the
+          // replica that holds the socket; on failure we fall back to push
+          // exactly as if the socket had never been open at all.
+          const sent = await router.sendToAlias(recipientAlias, wire);
+          if (sent) {
             await db
               .update(messagesTable)
               .set({ delivered: true })
               .where(eq(messagesTable.id, stored.id));
             logger.debug({ msgId: stored.id }, "Message delivered live");
           } else {
-            logger.debug({ msgId: stored.id, err: sendError }, "Live send failed on a stale socket — falling back to push");
+            logger.debug({ msgId: stored.id }, "Live send failed on a stale socket — falling back to push");
             await pushFallback();
           }
         } else {
@@ -855,9 +896,7 @@ export function createWsServer(wss: WebSocketServer): void {
               .insert(departuresTable)
               .values({ fromAlias: authedAlias, toAlias, delivered: false })
               .returning();
-            const recipient = connectedClients.get(toAlias);
-            if (recipient && recipient.ws.readyState === WebSocket.OPEN) {
-              recipient.ws.send(JSON.stringify({ type: "departed", from: authedAlias }));
+            if (await router.sendToAlias(toAlias, { type: "departed", from: authedAlias })) {
               await db
                 .update(departuresTable)
                 .set({ delivered: true })
@@ -904,13 +943,14 @@ export function createWsServer(wss: WebSocketServer): void {
  * Used for real-time server-initiated events (e.g. inbound SMS).
  * No-ops silently if the alias is offline.
  */
-export function broadcastToAlias(alias: string, message: Omit<WireMessage, "token">): void {
+export async function broadcastToAlias(
+  alias: string,
+  message: Omit<WireMessage, "token">,
+): Promise<void> {
   const normalized = normalizeAlias(alias);
   if (!normalized) return;
-  const client = connectedClients.get(normalized);
-  if (client && client.ws.readyState === WebSocket.OPEN) {
-    client.ws.send(JSON.stringify(message));
-  }
+  // Routed, so an inbound SMS reaches the user whichever replica holds them.
+  await router.sendToAlias(normalized, message);
 }
 
 export { connectedClients };

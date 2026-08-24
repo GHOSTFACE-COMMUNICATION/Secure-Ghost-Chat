@@ -135,8 +135,12 @@ function makeWs(): FakeWs {
     sent: [],
     closed: false,
     listeners,
-    send(raw: string) {
+    send(raw: string, cb?: (err?: Error) => void) {
       this.sent.push(raw);
+      // The real `ws` invokes this callback once the frame is written, and the
+      // router relies on it to confirm delivery. A fake that drops it leaves
+      // that promise pending forever.
+      cb?.();
     },
     close() {
       this.closed = true;

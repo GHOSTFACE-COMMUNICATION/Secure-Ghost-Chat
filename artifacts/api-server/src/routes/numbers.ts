@@ -405,7 +405,7 @@ router.post("/webhooks/sms/inbound", async (req: Request, res: Response) => {
       });
 
       // Push real-time notification to the alias owner if they are online
-      broadcastToAlias(number.userId, {
+      await broadcastToAlias(number.userId, {
         type: "sms_inbound",
         from,
         to,
