@@ -29,6 +29,14 @@ const intentLimiter = new RateLimiter({ windowMs: 10 * 60_000, max: 10 });
 // 60 status polls per minute per IP (client polls every few seconds).
 const statusLimiter = new RateLimiter({ windowMs: 60_000, max: 60 });
 
+// Failed-auth gate, per IP. A coarse per-IP request ceiling sized to survive
+// carrier NAT would have to be so high it protects nothing, so only requests
+// that FAIL authentication charge this bucket: legitimate NATed users never
+// touch it, while an unauthenticated flood is cut off before the device-token
+// lookup. The quotas above are charged to the authenticated alias instead.
+const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30 });
+
+
 // The ghost_payments and ghost_entitlements tables are provisioned through the
 // standard Drizzle schema (lib/db/src/schema/payments.ts) and applied via
 // `pnpm --filter db push` (see scripts/post-merge.sh) — the single source of
@@ -104,8 +112,9 @@ function entitlementPayload(plan: string, activeUntil: Date) {
 // URL (with a per-payment reference), amount, wallet, and expiry.
 router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
   try {
-    if (!intentLimiter.check(getIpKey(req))) {
-      return res.status(429).json({ error: "Too many payment requests. Try again shortly." });
+    const ipKey = getIpKey(req);
+    if (!authFailureGate.allowed(ipKey)) {
+      return res.status(429).json({ error: "Too many requests" });
     }
     if (!isWalletConfigured()) {
       return res
@@ -113,7 +122,13 @@ router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
         .json({ error: "Payments are not configured. Set GHOST_WALLET_ADDRESS." });
     }
     const alias = await getAuthedAlias(req);
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
+    if (!alias) {
+      authFailureGate.record(ipKey);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!intentLimiter.check(alias)) {
+      return res.status(429).json({ error: "Too many payment requests. Try again shortly." });
+    }
 
     const plan = (req.body?.plan as string | undefined)?.toLowerCase();
     if (!isPlan(plan)) {
@@ -168,11 +183,18 @@ router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
 // entitlement. Returns pending | confirmed | expired.
 router.get("/crypto/payment-status", async (req: Request, res: Response) => {
   try {
-    if (!statusLimiter.check(getIpKey(req))) {
-      return res.status(429).json({ error: "Too many status checks. Slow down." });
+    const ipKey = getIpKey(req);
+    if (!authFailureGate.allowed(ipKey)) {
+      return res.status(429).json({ error: "Too many requests" });
     }
     const alias = await getAuthedAlias(req);
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
+    if (!alias) {
+      authFailureGate.record(ipKey);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!statusLimiter.check(alias)) {
+      return res.status(429).json({ error: "Too many status checks. Slow down." });
+    }
 
     const reference = (req.query.reference as string | undefined)?.trim();
     if (!reference) return res.status(400).json({ error: "reference required" });

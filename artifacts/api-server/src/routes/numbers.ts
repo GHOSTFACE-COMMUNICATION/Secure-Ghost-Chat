@@ -19,6 +19,14 @@ const provisionLimiter = new RateLimiter({ windowMs: 60 * 60_000, max: 3 });
 // 30 SMS inbox fetches per minute per IP
 const smsInboxLimiter = new RateLimiter({ windowMs: 60_000, max: 30 });
 
+// Failed-auth gate, per IP. A coarse per-IP request ceiling sized to survive
+// carrier NAT would have to be so high it protects nothing, so only requests
+// that FAIL authentication charge this bucket: legitimate NATed users never
+// touch it, while an unauthenticated flood is cut off before the device-token
+// lookup. The quotas above are charged to the authenticated alias instead.
+const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30 });
+
+
 // The ghost_numbers, ghost_sms and user_rotation_limits tables are provisioned
 // through the standard Drizzle schema (lib/db/src/schema/ghostNumbers.ts) and
 // applied via `pnpm --filter db push` (see scripts/post-merge.sh) — the single
@@ -86,12 +94,19 @@ router.get("/numbers", async (req: Request, res: Response) => {
 
 // GET /api/numbers/:id/sms — inbox for a ghost number
 router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
-  if (!smsInboxLimiter.check(getIpKey(req))) {
+  const ipKey = getIpKey(req);
+  if (!authFailureGate.allowed(ipKey)) {
     return res.status(429).json({ error: "Too many requests" });
   }
   try {
     const alias = await getAuthedAlias(req);
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
+    if (!alias) {
+      authFailureGate.record(ipKey);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!smsInboxLimiter.check(alias)) {
+      return res.status(429).json({ error: "Too many requests" });
+    }
 
     const numberId = req.params.id as string;
     const [number] = await db
@@ -114,14 +129,23 @@ router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
 
 // POST /api/numbers/provision — rent a ghost number
 router.post("/numbers/provision", async (req: Request, res: Response) => {
-  if (!provisionLimiter.check(getIpKey(req))) {
-    return res
-      .status(429)
-      .json({ error: "Too many requests. Ghost number provisioning is limited to 3 per hour." });
+  const ipKey = getIpKey(req);
+  if (!authFailureGate.allowed(ipKey)) {
+    return res.status(429).json({ error: "Too many requests" });
   }
   try {
     const alias = await getAuthedAlias(req);
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
+    if (!alias) {
+      authFailureGate.record(ipKey);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    // Per alias, not per IP: this one spends real money on Vonage, and an IP
+    // key meant every subscriber behind a carrier NAT shared one 3/hour budget.
+    if (!provisionLimiter.check(alias)) {
+      return res
+        .status(429)
+        .json({ error: "Too many requests. Ghost number provisioning is limited to 3 per hour." });
+    }
 
     const { country = "NZ", plan = "basic" } = req.body;
 

@@ -14,12 +14,26 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+// See messages.ts for the reasoning: only failed auth charges this, so carrier
+// NAT and our own VPN egress cannot make real users share one budget.
+const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30 });
+
 /** Same bearer-device-token-vs-path-userId check used by push.ts/prekeys.ts. */
 async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {
   const auth = req.headers.authorization ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 
+  // Gate on prior failures from this address before the device-token lookup
+  // below, so an unauthenticated flood cannot drive DB load. Only failures
+  // charge it — see the note on authFailureGate.
+  const ipKey = getIpKey(req);
+  if (!authFailureGate.allowed(ipKey)) {
+    res.status(429).json({ error: "Too many requests" });
+    return;
+  }
+
   if (!token) {
+    authFailureGate.record(ipKey);
     res.status(401).json({ error: "Authorization: Bearer <token> header required" });
     return;
   }
@@ -38,6 +52,7 @@ async function requireDeviceAuth(req: Request, res: Response, next: () => void):
     .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
 
   if (!row) {
+    authFailureGate.record(ipKey);
     res.status(403).json({ error: "Invalid or mismatched device token for userId" });
     return;
   }
@@ -53,6 +68,7 @@ const TUNNEL_SUBNET_MIN = 2;
 const TUNNEL_SUBNET_MAX = 254;
 
 const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 30 });
+
 
 // Uses Node's built-in `https` module directly rather than global fetch —
 // pinning the agent's self-signed cert via `ca` needs a Node https.Agent,
@@ -141,7 +157,9 @@ function buildConfigResponse(tunnelIp: string): VpnConfigResponse | null {
  * deviceTokensTable's one-device model.
  */
 router.post("/vpn/:userId/register", requireDeviceAuth, async (req: Request, res: Response) => {
-  if (!limiter.check(getIpKey(req))) {
+  // requireDeviceAuth has already proved the bearer token belongs to this
+  // userId, so key the quota on the user rather than their address.
+  if (!limiter.check(req.params["userId"] as string)) {
     res.status(429).json({ error: "Too many requests" });
     return;
   }

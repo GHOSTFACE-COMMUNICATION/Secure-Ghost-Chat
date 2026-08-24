@@ -5,7 +5,7 @@ import { createReadStream } from "fs";
 import { join, resolve } from "path";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
-import { RateLimiter, getIpKey } from "../lib/rateLimiter";
+import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
 
 const router: IRouter = Router();
 
@@ -23,8 +23,12 @@ const BLOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 // Per-IP rate limiters. Uploads cost disk; downloads are cheap but we
 // still cap them so a single client can't tarpit the server.
-const uploadLimiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 120 });
-const downloadLimiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 600 });
+const uploadLimiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 1_200 });
+// Unauthenticated write surface: per-IP cannot discriminate under carrier NAT,
+// so the disk itself gets the ceiling. See TRACKER — the real fix is auth.
+const uploadGlobal = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 12_000 });
+const downloadLimiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 6_000 });
+const downloadGlobal = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 60_000 });
 
 let dirReady: Promise<void> | null = null;
 function ensureDir(): Promise<void> {
@@ -40,7 +44,7 @@ router.post(
   "/blobs",
   express.raw({ type: "application/octet-stream", limit: MAX_BLOB_BYTES }),
   async (req: Request, res: Response) => {
-    if (!uploadLimiter.check(getIpKey(req))) {
+    if (!uploadLimiter.check(getIpKey(req)) || !uploadGlobal.check()) {
       res.status(429).json({ error: "Too many uploads" });
       return;
     }
@@ -79,7 +83,7 @@ router.post(
 );
 
 router.get("/blobs/:id", async (req: Request, res: Response) => {
-  if (!downloadLimiter.check(getIpKey(req))) {
+  if (!downloadLimiter.check(getIpKey(req)) || !downloadGlobal.check()) {
     res.status(429).json({ error: "Too many downloads" });
     return;
   }

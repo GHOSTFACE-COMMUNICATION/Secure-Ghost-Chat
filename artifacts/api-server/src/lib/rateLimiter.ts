@@ -23,15 +23,32 @@ export class RateLimiter {
 
   /** Returns true if the request is allowed, false if rate-limited. */
   check(key: string): boolean {
+    if (!this.allowed(key)) return false;
+    this.record(key);
+    return true;
+  }
+
+  /**
+   * Peek without consuming budget. Split out from `check` so a caller can gate
+   * on prior failures *before* doing expensive work, and only charge the key
+   * once it knows the request was actually abusive — see `recordFailure` use in
+   * the authenticated routes.
+   */
+  allowed(key: string): boolean {
+    const entry = this.store.get(key);
+    if (!entry || Date.now() > entry.resetAt) return true;
+    return entry.count < this.max;
+  }
+
+  /** Consume one unit of budget for `key`. */
+  record(key: string): void {
     const now = Date.now();
     const entry = this.store.get(key);
     if (!entry || now > entry.resetAt) {
       this.store.set(key, { count: 1, resetAt: now + this.windowMs });
-      return true;
+      return;
     }
-    if (entry.count >= this.max) return false;
     entry.count += 1;
-    return true;
   }
 
   private prune() {
@@ -42,15 +59,59 @@ export class RateLimiter {
   }
 }
 
-/** Extract a stable IP key from an Express request, honouring X-Forwarded-For behind the Replit proxy. */
+/**
+ * A single shared bucket, independent of who is calling.
+ *
+ * Per-IP limits cannot discriminate under carrier NAT — thousands of real
+ * subscribers share one address, so any ceiling low enough to constrain an
+ * attacker also breaks legitimate users. For unauthenticated endpoints that
+ * consume a real resource (disk, Twilio spend) there is no per-user key to
+ * fall back on, so the resource itself gets the cap instead. This bounds the
+ * blast radius; it does not identify the abuser.
+ */
+export class GlobalLimiter {
+  private limiter: RateLimiter;
+  private static readonly KEY = "__global__";
+
+  constructor(opts: RateLimiterOptions) {
+    this.limiter = new RateLimiter(opts);
+  }
+
+  check(): boolean {
+    return this.limiter.check(GlobalLimiter.KEY);
+  }
+}
+
+/**
+ * Stable per-request IP key.
+ *
+ * Reads `req.ip`, which Express derives from X-Forwarded-For according to the
+ * `trust proxy` setting configured in app.ts — it walks the header from the
+ * right, skipping trusted hops, so a client-supplied prefix cannot win. That
+ * replaces the previous hand-parse of `x-forwarded-for.split(",")[0]`, which
+ * took the LEFTMOST value: client-controlled by construction.
+ *
+ * Verified 24 Aug that the old form was not exploitable as deployed — Railway's
+ * edge overwrites the header rather than appending, so a forged value never
+ * reached the app (burned the budget from one IP, reissued with a forged
+ * X-Forwarded-For, still got 429). This is defence in depth for the case where
+ * that stops being true: a direct exposure, or a proxy that appends.
+ */
 export function getIpKey(req: {
   ip?: string;
   headers: Record<string, string | string[] | undefined>;
 }): string {
+  if (req.ip) return req.ip;
+  // Fallback for callers that are not Express requests (and for a misconfigured
+  // trust proxy). Take the RIGHTMOST entry: the hop nearest us, which the
+  // closest proxy appended, rather than anything further left that a client
+  // could have supplied.
   const forwarded = req.headers["x-forwarded-for"];
   if (forwarded) {
-    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-    return first.trim();
+    const raw = Array.isArray(forwarded) ? forwarded[forwarded.length - 1] : forwarded;
+    const parts = raw.split(",");
+    const last = parts[parts.length - 1]?.trim();
+    if (last) return last;
   }
-  return req.ip ?? "unknown";
+  return "unknown";
 }

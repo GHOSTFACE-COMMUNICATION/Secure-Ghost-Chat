@@ -7,6 +7,22 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// ── Proxy trust ───────────────────────────────────────────────────────────────
+// Railway terminates TLS at its edge and forwards over the private network, so
+// the socket peer is always the proxy — without this, `req.ip` is useless and
+// X-Forwarded-For has to be parsed by hand (which is what lib/rateLimiter.ts
+// used to do, taking the leftmost, client-supplied value).
+//
+// `1` = trust exactly one hop. Express then walks X-Forwarded-For from the
+// right, skipping that many trusted proxies, so anything a client prepends is
+// ignored. Verified 24 Aug that Railway's edge OVERWRITES the header rather
+// than appending, so today there is exactly one entry and it is the real client
+// — but `1` stays correct either way, which is the point of setting it.
+//
+// Raise this only if another trusted proxy is ever put in front of Railway;
+// setting it too high would let a client's forged prefix be read as the peer.
+app.set("trust proxy", 1);
+
 // ── Security headers via helmet ───────────────────────────────────────────────
 app.use(
   helmet({
