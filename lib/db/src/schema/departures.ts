@@ -1,4 +1,5 @@
-import { pgTable, serial, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Stores one-shot "I have self-destructed" notices broadcast by a client
@@ -17,6 +18,13 @@ export const departuresTable = pgTable("departures", {
   toAlias:   text("to_alias").notNull(),
   delivered: boolean("delivered").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // deliverPendingDepartures (ws/manager.ts) filters on exactly this pair on
+  // every reconnect — same unindexed-sequential-scan problem the messages
+  // table had, and the same partial-index fix.
+  index("idx_departures_pending")
+    .on(table.toAlias)
+    .where(sql`${table.delivered} = false`),
+]);
 
 export type Departure = typeof departuresTable.$inferSelect;
