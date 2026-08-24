@@ -49,7 +49,20 @@ function wireSubscriber(): void {
     );
   });
 
-  sub.subscribe(KICK_CHANNEL).catch((err) => logger.warn({ err }, "[router] kick subscribe failed"));
+  // Re-subscribe on every ready, not just the first. ioredis drops all
+  // subscriptions when the connection drops, so after a blip this replica
+  // would keep holding sockets that no other replica could reach — silently,
+  // since nothing errors. Re-arming here also covers the startup case, where
+  // the socket is not yet up when this first runs.
+  const resubscribe = () => {
+    const channels = [KICK_CHANNEL, ...[...localDelivery.keys()].map((a) => `${CHANNEL_PREFIX}${a}`)];
+    sub
+      .subscribe(...channels)
+      .then(() => logger.info({ count: channels.length }, "[router] subscriptions armed"))
+      .catch((err) => logger.warn({ err }, "[router] subscribe failed"));
+  };
+  sub.on("ready", resubscribe);
+  if (sub.status === "ready") resubscribe();
 }
 
 /** Called when this replica accepts an authenticated socket for `alias`. */

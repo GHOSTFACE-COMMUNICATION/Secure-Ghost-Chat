@@ -20,10 +20,15 @@ let healthy = false;
 
 function build(url: string, role: string): Redis {
   const conn = new Redis(url, {
-    // Fail a command rather than queueing it forever when the connection is
-    // down. Callers fall back to their in-process path instead of hanging a
-    // request behind a dead socket.
-    enableOfflineQueue: false,
+    // Commands: fail rather than queue when the connection is down, so callers
+    // fall back to their in-process path instead of hanging a request behind a
+    // dead socket.
+    //
+    // Subscriber: queue instead. It never serves a request path, and its only
+    // traffic is SUBSCRIBE — which is issued at startup, before the socket is
+    // necessarily up. Failing those meant the kick channel was never
+    // subscribed and never retried.
+    enableOfflineQueue: role === "subscriber",
     maxRetriesPerRequest: 1,
     // Cap the reconnect backoff so a long outage doesn't leave us waiting
     // minutes to notice recovery.
