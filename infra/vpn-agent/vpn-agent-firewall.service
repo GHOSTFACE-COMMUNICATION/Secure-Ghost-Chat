@@ -1,0 +1,15 @@
+[Unit]
+Description=GHOSTFACE vpn-agent port restriction (tcp/8443 allowlist)
+# wg-quick adds its own nft rules on start; run after it so the two do not
+# race. Ordering only — this does not depend on wg0 being up.
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/etc/vpn-agent/firewall.sh
+# The script is idempotent, so a re-run on restart is harmless.
+
+[Install]
+WantedBy=multi-user.target

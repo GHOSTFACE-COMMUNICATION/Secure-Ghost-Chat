@@ -64,3 +64,31 @@ attack that caused the outage) while `/healthz` still answered in 3ms; 12
 concurrent registrations producing exactly 12 intact `[Peer]` blocks with no
 welding; auth rejecting missing and wrong tokens; idempotent re-registration;
 and delete removing the peer cleanly.
+
+## Firewall
+
+`firewall.sh` restricts tcp/8443 to the api-server's Railway static outbound
+IPs, plus localhost for healthchecks. It touches only that port, via its own
+`VPNAGENT` chain — SSH, WireGuard and the `INPUT` policy are left alone, so it
+cannot lock you out. That is also why `ufw` stays disabled on this box.
+
+Deploy:
+
+```
+scp infra/vpn-agent/firewall.sh root@88.99.225.231:/etc/vpn-agent/firewall.sh
+scp infra/vpn-agent/vpn-agent-firewall.service root@88.99.225.231:/etc/systemd/system/
+ssh root@88.99.225.231 'chmod +x /etc/vpn-agent/firewall.sh \
+  && systemctl daemon-reload \
+  && systemctl enable --now vpn-agent-firewall'
+```
+
+The rules are plain iptables (`iptables-nft` on this box — it writes into
+`table ip filter`, alongside the NAT rules wg-quick installs). They do **not**
+survive a reboot on their own, which is what the systemd unit is for.
+
+**Re-run `firewall.sh` if the Railway static IPs change** — they are reassigned
+when the service moves region. Current values come from:
+
+```
+railway outbound-network static-ip status --service api-server
+```
