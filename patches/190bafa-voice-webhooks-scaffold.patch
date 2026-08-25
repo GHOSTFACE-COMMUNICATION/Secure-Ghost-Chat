@@ -1,0 +1,181 @@
+From 190bafa4fc6d9a6d81d326b5811410baa6096448 Mon Sep 17 00:00:00 2001
+From: ghostzeronz-coder <ghostzeronz-coder@users.noreply.github.com>
+Date: Mon, 17 Aug 2026 16:06:43 -0700
+Subject: [PATCH] feat(api-server): scaffold inbound voice webhooks for ghost
+ numbers
+
+Vonage numbers are currently provisioned SMS-only (vonageClient.searchNumbers
+requests features: "SMS"), and there was no voice webhook at all - a call to
+a ghost number would just hit dead air with no Answer URL configured.
+
+Adds POST/GET /api/webhooks/voice/answer (Vonage's Answer URL - must return
+NCCO describing what to do with the call) and POST /api/webhooks/voice/events
+(call status changes), mirroring the existing SMS inbound webhook's pattern:
+look up the active ghost number by MSISDN (now shared via
+findActiveNumberByMsisdn, used by both SMS and voice), and push a real-time
+notification to the owner via broadcastToAlias (new "voice_call_missed" wire
+type) if they're online.
+
+Actual call routing - forward to the owner's real number, voicemail, or
+bridge into the app's own WebRTC calling - is a product decision, not a
+technical one, and isn't made yet. The answer webhook currently just plays a
+"doesn't accept calls yet" message via NCCO so the call doesn't hit dead air,
+while still notifying the owner someone tried. Swapping in real routing
+later is a change to the NCCO returned here, not to the plumbing.
+
+Still needed once call routing is decided: provisioning numbers with voice
+capability (features: "SMS,VOICE" or similar) and configuring a Vonage
+Application with these URLs - both are Vonage-dashboard/account-side steps,
+not code.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ artifacts/api-server/.env.example          |  6 ++
+ artifacts/api-server/src/routes/numbers.ts | 91 ++++++++++++++++++----
+ artifacts/api-server/src/ws/manager.ts     |  1 +
+ 3 files changed, 84 insertions(+), 14 deletions(-)
+
+diff --git a/artifacts/api-server/.env.example b/artifacts/api-server/.env.example
+index 841c6cf..6a7b6fd 100644
+--- a/artifacts/api-server/.env.example
++++ b/artifacts/api-server/.env.example
+@@ -39,3 +39,9 @@ TWILIO_API_KEY_SECRET=
+ # Vonage
+ VONAGE_API_KEY=
+ VONAGE_API_SECRET=
++# Inbound voice webhooks (POST /api/webhooks/voice/answer, /voice/events)
++# need no separate credentials here — they just receive Vonage's requests.
++# They do need a voice-capable Vonage Application configured on Vonage's
++# side with its Answer URL / Event URL pointed at this server, and numbers
++# provisioned with voice capability (see vonageClient.searchNumbers, which
++# currently only requests "SMS").
+diff --git a/artifacts/api-server/src/routes/numbers.ts b/artifacts/api-server/src/routes/numbers.ts
+index 99ab7ab..2265680 100644
+--- a/artifacts/api-server/src/routes/numbers.ts
++++ b/artifacts/api-server/src/routes/numbers.ts
+@@ -346,26 +346,32 @@ router.post("/numbers/:id/rotate-now", async (req: Request, res: Response) => {
+   }
+ });
+ 
++// Match against current MSISDN OR any archived MSISDN — covers in-flight
++// SMS/calls sent to a recently-rotated number. Shared by the SMS and voice
++// inbound webhooks below.
++async function findActiveNumberByMsisdn(msisdn: string) {
++  const [number] = await db
++    .select()
++    .from(ghostNumbersTable)
++    .where(
++      and(
++        eq(ghostNumbersTable.status, "active"),
++        or(
++          eq(ghostNumbersTable.msisdn, msisdn),
++          sql`${ghostNumbersTable.archivedMsisdns} @> ${JSON.stringify([msisdn])}::jsonb`,
++        ),
++      ),
++    );
++  return number;
++}
++
+ // POST /api/webhooks/sms/inbound — Vonage inbound SMS webhook
+ router.post("/webhooks/sms/inbound", async (req: Request, res: Response) => {
+   try {
+     const { msisdn: from, to, text } = req.body;
+     if (!to || !from) return res.json({ ok: true });
+ 
+-    // Match against current MSISDN OR any archived MSISDN — covers in-flight SMS
+-    // sent to a recently-rotated number.
+-    const [number] = await db
+-      .select()
+-      .from(ghostNumbersTable)
+-      .where(
+-        and(
+-          eq(ghostNumbersTable.status, "active"),
+-          or(
+-            eq(ghostNumbersTable.msisdn, to),
+-            sql`${ghostNumbersTable.archivedMsisdns} @> ${JSON.stringify([to])}::jsonb`,
+-          ),
+-        ),
+-      );
++    const number = await findActiveNumberByMsisdn(to);
+ 
+     if (number) {
+       await db.insert(ghostSmsTable).values({
+@@ -393,6 +399,63 @@ router.post("/webhooks/sms/inbound", async (req: Request, res: Response) => {
+   }
+ });
+ 
++// POST /api/webhooks/voice/answer — Vonage's Answer URL, hit the instant a
++// call reaches a ghost number. Must respond with an NCCO (Vonage's
++// call-control JSON) describing what to do with the call — returning an
++// error or empty body leaves the caller on dead air.
++//
++// Actual call routing (forward to the owner's real number, voicemail, or
++// bridge into this app's own WebRTC calling) isn't decided yet — that's a
++// product call, not just a technical one, and changes what gets built here.
++// This scaffold announces the number doesn't take calls yet and notifies
++// the owner in-app that someone tried, so the webhook plumbing is live and
++// testable end-to-end before the real routing behavior is built on top.
++//
++// Accepts both GET and POST since Vonage's Application config decides which
++// method it calls the Answer URL with, and params can land in the query
++// string or the body depending on that setting.
++const voiceAnswerHandler = async (req: Request, res: Response) => {
++  const params = { ...req.query, ...req.body } as { to?: string; from?: string };
++  const { to, from } = params;
++
++  try {
++    if (to) {
++      const number = await findActiveNumberByMsisdn(to);
++      if (number) {
++        broadcastToAlias(number.userId, {
++          type: "voice_call_missed",
++          from: from ?? "unknown",
++          to,
++        });
++        logger.info({ to, from, userId: number.userId }, "Inbound voice call to ghost number");
++      }
++    }
++  } catch (err) {
++    logger.error({ err, to, from }, "Voice answer webhook lookup failed");
++    // Fall through — still return valid NCCO below so the caller doesn't
++    // hit dead air just because the in-app notification failed.
++  }
++
++  return res.json([
++    {
++      action: "talk",
++      text: "This number does not accept voice calls yet. Please send a text message instead.",
++    },
++  ]);
++};
++router.get("/webhooks/voice/answer", voiceAnswerHandler);
++router.post("/webhooks/voice/answer", voiceAnswerHandler);
++
++// POST /api/webhooks/voice/events — Vonage's Event URL, posts call status
++// changes (ringing, answered, completed, etc.) throughout the call's
++// lifecycle. Nothing acts on these yet; logged for visibility while the
++// call-routing design above is still undecided. Vonage expects a bare 200
++// regardless of body.
++router.post("/webhooks/voice/events", (req: Request, res: Response) => {
++  logger.debug({ body: req.body }, "Voice call event");
++  res.status(200).end();
++});
++
+ // GET /api/numbers/plans — pricing info
+ router.get("/numbers/plans", (_req: Request, res: Response) => {
+   res.json({
+diff --git a/artifacts/api-server/src/ws/manager.ts b/artifacts/api-server/src/ws/manager.ts
+index 3d70d1e..ea7807f 100644
+--- a/artifacts/api-server/src/ws/manager.ts
++++ b/artifacts/api-server/src/ws/manager.ts
+@@ -48,6 +48,7 @@ export interface WireMessage {
+     | "call-answer"
+     | "call-ice"
+     | "sms_inbound"
++    | "voice_call_missed"
+     | "departed"
+     | "ghostpad-create"
+     | "ghostpad-created"
+-- 
+2.50.1 (Apple Git-155)
+
