@@ -12,10 +12,19 @@ into pay-as-you-go). Never run `eas build` — or anything that triggers one —
 unless the user has just said to. Same for `eas submit`: that pushes a binary
 to real users' TestFlight.
 
-### Always answer "no" to the Apple login prompt in EAS
-When an EAS command asks to log in to an Apple account, decline. The stored
+### Apple login in EAS: "no" for builds, real login for credentials work
+When an EAS **build** asks to log in to an Apple account, decline — the stored
 credentials on EAS servers (App Store Connect API key + provisioning profiles)
-are what should be used.
+are what should be used. But `eas credentials` operations that CHANGE things
+(regenerating a provisioning profile, registering an app group, setting up a
+new target's profile) are Developer Portal operations the ASC API key cannot
+perform — verified 25 Aug: unauthenticated, the TUI skips validation for
+existing targets and fails outright on new ones. Those need a real Apple ID
+login + 2FA, done by Benji at the keyboard.
+
+⚠️ The Apple ID prompt is a TEXT FIELD, not yes/no — typing "n" submits "n"
+as an Apple ID and produces a confusing "account locked" error about that
+bogus account. Press Ctrl+C to decline instead.
 
 ### Verify `EXPO_PUBLIC_DOMAIN` before any build
 It must be a **bare host with no scheme and no trailing slash** — e.g.
