@@ -114,7 +114,8 @@
       ],
       "@config-plugins/react-native-webrtc",
       "./plugins/withAdiRegistration",
-      "./plugins/withVoipPushKit"
+      "./plugins/withVoipPushKit",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,

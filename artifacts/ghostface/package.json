@@ -13,10 +13,13 @@
     "check:silence": "node scripts/check-panic-wipe-silence.js",
     "check:handshake": "node scripts/check-x3dh-handshake.mjs",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "ios:sim:build": "xcodebuild -workspace ios/GHOSTFACE.xcworkspace -scheme GHOSTFACE -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CLANG_ENABLE_EXPLICIT_MODULES=NO SWIFT_ENABLE_EXPLICIT_MODULES=NO build"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@bacons/apple-targets": "^5.0.0",
+    "@bacons/xcode": "1.0.0-alpha.32",
     "@eslint/js": "^10.0.1",
     "@expo-google-fonts/inter": "^0.4.0",
     "@expo/cli": "54.0.23",
