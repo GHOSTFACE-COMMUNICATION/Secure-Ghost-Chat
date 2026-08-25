@@ -1,0 +1,111 @@
+# GHOSTFACE api-server — working agreement
+
+Scoped to this directory — see the repo-root `CLAUDE.md` for repo-wide rules
+(STATUS.md/TRACKER.md, repo layout, report-before-writing-code, dependency
+approval).
+
+## ⚠️ Pushing this branch deploys to production
+
+Railway watches `ghostzeronz-coder/Secure-Ghost-Chat` on branch
+**`feat/push-notifications`** and deploys `api-server` on every push. There is
+no staging environment. A docs-only commit is skipped by `watchPatterns` in
+`railway.json`; anything touching `artifacts/api-server/**`, `lib/db/**`,
+`lib/api-zod/**` or the lockfile ships.
+
+A deploy restarts the process, which **drops every live WebSocket**.
+
+## Which box is which
+
+Getting this wrong has already cost a session's worth of debugging.
+
+| Host | What it is |
+|---|---|
+| `88.99.225.231` | **VPN box** — WireGuard `wg0` + the peer agent on 8443. `VPN_AGENT_URL` / `VPN_SERVER_ENDPOINT` point here. |
+| `204.168.139.146` | **coturn only** (`turnbox` in `~/.ssh/config`, user `coturnops`). No `wg0`, no agent. Serves TURN for calls. |
+
+`STATUS.md` sometimes calls the VPN box `ghostface-vpn-eu1`; its hostname is
+`ubuntu-4gb-hel1-*`. Confirm by IP, not by name. Agent source and deploy steps
+live in `infra/vpn-agent/`.
+
+## Railway topology — do not delete services
+
+`api-server` → `pgbouncer.railway.internal` → `postgres-ha` → Patroni leader.
+**PgBouncer and Postgres HA are both in the only path from the API to the
+database.** Deleting either is an instant, total outage. PgBouncer logging
+`0 queries/s` when idle is normal, not evidence it is unused.
+
+`DATABASE_URL` points at PgBouncer (`transaction` pool mode), so the `max` in
+`lib/db/src/index.ts` is a client-side cap inside the pooler's budget, not a
+direct claim on backend connections. If the pooler is ever bypassed,
+`max × replica count` must stay under Postgres `max_connections`.
+
+## Redis is load-bearing
+
+`REDIS_URL` backs both the rate limiters and all cross-replica WebSocket state
+(`ws/sharedState.ts`, `ws/router.ts`). `REDIS_URL` unset is a supported mode —
+dev and tests fall back to per-process state — but **that fallback is only
+correct at one replica**. A mid-flight outage degrades limits to per-replica
+rather than failing open, which matters because `provisionLimiter` spends real
+money.
+
+## Do not put new state in module scope in `ws/manager.ts`
+
+That is what pinned this service to `numReplicas: 1` and took three commits to
+undo. Anything that must be visible to another replica belongs in
+`ws/sharedState.ts`; anything that must reach a socket on another replica goes
+through `ws/router.sendToAlias`. A socket handle itself stays local.
+
+Corollary: do not branch on `ws.readyState` to decide whether a peer received
+something. It reads OPEN for tens of seconds after a backgrounded socket dies,
+and it cannot see a socket held by another replica. Branch on what
+`sendToAlias` actually returned.
+
+## Static outbound IPs are region-bound
+
+The VPN agent's 8443 is firewalled to this service's three Railway static
+egress IPs. **Railway reassigns them if the service changes region**, and this
+service moved `sfo` → `us-west2` on 24 Aug. A future region change breaks peer
+registration silently, and it will look exactly like the P0 in STATUS.md.
+Re-run `infra/vpn-agent/firewall.sh` with fresh values from
+`railway outbound-network static-ip status --service api-server`.
+
+## Schema changes: `drizzle-kit push`, no migration files
+
+The live schema is exactly what the TS in `lib/db/src/schema/` declares — there
+are no migration files to review. `pnpm --filter @workspace/db push` diffs the
+**entire** schema against production, so its blast radius is every table.
+
+For a single index, prefer applying it by hand against the Patroni leader
+(`DATABASE_PUBLIC_URL`, which bypasses PgBouncer) with
+`CREATE INDEX CONCURRENTLY`, then let the TS declaration document what exists.
+
+## `delivered` does not mean delivered
+
+`messagesTable.delivered` means *the server attempted delivery*. The client
+never sends the ack the server handles (`ws/manager.ts` has a `type: "ack"`
+branch nothing reaches), and three code paths set the flag without any proof of
+receipt. Do not build anything that treats it as a receipt until the client ack
+lands — see TRACKER.
+
+Related: `"ack"` means two different things in the wire protocol — auth
+confirmation server→client, and message receipt client→server.
+
+## Rate limits are per-alias, not per-IP
+
+The IP bucket counts **only failed authentication**. That is deliberate: mobile
+carrier NAT and our own VPN egress put thousands of real users behind one
+address, so any per-IP ceiling low enough to constrain an attacker also breaks
+them. Real quotas are charged to the authenticated alias. Do not "simplify" this
+back to per-IP.
+
+Four endpoints have no alias to key on (`invites`, `blobs`, `iceConfig`,
+`integrity`) and are capped by a `GlobalLimiter` on the resource instead. Three
+of them are unauthenticated — see TRACKER for the open auth-posture decision.
+
+## Before reporting work done
+
+`pnpm run typecheck && pnpm run lint && pnpm test` from this directory.
+
+`pnpm run lint` currently fails on a pre-existing warning in
+`lib/inviteRepository.ts` (`--max-warnings=0`). Not yours; lint your own files
+with `npx eslint <paths>` to check cleanly.
