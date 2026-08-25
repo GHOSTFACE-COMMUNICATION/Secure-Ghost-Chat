@@ -8,6 +8,7 @@ import {
   Animated,
   AppState,
   Easing,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,12 +19,208 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GhostRevealMark } from "@/components/GhostRevealMark";
-import { GoldGradient } from "@/components/GoldGradient";
+import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import { LinearGradient } from "expo-linear-gradient";
+import {
+  GLASS_METALLIC_BLACK,
+  GLASS_TINT_BLACK,
+  GOLD_OUTLINE_COLOR_CLEAR,
+  GoldGradient,
+  SpecularHighlight,
+} from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { emitFailedUnlock } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
 import { type } from "@/constants/typography";
+
+// ── ScratchFoil ──────────────────────────────────────────────────────────────
+// Reusable scratch-off layer (same idea as the landing page's scratch-to-
+// reveal): gold foil tiles clear under the finger with ragged edges; once
+// REVEAL_FRACTION of the foil is gone the remainder fades, the overlay stops
+// intercepting touches, and onRevealed (if any) fires. Sizes itself to
+// whatever it covers via onLayout. Pure Views + PanResponder — no canvas
+// dependency, which keeps it out of the native build graph entirely.
+const USE_NATIVE_GLASS = isLiquidGlassAvailable();
+
+const SCRATCH_REVEAL_FRACTION = 0.55;
+
+function ScratchFoil({
+  label,
+  labelSize = 7.5,
+  // Same black liquid glass as the radial menu's nodes (NODE_GLASS_TINT,
+  // rgba(10,10,12,0.55)) — opacity raised so the foil still conceals what's
+  // underneath; at the node's own 0.55 the hidden text would ghost through.
+  foil = "rgba(12,12,14,0.96)",
+  labelColor = "#E8C55B",
+  radius = 6,
+  onRevealed,
+}: {
+  label?: string;
+  labelSize?: number;
+  foil?: string;
+  labelColor?: string;
+  radius?: number;
+  onRevealed?: () => void;
+}) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [gone, setGone] = useState(false);
+  const tilesRef = useRef<Animated.Value[]>([]);
+  const cleared = useRef<Set<number>>(new Set());
+  const done = useRef(false);
+  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const dressingOpacity = useRef(new Animated.Value(1)).current;
+
+  const cols = dims ? Math.max(6, Math.round(dims.w / 14)) : 0;
+  const rows = dims ? Math.max(3, Math.round(dims.h / 11)) : 0;
+  if (dims && tilesRef.current.length !== cols * rows) {
+    tilesRef.current = Array.from({ length: cols * rows }, () => new Animated.Value(1));
+  }
+
+  const clearAt = (x: number, y: number) => {
+    if (!dims || done.current) return;
+    const col = Math.floor((x / dims.w) * cols);
+    const row = Math.floor((y / dims.h) * rows);
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const r = row + dr;
+        const c = col + dc;
+        if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+        // Corner neighbours stay sometimes, giving the patch a ragged edge.
+        if (Math.abs(dr) + Math.abs(dc) === 2 && Math.random() < 0.5) continue;
+        const i = r * cols + c;
+        if (cleared.current.has(i)) continue;
+        cleared.current.add(i);
+        Animated.timing(tilesRef.current[i], {
+          toValue: 0,
+          duration: 140,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+    if (cleared.current.size === 1 || cleared.current.size === 4) {
+      Animated.timing(labelOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    }
+    if (cleared.current.size / (cols * rows) >= SCRATCH_REVEAL_FRACTION) {
+      done.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      Animated.timing(dressingOpacity, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      tilesRef.current.forEach((t, i) => {
+        if (!cleared.current.has(i)) {
+          Animated.timing(t, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+        }
+      });
+      setTimeout(() => {
+        setGone(true);
+        onRevealed?.();
+      }, 300);
+    }
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !done.current,
+      onMoveShouldSetPanResponder: () => !done.current,
+      onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+    }),
+  ).current;
+
+  if (gone) return null;
+
+  const tileW = dims ? dims.w / cols : 0;
+  const tileH = dims ? dims.h / rows : 0;
+
+  return (
+    <View
+      {...pan.panHandlers}
+      onLayout={(e) =>
+        setDims({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })
+      }
+      style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: "hidden" }]}
+    >
+      {dims &&
+        tilesRef.current.map((t, i) => {
+          const r = Math.floor(i / cols);
+          const c = i % cols;
+          return (
+            <Animated.View
+              key={i}
+              style={{
+                position: "absolute",
+                left: c * tileW - 0.5,
+                top: r * tileH - 0.5,
+                width: tileW + 1,
+                height: tileH + 1,
+                backgroundColor: foil,
+                opacity: t,
+              }}
+            />
+          );
+        })}
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: dressingOpacity }]}>
+        {USE_NATIVE_GLASS ? (
+          <GlassView
+            style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
+            glassEffectStyle="clear"
+            tintColor="rgba(10,10,12,0.35)"
+          />
+        ) : (
+          <LinearGradient
+            colors={GLASS_METALLIC_BLACK}
+            start={{ x: 0.15, y: 0 }}
+            end={{ x: 0.85, y: 1 }}
+            style={[StyleSheet.absoluteFill, { borderRadius: radius, opacity: 0.55 }]}
+          />
+        )}
+        <SpecularHighlight intensity={0.35} />
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { borderRadius: radius, borderWidth: 1, borderColor: GOLD_OUTLINE_COLOR_CLEAR },
+          ]}
+        />
+      </Animated.View>
+      {label ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { alignItems: "center", justifyContent: "center", opacity: labelOpacity },
+          ]}
+        >
+          <Text style={[type.labelStrong, { fontSize: labelSize, letterSpacing: 1.4, color: labelColor }]}>
+            {label}
+          </Text>
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
+// Small corner plaque: bordered sign with the tagline underneath its foil.
+function ScratchSign({ fg, onRevealed }: { fg: string; onRevealed: () => void }) {
+  return (
+    <View
+      style={{
+        width: 118,
+        height: 26,
+        borderRadius: 6,
+        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Ionicons name="lock-closed" size={7} color={fg} />
+        <Text style={[type.monoSmall, { fontSize: 6.5, color: fg, letterSpacing: 0.5 }]}>NO FACE. NO TRACE.</Text>
+      </View>
+      <ScratchFoil label="APTAY EREHAY" onRevealed={onRevealed} />
+    </View>
+  );
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -598,15 +795,21 @@ export default function LockScreen() {
     },
     enterBtnWrap: {
       borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: "#ffffff",
-      boxShadow: boxShadow(colors.primary, 0.4, 16, 0, 4),
     },
     enterBtn: {
       paddingHorizontal: 64,
       paddingVertical: 15,
       alignItems: "center",
       borderRadius: colors.radius,
+    },
+    enterGlass: {
+      paddingHorizontal: 64,
+      paddingVertical: 15,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: GOLD_OUTLINE_COLOR_CLEAR,
     },
     enterBtnText: {
       ...type.labelStrong,
@@ -898,14 +1101,55 @@ export default function LockScreen() {
             onPress={hasPin ? revealKeypad : () => setLocked(false)}
             testID={hasPin ? "enter-btn" : "no-pin-continue"}
           >
-            <GoldGradient solid style={styles.enterBtn}>
-              <Text style={styles.enterBtnText}>ENTER</Text>
-            </GoldGradient>
+            {USE_NATIVE_GLASS ? (
+              <GlassView
+                style={styles.enterGlass}
+                glassEffectStyle="clear"
+                tintColor={GLASS_TINT_BLACK}
+                isInteractive
+              >
+                <SpecularHighlight intensity={0.35} />
+                <Text style={styles.enterBtnText}>ENTER</Text>
+              </GlassView>
+            ) : (
+              <View style={[styles.enterGlass, { overflow: "hidden" }]}>
+                <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={GLASS_METALLIC_BLACK}
+                  start={{ x: 0.15, y: 0 }}
+                  end={{ x: 0.85, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+                <SpecularHighlight intensity={0.35} />
+                <Text style={styles.enterBtnText}>ENTER</Text>
+              </View>
+            )}
+            <ScratchFoil label="ENTER" labelSize={15} radius={Number(colors.radius) || 12} />
           </Pressable>
+
+          {!hasPin && (
+            <Pressable
+              onPress={() => setLocked(false)}
+              style={({ pressed }) => [{ marginTop: 14 }, pressed && { opacity: 0.7 }]}
+              testID="signup-link"
+            >
+              <Text style={[type.monoSmall, { color: colors.mutedForeground, letterSpacing: 0.5 }]}>
+                NO ACCOUNT? <Text style={{ color: colors.primary }}>TAP HERE TO SIGN UP</Text>
+              </Text>
+            </Pressable>
+          )}
 
           <View style={styles.taglineRow}>
             <Ionicons name="lock-closed" size={11} color={colors.mutedForeground} />
             <Text style={styles.taglineText}>NO FACE. NO TRACE.</Text>
+          </View>
+
+          <View style={{ position: "absolute", top: insets.top + 10, right: 16 }}>
+            <ScratchSign
+              fg={colors.primary}
+              onRevealed={hasPin ? revealKeypad : () => setLocked(false)}
+            />
           </View>
         </View>
       )}
