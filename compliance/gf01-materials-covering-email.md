@@ -1,17 +1,16 @@
 # GF-01 — covering email to Sarah Salmond (materials pack)
 
-Draft finalised 25 Aug 2026, incorporating the full declaration history
-recovered that day (three uploads, not two; honest questionnaire first).
+Draft finalised 25 Aug 2026 against the exhibit bundle (June questionnaire
++ failed doc uploads; four binary uploads; honest answers first).
 Send from benjamin@ghostface.co.nz on the existing thread.
 
-**Attachments to include:**
-1. `compliance/GHOSTFACE_Cryptographic_Inventory.pdf` (in this repo)
-2. `compliance/GHOSTFACE_Classification_Memo.pdf` (in this repo)
-3. Screenshot: ASC build page, 16 Jul upload (v1.0.1 b27, Invalid Binary)
-4. Screenshot: ASC build page, build 63 (v1.0.2, Validated)
-5. The 3 Jul EAS submit log showing Apple error 90592
-6. The July ASC App Encryption Documentation record, if retrievable
-   (App Information → App Encryption Documentation)
+**Attachments to include (all in `compliance/` in this repo):**
+1. `GHOSTFACE_Cryptographic_Inventory.pdf`
+2. `GHOSTFACE_Classification_Memo.pdf`
+3. `GHOSTFACE_ASC_Declaration_Exhibits.pdf` — 6 captioned screenshots
+   covering the ASC encryption-documentation page (Jun 18/19 upload
+   failures), the Jul 3 EAS submission + 90592 log, and the three ASC
+   build records (b28 Invalid, b27 Invalid, b63 Validated)
 
 ---
 
@@ -29,23 +28,29 @@ $500 plus GST — having the classification conclusion and the App Store
 declaration addressed in one opinion is exactly what we want.
 
 Regarding the prior declarations and questionnaire responses you asked
-about, our App Store Connect history shows three upload attempts, and the
-sequence is worth setting out precisely:
+about, our records show the following sequence, each step evidenced in the
+attached exhibit bundle:
 
-1. In early July 2026 I manually completed the export-compliance
+1. In June 2026 (18th and 19th) I completed the export-compliance
    questionnaire in App Store Connect, answering that the app does use
-   encryption. That created export-compliance documentation in Apple's
-   system with an associated key value.
+   encryption, and attempted to upload supporting documentation. App
+   Store Connect shows both document uploads with status "Upload
+   Failed" (Exhibit 1).
 
-2. On 3 July, an upload of v1.0.0 was rejected by Apple mid-processing
-   (error 90592) because the binary's Info.plist carried no export-
-   compliance key at all, which did not match the documentation on file.
-   The rejection log is attached.
+2. On 3 July, an automated submission of v1.0.0 (build 27) was rejected
+   by Apple mid-processing with error 90592: the binary's Info.plist
+   carried no export-compliance key at all, which did not match the
+   export-compliance documentation Apple held from the June
+   questionnaire (Exhibits 2-3).
 
-3. On 16 July, an upload of v1.0.1 reached App Store Connect but was
-   marked Invalid Binary and was never installable or distributed.
+3. Also on 3 July, a second binary, v1.0.0 (build 28), reached App
+   Store Connect and was marked Invalid Binary - never installable
+   (Exhibit 4).
 
-4. On 21 August (UTC), a build (v1.0.2, build 63) carrying
+4. On 16 July, v1.0.1 (build 27) likewise reached App Store Connect and
+   was marked Invalid Binary (Exhibit 5).
+
+5. On 21 August (UTC), a build (v1.0.2, build 63) carrying
    ITSAppUsesNonExemptEncryption set to "false" was uploaded and validated,
    with "App Uses Non-Exempt Encryption: No" recorded — this time derived
    from the compiled setting, with no questionnaire completed. For
@@ -62,9 +67,9 @@ reversal of it, and it remains the current committed value. Later builds
 exist (through build 66) but none has been uploaded, and we are holding all
 further uploads and any submission until your advice.
 
-Screenshots of both build records and the rejection log are attached
-[+ the July documentation record if located]. Happy to provide anything
-further your review turns up.
+The exhibit bundle also shows the App Encryption Documentation section
+as it stands today. Happy to provide anything further your review turns
+up.
 
 Kind regards,
 Benjamin Henderson
