@@ -234,6 +234,126 @@ function ScratchSign({ fg, onRevealed }: { fg: string; onRevealed: () => void })
   );
 }
 
+// ── SwipeEnter ───────────────────────────────────────────────────────────────
+// The primary way into the app: scratch-to-reveal, but reliable. Exactly ONE
+// PanResponder claims the touch (no nested Pressable, no interactive glass, so
+// nothing competes). Rubbing clears gold-glass foil tiles under the finger for
+// the scratch feel; lifting the finger — after any real touch — enters. So a
+// deliberate scratch OR a quick swipe both get you in, and it can't dead-end.
+function SwipeEnter({
+  radius,
+  textColor,
+  testID,
+  onEnter,
+}: {
+  radius: number;
+  textColor: string;
+  testID?: string;
+  onEnter: () => void;
+}) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const tilesRef = useRef<Animated.Value[]>([]);
+  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const touched = useRef(false);
+  const fired = useRef(false);
+
+  const cols = dims ? Math.max(8, Math.round(dims.w / 16)) : 0;
+  const rows = dims ? Math.max(3, Math.round(dims.h / 12)) : 0;
+  if (dims && tilesRef.current.length !== cols * rows) {
+    tilesRef.current = Array.from({ length: cols * rows }, () => new Animated.Value(1));
+  }
+
+  const clearAt = (x: number, y: number) => {
+    if (!dims) return;
+    touched.current = true;
+    Animated.timing(labelOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+    const col = Math.floor((x / dims.w) * cols);
+    const row = Math.floor((y / dims.h) * rows);
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const r = row + dr;
+        const c = col + dc;
+        if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+        const t = tilesRef.current[r * cols + c];
+        if (t) Animated.timing(t, { toValue: 0, duration: 130, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+      }
+    }
+  };
+
+  const enter = () => {
+    if (fired.current || !touched.current) return;
+    fired.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    tilesRef.current.forEach((t) => Animated.timing(t, { toValue: 0, duration: 220, useNativeDriver: true }).start());
+    setTimeout(onEnter, 200);
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      onPanResponderRelease: () => enter(),
+      onPanResponderTerminate: () => enter(),
+    }),
+  ).current;
+
+  const tileW = dims ? dims.w / cols : 0;
+  const tileH = dims ? dims.h / rows : 0;
+
+  return (
+    <View
+      {...pan.panHandlers}
+      testID={testID}
+      onLayout={(e) => setDims({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+      style={{
+        paddingHorizontal: 64,
+        paddingVertical: 15,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: radius,
+        borderWidth: 1,
+        borderColor: GOLD_OUTLINE_COLOR_CLEAR,
+        overflow: "hidden",
+      }}
+    >
+      {USE_NATIVE_GLASS ? (
+        <GlassView style={[StyleSheet.absoluteFill, { borderRadius: radius }]} glassEffectStyle="clear" tintColor={GLASS_TINT_BLACK} />
+      ) : (
+        <LinearGradient pointerEvents="none" colors={GLASS_METALLIC_BLACK} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: radius }]} />
+      )}
+      <SpecularHighlight intensity={0.35} />
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {dims && tilesRef.current.map((t, i) => {
+          const r = Math.floor(i / cols);
+          const c = i % cols;
+          return (
+            <Animated.View
+              key={i}
+              style={{
+                position: "absolute",
+                left: c * tileW - 0.5,
+                top: r * tileH - 0.5,
+                width: tileW + 1,
+                height: tileH + 1,
+                backgroundColor: "rgba(232,197,91,0.9)",
+                opacity: t,
+              }}
+            />
+          );
+        })}
+      </View>
+      <Animated.Text
+        pointerEvents="none"
+        style={{ ...type.labelStrong, fontSize: 15, letterSpacing: 2, color: textColor, opacity: labelOpacity }}
+      >
+        ENTER
+      </Animated.Text>
+    </View>
+  );
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_ATTEMPTS = 10;
@@ -1108,38 +1228,12 @@ export default function LockScreen() {
             {hasPin ? "IDENTITY KEY READY" : "NO PIN CONFIGURED"}
           </Text>
 
-          <View style={styles.enterBtnWrap} testID={hasPin ? "enter-btn" : "no-pin-continue"}>
-            {USE_NATIVE_GLASS ? (
-              <GlassView
-                style={styles.enterGlass}
-                glassEffectStyle="clear"
-                tintColor={GLASS_TINT_BLACK}
-              >
-                <SpecularHighlight intensity={0.35} />
-                <Text style={styles.enterBtnText}>ENTER</Text>
-              </GlassView>
-            ) : (
-              <View style={[styles.enterGlass, { overflow: "hidden" }]}>
-                <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
-                <LinearGradient
-                  pointerEvents="none"
-                  colors={GLASS_METALLIC_BLACK}
-                  start={{ x: 0.15, y: 0 }}
-                  end={{ x: 0.85, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                />
-                <SpecularHighlight intensity={0.35} />
-                <Text style={styles.enterBtnText}>ENTER</Text>
-              </View>
-            )}
-            <ScratchFoil
-              label="ENTER"
-              labelSize={15}
-              radius={Number(colors.radius) || 12}
-              revealFraction={0.18}
-              onRevealed={hasPin ? revealKeypad : () => setLocked(false)}
-            />
-          </View>
+          <SwipeEnter
+            radius={Number(colors.radius) || 12}
+            textColor={styles.enterBtnText.color as string}
+            testID={hasPin ? "enter-btn" : "no-pin-continue"}
+            onEnter={hasPin ? revealKeypad : () => setLocked(false)}
+          />
 
           {!hasPin && (
             <Pressable
