@@ -55,6 +55,7 @@ function ScratchFoil({
   foil = "rgba(12,12,14,0.96)",
   labelColor = "#E8C55B",
   radius = 6,
+  revealFraction = SCRATCH_REVEAL_FRACTION,
   onRevealed,
 }: {
   label?: string;
@@ -62,6 +63,7 @@ function ScratchFoil({
   foil?: string;
   labelColor?: string;
   radius?: number;
+  revealFraction?: number;
   onRevealed?: () => void;
 }) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -103,20 +105,24 @@ function ScratchFoil({
     if (cleared.current.size === 1 || cleared.current.size === 4) {
       Animated.timing(labelOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
     }
-    if (cleared.current.size / (cols * rows) >= SCRATCH_REVEAL_FRACTION) {
-      done.current = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      Animated.timing(dressingOpacity, { toValue: 0, duration: 260, useNativeDriver: true }).start();
-      tilesRef.current.forEach((t, i) => {
-        if (!cleared.current.has(i)) {
-          Animated.timing(t, { toValue: 0, duration: 260, useNativeDriver: true }).start();
-        }
-      });
-      setTimeout(() => {
-        setGone(true);
-        onRevealed?.();
-      }, 300);
-    }
+    if (cleared.current.size / (cols * rows) >= revealFraction) finish();
+  };
+
+  const finish = () => {
+    if (done.current) return;
+    done.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Animated.timing(labelOpacity, { toValue: 0, duration: 160, useNativeDriver: true }).start();
+    Animated.timing(dressingOpacity, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+    tilesRef.current.forEach((t, i) => {
+      if (!cleared.current.has(i)) {
+        Animated.timing(t, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      }
+    });
+    setTimeout(() => {
+      setGone(true);
+      onRevealed?.();
+    }, 300);
   };
 
   const pan = useRef(
@@ -125,6 +131,12 @@ function ScratchFoil({
       onMoveShouldSetPanResponder: () => !done.current,
       onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
       onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      // Any real touch that lifts finishes the reveal, so a tap or a short
+      // swipe reliably gets you in — a full 55% rub of a big surface is not a
+      // realistic gesture for the primary action.
+      onPanResponderRelease: () => {
+        if (cleared.current.size > 0) finish();
+      },
     }),
   ).current;
 
