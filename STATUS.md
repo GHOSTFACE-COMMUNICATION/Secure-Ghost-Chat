@@ -250,8 +250,10 @@ up != tunnel works. Do not cancel or downgrade Mullvad.
   is expected ~week of 1 Sep. **`eas submit` stays FROZEN until that written
   opinion lands**, and the `ITSAppUsesNonExemptEncryption: false` flag is to be
   re-decided against it before any submission. No action needed now beyond
-  standing by for Sarah's questions; chase only if nothing arrives by ~Wed 3
-  Sep. Torres/Wiley US outreach (22 Aug) can be stood down with a courtesy
+  standing by for Sarah's questions. **Chase pinned to Wed 3 Sep** (gives her
+  Mon/Tue of "early next week" first): if no written opinion by then, draft a
+  short status-check reply on the existing MinterEllison thread — review
+  before sending, don't chase blind. Torres/Wiley US outreach (22 Aug) can be stood down with a courtesy
   note if they reply, now that MinterEllison covers the US question in-house.
 - **GF-01: MinterEllison replied, held off pending US firms.** Partner in
   MinterEllisonRuddWatts' International Trade and Regulatory team responded
