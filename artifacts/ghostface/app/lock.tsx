@@ -1108,17 +1108,12 @@ export default function LockScreen() {
             {hasPin ? "IDENTITY KEY READY" : "NO PIN CONFIGURED"}
           </Text>
 
-          <Pressable
-            style={({ pressed }) => [styles.enterBtnWrap, pressed && { opacity: 0.85 }]}
-            onPress={hasPin ? revealKeypad : () => setLocked(false)}
-            testID={hasPin ? "enter-btn" : "no-pin-continue"}
-          >
+          <View style={styles.enterBtnWrap} testID={hasPin ? "enter-btn" : "no-pin-continue"}>
             {USE_NATIVE_GLASS ? (
               <GlassView
                 style={styles.enterGlass}
                 glassEffectStyle="clear"
                 tintColor={GLASS_TINT_BLACK}
-                isInteractive
               >
                 <SpecularHighlight intensity={0.35} />
                 <Text style={styles.enterBtnText}>ENTER</Text>
@@ -1141,9 +1136,10 @@ export default function LockScreen() {
               label="ENTER"
               labelSize={15}
               radius={Number(colors.radius) || 12}
+              revealFraction={0.18}
               onRevealed={hasPin ? revealKeypad : () => setLocked(false)}
             />
-          </Pressable>
+          </View>
 
           {!hasPin && (
             <Pressable
