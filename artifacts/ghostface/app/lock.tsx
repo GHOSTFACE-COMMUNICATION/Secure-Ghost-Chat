@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
+  Dimensions,
   Easing,
   PanResponder,
   Platform,
@@ -421,6 +422,78 @@ function shuffleDigits(): string[] {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+
+// ── ScratchOverlay ───────────────────────────────────────────────────────────
+// Full-screen gold foil over the whole lock screen. It's the topmost layer, so
+// its single PanResponder owns every touch with nothing to compete — the fix
+// for why a per-button scratch kept losing the gesture. Rub anywhere to clear
+// foil tiles and reveal the screen beneath; once ~60% is cleared it dissolves
+// and enters. A tap alone won't do it — this is a deliberate scratch-in.
+function ScratchOverlay({ onEnter }: { onEnter: () => void }) {
+  const { width, height } = Dimensions.get("window");
+  const COLS = 22;
+  const ROWS = Math.round((height / width) * COLS);
+  const tiles = useRef(Array.from({ length: COLS * ROWS }, () => new Animated.Value(1))).current;
+  const cleared = useRef<Set<number>>(new Set());
+  const done = useRef(false);
+  const hint = useRef(new Animated.Value(1)).current;
+  const [gone, setGone] = useState(false);
+
+  const clearAt = (x: number, y: number) => {
+    if (done.current) return;
+    Animated.timing(hint, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+    const col = Math.floor((x / width) * COLS);
+    const row = Math.floor((y / height) * ROWS);
+    const R = 2;
+    for (let dr = -R; dr <= R; dr++) {
+      for (let dc = -R; dc <= R; dc++) {
+        const r = row + dr, c = col + dc;
+        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+        if (dr * dr + dc * dc > R * R + 1) continue;
+        const i = r * COLS + c;
+        if (cleared.current.has(i)) continue;
+        cleared.current.add(i);
+        Animated.timing(tiles[i], { toValue: 0, duration: 120, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+      }
+    }
+    if (cleared.current.size / (COLS * ROWS) >= 0.6) {
+      done.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      tiles.forEach((t, i) => { if (!cleared.current.has(i)) Animated.timing(t, { toValue: 0, duration: 260, useNativeDriver: true }).start(); });
+      setTimeout(() => { setGone(true); onEnter(); }, 300);
+    }
+  };
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+    onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+  })).current;
+
+  if (gone) return null;
+  const tw = width / COLS, th = height / ROWS;
+
+  return (
+    <View {...pan.panHandlers} style={StyleSheet.absoluteFill} pointerEvents="auto">
+      {tiles.map((t, i) => {
+        const r = Math.floor(i / COLS), c = i % COLS;
+        return (
+          <Animated.View key={i} style={{
+            position: "absolute", left: c * tw - 0.5, top: r * th - 0.5,
+            width: tw + 1, height: th + 1,
+            backgroundColor: (r + c) % 2 === 0 ? "#D4AC42" : "#C6A038",
+            opacity: t,
+          }} />
+        );
+      })}
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", opacity: hint }]}>
+        <Ionicons name="finger-print" size={40} color="#1A1509" />
+        <Text style={{ ...type.labelStrong, fontSize: 15, letterSpacing: 3, color: "#1A1509", marginTop: 12 }}>SCRATCH TO ENTER</Text>
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function LockScreen() {
   const colors = useColors();
@@ -1228,12 +1301,19 @@ export default function LockScreen() {
             {hasPin ? "IDENTITY KEY READY" : "NO PIN CONFIGURED"}
           </Text>
 
-          <SwipeEnter
-            radius={Number(colors.radius) || 12}
-            textColor={styles.enterBtnText.color as string}
+          <Pressable
+            onPress={hasPin ? revealKeypad : () => setLocked(false)}
             testID={hasPin ? "enter-btn" : "no-pin-continue"}
-            onEnter={hasPin ? revealKeypad : () => setLocked(false)}
-          />
+            style={({ pressed }) => [styles.enterGlass, pressed && { opacity: 0.85 }]}
+          >
+            {USE_NATIVE_GLASS ? (
+              <GlassView style={StyleSheet.absoluteFill} glassEffectStyle="clear" tintColor={GLASS_TINT_BLACK} />
+            ) : (
+              <LinearGradient pointerEvents="none" colors={GLASS_METALLIC_BLACK} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
+            )}
+            <SpecularHighlight intensity={0.35} />
+            <Text style={styles.enterBtnText}>ENTER</Text>
+          </Pressable>
 
           {!hasPin && (
             <Pressable
@@ -1252,12 +1332,6 @@ export default function LockScreen() {
             <Text style={styles.taglineText}>NO FACE. NO TRACE.</Text>
           </View>
 
-          <View style={{ position: "absolute", top: insets.top + 10, right: 16 }}>
-            <ScratchSign
-              fg={colors.primary}
-              onRevealed={hasPin ? revealKeypad : () => setLocked(false)}
-            />
-          </View>
         </View>
       )}
 
@@ -1309,6 +1383,10 @@ export default function LockScreen() {
             <Ionicons name="close" size={12} color={colors.mutedForeground} style={{ opacity: 0.6 }} />
           </View>
         </TouchableOpacity>
+      )}
+
+      {!(hasPin && decryptRevealed) && (
+        <ScratchOverlay onEnter={hasPin ? revealKeypad : () => setLocked(false)} />
       )}
     </View>
   );
