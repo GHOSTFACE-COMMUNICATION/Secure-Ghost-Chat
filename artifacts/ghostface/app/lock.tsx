@@ -439,59 +439,64 @@ function ScratchOverlay({ onEnter }: { onEnter: () => void }) {
   const hint = useRef(new Animated.Value(1)).current;
   const [gone, setGone] = useState(false);
 
-  const clearAt = (x: number, y: number) => {
+  // Reveal from a tap point outward. Uses a plain Pressable (taps register
+  // reliably on-device where PanResponder rub events did not) — foil peels away
+  // in a growing ring from where you touch, then enters. A rub still LOOKS like
+  // scratch; the trigger is a tap so it always works.
+  const revealFrom = (x: number, y: number) => {
     if (done.current) return;
-    Animated.timing(hint, { toValue: 0, duration: 250, useNativeDriver: true }).start();
-    const col = Math.floor((x / width) * COLS);
-    const row = Math.floor((y / height) * ROWS);
-    const R = 2;
-    for (let dr = -R; dr <= R; dr++) {
-      for (let dc = -R; dc <= R; dc++) {
-        const r = row + dr, c = col + dc;
-        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
-        if (dr * dr + dc * dc > R * R + 1) continue;
-        const i = r * COLS + c;
-        if (cleared.current.has(i)) continue;
-        cleared.current.add(i);
-        Animated.timing(tiles[i], { toValue: 0, duration: 120, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-      }
-    }
-    if (cleared.current.size / (COLS * ROWS) >= 0.6) {
-      done.current = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      tiles.forEach((t, i) => { if (!cleared.current.has(i)) Animated.timing(t, { toValue: 0, duration: 260, useNativeDriver: true }).start(); });
-      setTimeout(() => { setGone(true); onEnter(); }, 300);
-    }
+    done.current = true;
+    Animated.timing(hint, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+    const tapCol = (x / width) * COLS;
+    const tapRow = (y / height) * ROWS;
+    const maxD = Math.hypot(COLS, ROWS);
+    tiles.forEach((t, i) => {
+      const r = Math.floor(i / COLS), c = i % COLS;
+      const d = Math.hypot(c - tapCol, r - tapRow);
+      Animated.timing(t, {
+        toValue: 0,
+        delay: (d / maxD) * 420,
+        duration: 160,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setTimeout(() => { setGone(true); onEnter(); }, 620);
   };
-
-  const pan = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
-    onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
-  })).current;
 
   if (gone) return null;
   const tw = width / COLS, th = height / ROWS;
 
   return (
-    <View {...pan.panHandlers} style={StyleSheet.absoluteFill} pointerEvents="auto">
+    <Pressable
+      onPress={(e) => revealFrom(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+      style={StyleSheet.absoluteFill}
+    >
       {tiles.map((t, i) => {
         const r = Math.floor(i / COLS), c = i % COLS;
         return (
           <Animated.View key={i} style={{
             position: "absolute", left: c * tw - 0.5, top: r * th - 0.5,
             width: tw + 1, height: th + 1,
-            backgroundColor: (r + c) % 2 === 0 ? "#D4AC42" : "#C6A038",
+            backgroundColor: "#CDA23E",
             opacity: t,
           }} />
         );
       })}
+      <LinearGradient
+        pointerEvents="none"
+        colors={["#E7C765", "#CDA23E", "#B98C2E"]}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
+      />
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", opacity: hint }]}>
         <Ionicons name="finger-print" size={40} color="#1A1509" />
-        <Text style={{ ...type.labelStrong, fontSize: 15, letterSpacing: 3, color: "#1A1509", marginTop: 12 }}>SCRATCH TO ENTER</Text>
+        <Text style={{ ...type.labelStrong, fontSize: 15, letterSpacing: 3, color: "#1A1509", marginTop: 12 }}>TAP TO ENTER</Text>
       </Animated.View>
-    </View>
+    </Pressable>
   );
 }
 
