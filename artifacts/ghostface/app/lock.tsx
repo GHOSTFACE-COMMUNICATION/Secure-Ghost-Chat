@@ -429,48 +429,90 @@ function shuffleDigits(): string[] {
 // for why a per-button scratch kept losing the gesture. Rub anywhere to clear
 // foil tiles and reveal the screen beneath; once ~60% is cleared it dissolves
 // and enters. A tap alone won't do it — this is a deliberate scratch-in.
-function ScratchOverlay({ onEnter }: { onEnter: () => void }) {
+function ScratchOverlay({ onEnter, biometricEnabled, onBiometric }: { onEnter: () => void; biometricEnabled: boolean; onBiometric: () => Promise<boolean> }) {
+  const insets = useSafeAreaInsets();
+  const [fingerprintReady, setFingerprintReady] = useState(false);
   const { width, height } = Dimensions.get("window");
   const COLS = 22;
   const ROWS = Math.round((height / width) * COLS);
   const tiles = useRef(Array.from({ length: COLS * ROWS }, () => new Animated.Value(1))).current;
-  const cleared = useRef<Set<number>>(new Set());
   const done = useRef(false);
   const hint = useRef(new Animated.Value(1)).current;
+  const scan = useRef(new Animated.Value(0)).current;   // 0..1 fingerprint fill
   const [gone, setGone] = useState(false);
 
-  // Reveal from a tap point outward. Uses a plain Pressable (taps register
-  // reliably on-device where PanResponder rub events did not) — foil peels away
-  // in a growing ring from where you touch, then enters. A rub still LOOKS like
-  // scratch; the trigger is a tap so it always works.
-  const revealFrom = (x: number, y: number) => {
+  // Only arm real biometric when the device has a FINGERPRINT reader (Touch ID) —
+  // matches the print art. Face-ID-only devices (e.g. iPhone 14) fall back to the
+  // cosmetic hold. Apple hands us pass/fail only, never the raw scan.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+        const hasFinger = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        if (alive) setFingerprintReady(biometricEnabled && hasFinger && enrolled);
+      } catch { if (alive) setFingerprintReady(false); }
+    })();
+    return () => { alive = false; };
+  }, [biometricEnabled]);
+
+  // Hold-to-scan: press and HOLD the print, it fills over ~1s, then the foil
+  // peels away and the gate is revealed. Press/hold (onPressIn/onPressOut) fire
+  // reliably on-device where a PanResponder rub never registered. Lift early and
+  // the fill drains back — nothing happens until a full scan completes.
+  const peel = () => {
     if (done.current) return;
     done.current = true;
-    Animated.timing(hint, { toValue: 0, duration: 180, useNativeDriver: true }).start();
-    const tapCol = (x / width) * COLS;
-    const tapRow = (y / height) * ROWS;
-    const maxD = Math.hypot(COLS, ROWS);
+    Animated.timing(hint, { toValue: 0, duration: 160, useNativeDriver: true }).start();
+    const cx = COLS / 2, cy = ROWS / 2;
+    const maxD = Math.hypot(COLS, ROWS) / 2;
     tiles.forEach((t, i) => {
       const r = Math.floor(i / COLS), c = i % COLS;
-      const d = Math.hypot(c - tapCol, r - tapRow);
+      const d = Math.hypot(c - cx, r - cy);
       Animated.timing(t, {
         toValue: 0,
-        delay: (d / maxD) * 420,
+        delay: (d / maxD) * 380,
         duration: 160,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }).start();
     });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    setTimeout(() => { setGone(true); onEnter(); }, 620);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setTimeout(() => { setGone(true); onEnter(); }, 560);
+  };
+
+  const startScan = () => {
+    if (done.current) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Animated.timing(scan, { toValue: 1, duration: 950, easing: Easing.linear, useNativeDriver: false })
+      .start(({ finished }) => { if (finished) peel(); });
+  };
+  const cancelScan = () => {
+    if (done.current) return;
+    scan.stopAnimation();
+    Animated.timing(scan, { toValue: 0, duration: 220, useNativeDriver: false }).start();
+  };
+
+  const doBiometric = async () => {
+    if (done.current) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Animated.timing(scan, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: false }).start();
+    const ok = await onBiometric();
+    if (ok) { peel(); return; }               // fingerprint match → peel + full unlock
+    scan.stopAnimation();
+    Animated.timing(scan, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+    done.current = true; setGone(true); onEnter();   // no match/cancel → gate so PIN still reachable
   };
 
   if (gone) return null;
   const tw = width / COLS, th = height / ROWS;
+  const PRINT = 64;
 
   return (
     <Pressable
-      onPress={(e) => revealFrom(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+      onPressIn={fingerprintReady ? doBiometric : startScan}
+      onPressOut={fingerprintReady ? undefined : cancelScan}
       style={StyleSheet.absoluteFill}
     >
       {tiles.map((t, i) => {
@@ -492,9 +534,22 @@ function ScratchOverlay({ onEnter }: { onEnter: () => void }) {
         end={{ x: 0.9, y: 1 }}
         style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
       />
+
+      {/* tiny embossed corner sign — top right */}
+      <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 8, right: 16, flexDirection: "row", alignItems: "center", gap: 4, opacity: 0.55 }}>
+        <Ionicons name="lock-closed" size={8} color="#3A2E10" />
+        <Text style={[type.monoSmall, { fontSize: 7, color: "#3A2E10", letterSpacing: 0.6 }]}>NO FACE. NO TRACE.</Text>
+      </View>
+
+      {/* fingerprint scanner — base print + accent fill that rises as you hold */}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", opacity: hint }]}>
-        <Ionicons name="finger-print" size={40} color="#1A1509" />
-        <Text style={{ ...type.labelStrong, fontSize: 15, letterSpacing: 3, color: "#1A1509", marginTop: 12 }}>TAP TO ENTER</Text>
+        <View style={{ width: PRINT, height: PRINT, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="finger-print" size={PRINT} color="#1A1509" style={{ opacity: 0.45 }} />
+          <Animated.View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: scan.interpolate({ inputRange: [0, 1], outputRange: [0, PRINT] }), overflow: "hidden", alignItems: "center", justifyContent: "flex-end" }}>
+            <Ionicons name="finger-print" size={PRINT} color="#0B0B0C" />
+          </Animated.View>
+        </View>
+        <Text style={{ ...type.labelStrong, fontSize: 14, letterSpacing: 3, color: "#1A1509", marginTop: 14 }}>{fingerprintReady ? "SCAN TO ENTER" : "HOLD TO ENTER"}</Text>
       </Animated.View>
     </Pressable>
   );
@@ -518,6 +573,7 @@ export default function LockScreen() {
 
   const [entered, setEntered] = useState("");
   const [error, setError] = useState(false);
+  const [foilScratched, setFoilScratched] = useState(false);
   const [biometricError, setBiometricError] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -625,12 +681,12 @@ export default function LockScreen() {
   };
 
   // ── Biometric ─────────────────────────────────────────────────────────────
-  const tryBiometric = async () => {
-    if (Platform.OS === "web") return;
-    if (!biometricEnabled) return;
+  const tryBiometric = async (): Promise<boolean> => {
+    if (Platform.OS === "web") return false;
+    if (!biometricEnabled) return false;
     // Block biometric unlock while a duress wipe countdown is running to prevent
     // an unintended bypass (lock-screen unmount would cancel the interval).
-    if (duressIntervalRef.current !== null) return;
+    if (duressIntervalRef.current !== null) return false;
     try {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Authenticate to unlock GHOSTFACE",
@@ -644,13 +700,15 @@ export default function LockScreen() {
         setFailedAttempts(0);
         exitDecoyMode();
         setLocked(false);
-      } else {
-        emitFailedUnlock("biometric");
-        setBiometricError("Biometric failed — use PIN");
+        return true;
       }
+      emitFailedUnlock("biometric");
+      setBiometricError("Biometric failed — use PIN");
+      return false;
     } catch {
       emitFailedUnlock("biometric");
       setBiometricError("Biometric unavailable — use PIN");
+      return false;
     }
   };
 
@@ -1390,8 +1448,8 @@ export default function LockScreen() {
         </TouchableOpacity>
       )}
 
-      {!(hasPin && decryptRevealed) && (
-        <ScratchOverlay onEnter={hasPin ? revealKeypad : () => setLocked(false)} />
+      {!foilScratched && !(hasPin && decryptRevealed) && (
+        <ScratchOverlay onEnter={() => setFoilScratched(true)} biometricEnabled={biometricEnabled} onBiometric={tryBiometric} />
       )}
     </View>
   );
