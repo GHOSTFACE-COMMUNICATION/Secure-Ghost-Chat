@@ -1125,7 +1125,12 @@ export default function LockScreen() {
                 <Text style={styles.enterBtnText}>ENTER</Text>
               </View>
             )}
-            <ScratchFoil label="ENTER" labelSize={15} radius={Number(colors.radius) || 12} />
+            <ScratchFoil
+              label="ENTER"
+              labelSize={15}
+              radius={Number(colors.radius) || 12}
+              onRevealed={hasPin ? revealKeypad : () => setLocked(false)}
+            />
           </Pressable>
 
           {!hasPin && (
