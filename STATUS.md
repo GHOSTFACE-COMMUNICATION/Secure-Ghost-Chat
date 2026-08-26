@@ -240,6 +240,21 @@ up != tunnel works. Do not cancel or downgrade Mullvad.
 
 ## 23 Aug session changes
 
+- **GF-01: MinterEllison ENGAGED — materials sent, opinion due early next
+  week (25 Aug).** Superseding the "held off" note below: the engagement went
+  ahead. Materials (crypto inventory + research memo) were sent through to
+  Sarah Salmond, and she has now confirmed receipt — "we'll review the
+  materials and come back to you if we have any questions… we expect to
+  provide our advice early next week." So the written opinion (both the US EAR
+  mass-market/CCATS question and the NZ strategic-goods/cryptography question)
+  is expected ~week of 1 Sep. **`eas submit` stays FROZEN until that written
+  opinion lands**, and the `ITSAppUsesNonExemptEncryption: false` flag is to be
+  re-decided against it before any submission. No action needed now beyond
+  standing by for Sarah's questions. **Chase pinned to Wed 3 Sep** (gives her
+  Mon/Tue of "early next week" first): if no written opinion by then, draft a
+  short status-check reply on the existing MinterEllison thread — review
+  before sending, don't chase blind. Torres/Wiley US outreach (22 Aug) can be stood down with a courtesy
+  note if they reply, now that MinterEllison covers the US question in-house.
 - **GF-01: MinterEllison replied, held off pending US firms.** Partner in
   MinterEllisonRuddWatts' International Trade and Regulatory team responded
   to the 19 Aug enquiry with a proposal: written opinion covering BOTH the

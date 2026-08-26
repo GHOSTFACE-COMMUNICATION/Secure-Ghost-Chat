@@ -7,7 +7,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
+  Dimensions,
   Easing,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,12 +20,340 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GhostRevealMark } from "@/components/GhostRevealMark";
-import { GoldGradient } from "@/components/GoldGradient";
+import { BlurView } from "expo-blur";
+import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
+import { LinearGradient } from "expo-linear-gradient";
+import {
+  GLASS_METALLIC_BLACK,
+  GLASS_TINT_BLACK,
+  GOLD_OUTLINE_COLOR_CLEAR,
+  GoldGradient,
+  SpecularHighlight,
+} from "@/components/GoldGradient";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { emitFailedUnlock } from "@/lib/phantomHooks";
 import { boxShadow } from "@/lib/shadow";
 import { type } from "@/constants/typography";
+
+// ── ScratchFoil ──────────────────────────────────────────────────────────────
+// Reusable scratch-off layer (same idea as the landing page's scratch-to-
+// reveal): gold foil tiles clear under the finger with ragged edges; once
+// REVEAL_FRACTION of the foil is gone the remainder fades, the overlay stops
+// intercepting touches, and onRevealed (if any) fires. Sizes itself to
+// whatever it covers via onLayout. Pure Views + PanResponder — no canvas
+// dependency, which keeps it out of the native build graph entirely.
+const USE_NATIVE_GLASS = isLiquidGlassAvailable();
+
+const SCRATCH_REVEAL_FRACTION = 0.55;
+
+function ScratchFoil({
+  label,
+  labelSize = 7.5,
+  // Same black liquid glass as the radial menu's nodes (NODE_GLASS_TINT,
+  // rgba(10,10,12,0.55)) — opacity raised so the foil still conceals what's
+  // underneath; at the node's own 0.55 the hidden text would ghost through.
+  foil = "rgba(12,12,14,0.96)",
+  labelColor = "#E8C55B",
+  radius = 6,
+  revealFraction = SCRATCH_REVEAL_FRACTION,
+  onRevealed,
+}: {
+  label?: string;
+  labelSize?: number;
+  foil?: string;
+  labelColor?: string;
+  radius?: number;
+  revealFraction?: number;
+  onRevealed?: () => void;
+}) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [gone, setGone] = useState(false);
+  const tilesRef = useRef<Animated.Value[]>([]);
+  const cleared = useRef<Set<number>>(new Set());
+  const done = useRef(false);
+  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const dressingOpacity = useRef(new Animated.Value(1)).current;
+
+  const cols = dims ? Math.max(6, Math.round(dims.w / 14)) : 0;
+  const rows = dims ? Math.max(3, Math.round(dims.h / 11)) : 0;
+  if (dims && tilesRef.current.length !== cols * rows) {
+    tilesRef.current = Array.from({ length: cols * rows }, () => new Animated.Value(1));
+  }
+
+  const clearAt = (x: number, y: number) => {
+    if (!dims || done.current) return;
+    const col = Math.floor((x / dims.w) * cols);
+    const row = Math.floor((y / dims.h) * rows);
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const r = row + dr;
+        const c = col + dc;
+        if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+        // Corner neighbours stay sometimes, giving the patch a ragged edge.
+        if (Math.abs(dr) + Math.abs(dc) === 2 && Math.random() < 0.5) continue;
+        const i = r * cols + c;
+        if (cleared.current.has(i)) continue;
+        cleared.current.add(i);
+        Animated.timing(tilesRef.current[i], {
+          toValue: 0,
+          duration: 140,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+    if (cleared.current.size === 1 || cleared.current.size === 4) {
+      Animated.timing(labelOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    }
+    if (cleared.current.size / (cols * rows) >= revealFraction) finish();
+  };
+
+  const finish = () => {
+    if (done.current) return;
+    done.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Animated.timing(labelOpacity, { toValue: 0, duration: 160, useNativeDriver: true }).start();
+    Animated.timing(dressingOpacity, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+    tilesRef.current.forEach((t, i) => {
+      if (!cleared.current.has(i)) {
+        Animated.timing(t, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      }
+    });
+    setTimeout(() => {
+      setGone(true);
+      onRevealed?.();
+    }, 300);
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !done.current,
+      onMoveShouldSetPanResponder: () => !done.current,
+      onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      // Any real touch that lifts finishes the reveal, so a tap or a short
+      // swipe reliably gets you in — a full 55% rub of a big surface is not a
+      // realistic gesture for the primary action.
+      onPanResponderRelease: () => {
+        if (cleared.current.size > 0) finish();
+      },
+    }),
+  ).current;
+
+  if (gone) return null;
+
+  const tileW = dims ? dims.w / cols : 0;
+  const tileH = dims ? dims.h / rows : 0;
+
+  return (
+    <View
+      {...pan.panHandlers}
+      onLayout={(e) =>
+        setDims({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })
+      }
+      style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: "hidden" }]}
+    >
+      {dims &&
+        tilesRef.current.map((t, i) => {
+          const r = Math.floor(i / cols);
+          const c = i % cols;
+          return (
+            <Animated.View
+              key={i}
+              style={{
+                position: "absolute",
+                left: c * tileW - 0.5,
+                top: r * tileH - 0.5,
+                width: tileW + 1,
+                height: tileH + 1,
+                backgroundColor: foil,
+                opacity: t,
+              }}
+            />
+          );
+        })}
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: dressingOpacity }]}>
+        {USE_NATIVE_GLASS ? (
+          <GlassView
+            style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
+            glassEffectStyle="clear"
+            tintColor="rgba(10,10,12,0.35)"
+          />
+        ) : (
+          <LinearGradient
+            colors={GLASS_METALLIC_BLACK}
+            start={{ x: 0.15, y: 0 }}
+            end={{ x: 0.85, y: 1 }}
+            style={[StyleSheet.absoluteFill, { borderRadius: radius, opacity: 0.55 }]}
+          />
+        )}
+        <SpecularHighlight intensity={0.35} />
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { borderRadius: radius, borderWidth: 1, borderColor: GOLD_OUTLINE_COLOR_CLEAR },
+          ]}
+        />
+      </Animated.View>
+      {label ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { alignItems: "center", justifyContent: "center", opacity: labelOpacity },
+          ]}
+        >
+          <Text style={[type.labelStrong, { fontSize: labelSize, letterSpacing: 1.4, color: labelColor }]}>
+            {label}
+          </Text>
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
+// Small corner plaque: bordered sign with the tagline underneath its foil.
+function ScratchSign({ fg, onRevealed }: { fg: string; onRevealed: () => void }) {
+  return (
+    <View
+      style={{
+        width: 118,
+        height: 26,
+        borderRadius: 6,
+        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Ionicons name="lock-closed" size={7} color={fg} />
+        <Text style={[type.monoSmall, { fontSize: 6.5, color: fg, letterSpacing: 0.5 }]}>NO FACE. NO TRACE.</Text>
+      </View>
+      <ScratchFoil label="APTAY EREHAY" onRevealed={onRevealed} />
+    </View>
+  );
+}
+
+// ── SwipeEnter ───────────────────────────────────────────────────────────────
+// The primary way into the app: scratch-to-reveal, but reliable. Exactly ONE
+// PanResponder claims the touch (no nested Pressable, no interactive glass, so
+// nothing competes). Rubbing clears gold-glass foil tiles under the finger for
+// the scratch feel; lifting the finger — after any real touch — enters. So a
+// deliberate scratch OR a quick swipe both get you in, and it can't dead-end.
+function SwipeEnter({
+  radius,
+  textColor,
+  testID,
+  onEnter,
+}: {
+  radius: number;
+  textColor: string;
+  testID?: string;
+  onEnter: () => void;
+}) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const tilesRef = useRef<Animated.Value[]>([]);
+  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const touched = useRef(false);
+  const fired = useRef(false);
+
+  const cols = dims ? Math.max(8, Math.round(dims.w / 16)) : 0;
+  const rows = dims ? Math.max(3, Math.round(dims.h / 12)) : 0;
+  if (dims && tilesRef.current.length !== cols * rows) {
+    tilesRef.current = Array.from({ length: cols * rows }, () => new Animated.Value(1));
+  }
+
+  const clearAt = (x: number, y: number) => {
+    if (!dims) return;
+    touched.current = true;
+    Animated.timing(labelOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start();
+    const col = Math.floor((x / dims.w) * cols);
+    const row = Math.floor((y / dims.h) * rows);
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const r = row + dr;
+        const c = col + dc;
+        if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+        const t = tilesRef.current[r * cols + c];
+        if (t) Animated.timing(t, { toValue: 0, duration: 130, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+      }
+    }
+  };
+
+  const enter = () => {
+    if (fired.current || !touched.current) return;
+    fired.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    tilesRef.current.forEach((t) => Animated.timing(t, { toValue: 0, duration: 220, useNativeDriver: true }).start());
+    setTimeout(onEnter, 200);
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      onPanResponderMove: (e) => clearAt(e.nativeEvent.locationX, e.nativeEvent.locationY),
+      onPanResponderRelease: () => enter(),
+      onPanResponderTerminate: () => enter(),
+    }),
+  ).current;
+
+  const tileW = dims ? dims.w / cols : 0;
+  const tileH = dims ? dims.h / rows : 0;
+
+  return (
+    <View
+      {...pan.panHandlers}
+      testID={testID}
+      onLayout={(e) => setDims({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+      style={{
+        paddingHorizontal: 64,
+        paddingVertical: 15,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: radius,
+        borderWidth: 1,
+        borderColor: GOLD_OUTLINE_COLOR_CLEAR,
+        overflow: "hidden",
+      }}
+    >
+      {USE_NATIVE_GLASS ? (
+        <GlassView style={[StyleSheet.absoluteFill, { borderRadius: radius }]} glassEffectStyle="clear" tintColor={GLASS_TINT_BLACK} />
+      ) : (
+        <LinearGradient pointerEvents="none" colors={GLASS_METALLIC_BLACK} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} style={[StyleSheet.absoluteFill, { borderRadius: radius }]} />
+      )}
+      <SpecularHighlight intensity={0.35} />
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {dims && tilesRef.current.map((t, i) => {
+          const r = Math.floor(i / cols);
+          const c = i % cols;
+          return (
+            <Animated.View
+              key={i}
+              style={{
+                position: "absolute",
+                left: c * tileW - 0.5,
+                top: r * tileH - 0.5,
+                width: tileW + 1,
+                height: tileH + 1,
+                backgroundColor: "rgba(232,197,91,0.9)",
+                opacity: t,
+              }}
+            />
+          );
+        })}
+      </View>
+      <Animated.Text
+        pointerEvents="none"
+        style={{ ...type.labelStrong, fontSize: 15, letterSpacing: 2, color: textColor, opacity: labelOpacity }}
+      >
+        ENTER
+      </Animated.Text>
+    </View>
+  );
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +423,138 @@ function shuffleDigits(): string[] {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// ── ScratchOverlay ───────────────────────────────────────────────────────────
+// Full-screen gold foil over the whole lock screen. It's the topmost layer, so
+// its single PanResponder owns every touch with nothing to compete — the fix
+// for why a per-button scratch kept losing the gesture. Rub anywhere to clear
+// foil tiles and reveal the screen beneath; once ~60% is cleared it dissolves
+// and enters. A tap alone won't do it — this is a deliberate scratch-in.
+function ScratchOverlay({ onEnter, biometricEnabled, onBiometric }: { onEnter: () => void; biometricEnabled: boolean; onBiometric: () => Promise<boolean> }) {
+  const insets = useSafeAreaInsets();
+  const [fingerprintReady, setFingerprintReady] = useState(false);
+  const { width, height } = Dimensions.get("window");
+  const COLS = 22;
+  const ROWS = Math.round((height / width) * COLS);
+  const tiles = useRef(Array.from({ length: COLS * ROWS }, () => new Animated.Value(1))).current;
+  const done = useRef(false);
+  const hint = useRef(new Animated.Value(1)).current;
+  const scan = useRef(new Animated.Value(0)).current;   // 0..1 fingerprint fill
+  const [gone, setGone] = useState(false);
+
+  // Only arm real biometric when the device has a FINGERPRINT reader (Touch ID) —
+  // matches the print art. Face-ID-only devices (e.g. iPhone 14) fall back to the
+  // cosmetic hold. Apple hands us pass/fail only, never the raw scan.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+        const hasFinger = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        if (alive) setFingerprintReady(biometricEnabled && hasFinger && enrolled);
+      } catch { if (alive) setFingerprintReady(false); }
+    })();
+    return () => { alive = false; };
+  }, [biometricEnabled]);
+
+  // Hold-to-scan: press and HOLD the print, it fills over ~1s, then the foil
+  // peels away and the gate is revealed. Press/hold (onPressIn/onPressOut) fire
+  // reliably on-device where a PanResponder rub never registered. Lift early and
+  // the fill drains back — nothing happens until a full scan completes.
+  const peel = () => {
+    if (done.current) return;
+    done.current = true;
+    Animated.timing(hint, { toValue: 0, duration: 160, useNativeDriver: true }).start();
+    const cx = COLS / 2, cy = ROWS / 2;
+    const maxD = Math.hypot(COLS, ROWS) / 2;
+    tiles.forEach((t, i) => {
+      const r = Math.floor(i / COLS), c = i % COLS;
+      const d = Math.hypot(c - cx, r - cy);
+      Animated.timing(t, {
+        toValue: 0,
+        delay: (d / maxD) * 380,
+        duration: 160,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setTimeout(() => { setGone(true); onEnter(); }, 560);
+  };
+
+  const startScan = () => {
+    if (done.current) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Animated.timing(scan, { toValue: 1, duration: 950, easing: Easing.linear, useNativeDriver: false })
+      .start(({ finished }) => { if (finished) peel(); });
+  };
+  const cancelScan = () => {
+    if (done.current) return;
+    scan.stopAnimation();
+    Animated.timing(scan, { toValue: 0, duration: 220, useNativeDriver: false }).start();
+  };
+
+  const doBiometric = async () => {
+    if (done.current) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Animated.timing(scan, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: false }).start();
+    const ok = await onBiometric();
+    if (ok) { peel(); return; }               // fingerprint match → peel + full unlock
+    scan.stopAnimation();
+    Animated.timing(scan, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+    done.current = true; setGone(true); onEnter();   // no match/cancel → gate so PIN still reachable
+  };
+
+  if (gone) return null;
+  const tw = width / COLS, th = height / ROWS;
+  const PRINT = 64;
+
+  return (
+    <Pressable
+      onPressIn={fingerprintReady ? doBiometric : startScan}
+      onPressOut={fingerprintReady ? undefined : cancelScan}
+      style={StyleSheet.absoluteFill}
+    >
+      {tiles.map((t, i) => {
+        const r = Math.floor(i / COLS), c = i % COLS;
+        return (
+          <Animated.View key={i} style={{
+            position: "absolute", left: c * tw - 0.5, top: r * th - 0.5,
+            width: tw + 1, height: th + 1,
+            backgroundColor: "#CDA23E",
+            opacity: t,
+          }} />
+        );
+      })}
+      <LinearGradient
+        pointerEvents="none"
+        colors={["#E7C765", "#CDA23E", "#B98C2E"]}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
+      />
+
+      {/* tiny embossed corner sign — top right */}
+      <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 8, right: 16, flexDirection: "row", alignItems: "center", gap: 4, opacity: 0.55 }}>
+        <Ionicons name="lock-closed" size={8} color="#3A2E10" />
+        <Text style={[type.monoSmall, { fontSize: 7, color: "#3A2E10", letterSpacing: 0.6 }]}>NO FACE. NO TRACE.</Text>
+      </View>
+
+      {/* fingerprint scanner — base print + accent fill that rises as you hold */}
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", opacity: hint }]}>
+        <View style={{ width: PRINT, height: PRINT, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="finger-print" size={PRINT} color="#1A1509" style={{ opacity: 0.45 }} />
+          <Animated.View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: scan.interpolate({ inputRange: [0, 1], outputRange: [0, PRINT] }), overflow: "hidden", alignItems: "center", justifyContent: "flex-end" }}>
+            <Ionicons name="finger-print" size={PRINT} color="#0B0B0C" />
+          </Animated.View>
+        </View>
+        <Text style={{ ...type.labelStrong, fontSize: 14, letterSpacing: 3, color: "#1A1509", marginTop: 14 }}>{fingerprintReady ? "SCAN TO ENTER" : "HOLD TO ENTER"}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 export default function LockScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -111,6 +573,7 @@ export default function LockScreen() {
 
   const [entered, setEntered] = useState("");
   const [error, setError] = useState(false);
+  const [foilScratched, setFoilScratched] = useState(false);
   const [biometricError, setBiometricError] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -218,12 +681,12 @@ export default function LockScreen() {
   };
 
   // ── Biometric ─────────────────────────────────────────────────────────────
-  const tryBiometric = async () => {
-    if (Platform.OS === "web") return;
-    if (!biometricEnabled) return;
+  const tryBiometric = async (): Promise<boolean> => {
+    if (Platform.OS === "web") return false;
+    if (!biometricEnabled) return false;
     // Block biometric unlock while a duress wipe countdown is running to prevent
     // an unintended bypass (lock-screen unmount would cancel the interval).
-    if (duressIntervalRef.current !== null) return;
+    if (duressIntervalRef.current !== null) return false;
     try {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Authenticate to unlock GHOSTFACE",
@@ -237,13 +700,15 @@ export default function LockScreen() {
         setFailedAttempts(0);
         exitDecoyMode();
         setLocked(false);
-      } else {
-        emitFailedUnlock("biometric");
-        setBiometricError("Biometric failed — use PIN");
+        return true;
       }
+      emitFailedUnlock("biometric");
+      setBiometricError("Biometric failed — use PIN");
+      return false;
     } catch {
       emitFailedUnlock("biometric");
       setBiometricError("Biometric unavailable — use PIN");
+      return false;
     }
   };
 
@@ -598,15 +1063,21 @@ export default function LockScreen() {
     },
     enterBtnWrap: {
       borderRadius: colors.radius,
-      borderWidth: 1,
-      borderColor: "#ffffff",
-      boxShadow: boxShadow(colors.primary, 0.4, 16, 0, 4),
     },
     enterBtn: {
       paddingHorizontal: 64,
       paddingVertical: 15,
       alignItems: "center",
       borderRadius: colors.radius,
+    },
+    enterGlass: {
+      paddingHorizontal: 64,
+      paddingVertical: 15,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: colors.radius,
+      borderWidth: 1,
+      borderColor: GOLD_OUTLINE_COLOR_CLEAR,
     },
     enterBtnText: {
       ...type.labelStrong,
@@ -894,19 +1365,36 @@ export default function LockScreen() {
           </Text>
 
           <Pressable
-            style={({ pressed }) => [styles.enterBtnWrap, pressed && { opacity: 0.85 }]}
             onPress={hasPin ? revealKeypad : () => setLocked(false)}
             testID={hasPin ? "enter-btn" : "no-pin-continue"}
+            style={({ pressed }) => [styles.enterGlass, pressed && { opacity: 0.85 }]}
           >
-            <GoldGradient solid style={styles.enterBtn}>
-              <Text style={styles.enterBtnText}>ENTER</Text>
-            </GoldGradient>
+            {USE_NATIVE_GLASS ? (
+              <GlassView style={StyleSheet.absoluteFill} glassEffectStyle="clear" tintColor={GLASS_TINT_BLACK} />
+            ) : (
+              <LinearGradient pointerEvents="none" colors={GLASS_METALLIC_BLACK} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
+            )}
+            <SpecularHighlight intensity={0.35} />
+            <Text style={styles.enterBtnText}>ENTER</Text>
           </Pressable>
+
+          {!hasPin && (
+            <Pressable
+              onPress={() => setLocked(false)}
+              style={({ pressed }) => [{ marginTop: 14 }, pressed && { opacity: 0.7 }]}
+              testID="signup-link"
+            >
+              <Text style={[type.monoSmall, { color: colors.mutedForeground, letterSpacing: 0.5 }]}>
+                NO ACCOUNT? <Text style={{ color: colors.primary }}>TAP HERE TO SIGN UP</Text>
+              </Text>
+            </Pressable>
+          )}
 
           <View style={styles.taglineRow}>
             <Ionicons name="lock-closed" size={11} color={colors.mutedForeground} />
             <Text style={styles.taglineText}>NO FACE. NO TRACE.</Text>
           </View>
+
         </View>
       )}
 
@@ -958,6 +1446,10 @@ export default function LockScreen() {
             <Ionicons name="close" size={12} color={colors.mutedForeground} style={{ opacity: 0.6 }} />
           </View>
         </TouchableOpacity>
+      )}
+
+      {!foilScratched && !(hasPin && decryptRevealed) && (
+        <ScratchOverlay onEnter={() => setFoilScratched(true)} biometricEnabled={biometricEnabled} onBiometric={tryBiometric} />
       )}
     </View>
   );
