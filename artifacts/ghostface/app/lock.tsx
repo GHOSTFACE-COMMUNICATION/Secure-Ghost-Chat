@@ -521,10 +521,10 @@ function ScratchOverlay({ onEnter, biometricEnabled, onBiometric }: { onEnter: (
           pointerEvents="none"
           style={StyleSheet.absoluteFill}
           glassEffectStyle="regular"
-          tintColor="rgba(16,16,20,0.4)"
+          tintColor="rgba(16,16,20,0.32)"
         />
       ) : (
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(16,16,20,0.5)" }]} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(16,16,20,0.42)" }]} />
       )}
       {tiles.map((t, i) => {
         const r = Math.floor(i / COLS), c = i % COLS;
@@ -532,7 +532,7 @@ function ScratchOverlay({ onEnter, biometricEnabled, onBiometric }: { onEnter: (
           <Animated.View key={i} style={{
             position: "absolute", left: c * tw, top: r * th,
             width: tw + 0.5, height: th + 0.5,
-            backgroundColor: "rgba(34,34,40,0.32)",
+            backgroundColor: "rgba(34,34,40,0.24)",
             opacity: t,
           }} />
         );
