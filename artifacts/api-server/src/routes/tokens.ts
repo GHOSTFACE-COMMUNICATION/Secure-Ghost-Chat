@@ -109,9 +109,9 @@ async function ensureSeedTokens() {
     },
     {
       name: "FANTASMA",
-      symbol: "FSM",
+      symbol: "FTM",
       description:
-        "FANTASMA (FSM) is the privacy-first payment rail for GHOSTFACE. Peer-to-peer transfers, paywall access, and cross-chain bridging.",
+        "FANTASMA (FTM) is the privacy-first payment rail for GHOSTFACE. Peer-to-peer transfers, paywall access, and cross-chain bridging.",
       decimals: 6,
       totalSupply: 500_000_000,
       logoColor: "#9945FF",

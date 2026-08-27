@@ -215,9 +215,9 @@ export default function WalletScreen() {
   };
 
   // Funds the wallet with SOL or USDC. Deliberately NOT tied to activeToken:
-  // FSM and GFC are GHOSTFACE's own SPL tokens and no card on-ramp lists
+  // FTM and GFC are GHOSTFACE's own SPL tokens and no card on-ramp lists
   // them, so deriving the purchase currency from the selected tab meant
-  // "BUY" while viewing FSM silently opened a USDC checkout. The asset is now
+  // "BUY" while viewing FTM silently opened a USDC checkout. The asset is now
   // chosen explicitly.
   const handleBuy = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -240,7 +240,7 @@ export default function WalletScreen() {
     const destination = connectedWalletAddress;
     Alert.alert(
       "FUND WALLET",
-      "Buy with a card. Funds go to your linked Solana wallet.\n\nFSM and GFC can't be bought with a card — they aren't listed on any on-ramp.",
+      "Buy with a card. Funds go to your linked Solana wallet.\n\nFTM and GFC can't be bought with a card — they aren't listed on any on-ramp.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "USDC", onPress: () => void openMoonPay("usdc_sol", destination) },
@@ -274,7 +274,7 @@ export default function WalletScreen() {
   // app token) — fetched live from the api-server rather than hardcoded, so
   // renaming/redeploying a token doesn't need a client release.
   const gfcSymbol = appTokens[0]?.symbol ?? "GFC";
-  const secondTokenSymbol = appTokens[1]?.symbol ?? "FSM";
+  const secondTokenSymbol = appTokens[1]?.symbol ?? "FTM";
   const activeSymbol = activeToken === "FANTASMA" ? secondTokenSymbol : gfcSymbol;
   const filteredTx = transactions.filter((t) => t.token === activeToken);
 
@@ -1159,7 +1159,7 @@ export default function WalletScreen() {
         </Text>
         <Text style={styles.buyHelp}>
           {connectedWalletAddress
-            ? "Buy SOL or USDC with a card — funds go to your linked Solana wallet. FSM and GFC can't be bought with a card."
+            ? "Buy SOL or USDC with a card — funds go to your linked Solana wallet. FTM and GFC can't be bought with a card."
             : "Link a Solana wallet to buy SOL or USDC with a card."}
         </Text>
 
