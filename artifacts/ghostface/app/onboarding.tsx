@@ -205,10 +205,8 @@ export default function OnboardingScreen() {
     },
     header: {
       alignItems: "center",
-      // Shifted up 10mm (~38px @ 96dpi) — CONFIRM ALIAS was sitting low
-      // enough to need an awkward reach/tilt to tap.
-      marginTop: 32 - 38,
-      marginBottom: 32,
+      marginTop: 8,
+      marginBottom: 30,
     },
     tagline: {
       ...type.labelStrong,
@@ -237,7 +235,7 @@ export default function OnboardingScreen() {
       backgroundColor: colors.card,
       color: colors.foreground,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: "rgba(201,154,60,0.30)",
       borderRadius: colors.radius,
       paddingHorizontal: 16,
       paddingVertical: 14,
@@ -271,8 +269,8 @@ export default function OnboardingScreen() {
     confirmBtn: {
       borderRadius: colors.radius,
       marginBottom: 12,
-      borderWidth: 1,
-      borderColor: "#ffffff",
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: "rgba(214,180,96,0.55)",
       overflow: "hidden",
     },
     confirmBtnInner: {
@@ -403,9 +401,9 @@ export default function OnboardingScreen() {
     },
     promoBanner: {
       borderWidth: 1,
-      borderColor: "#ef4444",
+      borderColor: "rgba(201,154,60,0.45)",
       borderRadius: colors.radius,
-      backgroundColor: "rgba(239,68,68,0.07)",
+      backgroundColor: "rgba(201,154,60,0.08)",
       paddingHorizontal: 16,
       paddingVertical: 14,
       marginBottom: 20,
@@ -417,7 +415,7 @@ export default function OnboardingScreen() {
       width: 36,
       height: 36,
       borderRadius: 18,
-      backgroundColor: "rgba(239,68,68,0.15)",
+      backgroundColor: "rgba(201,154,60,0.16)",
       alignItems: "center",
       justifyContent: "center",
     },
@@ -427,7 +425,7 @@ export default function OnboardingScreen() {
     promoLabel: {
       ...type.labelStrong,
       fontSize: 10,
-      color: "#ef4444",
+      color: "#C99A3C",
       marginBottom: 2,
     },
     promoHeadline: {
@@ -442,7 +440,7 @@ export default function OnboardingScreen() {
       marginTop: 2,
     },
     promoBadge: {
-      backgroundColor: "#ef4444",
+      backgroundColor: "#C99A3C",
       borderRadius: 4,
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -547,7 +545,7 @@ export default function OnboardingScreen() {
             {/* First Login Special — Free Ghost Number */}
             <View style={styles.promoBanner}>
               <View style={styles.promoIconWrap}>
-                <Ionicons name="call" size={18} color="#ef4444" />
+                <Ionicons name="call" size={18} color="#C99A3C" />
               </View>
               <View style={styles.promoTextWrap}>
                 <Text style={styles.promoLabel}>FIRST LOGIN SPECIAL</Text>
