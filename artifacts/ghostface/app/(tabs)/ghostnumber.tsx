@@ -1,3 +1,4 @@
+import { SectionLock } from "@/components/SectionLock";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -66,7 +67,7 @@ function formatTime(ts: string): string {
   return `${Math.floor(hrs / 24)}D AGO`;
 }
 
-export default function GhostNumberScreen() {
+function GhostNumberScreenInner() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { alias, deviceToken, loaded, themePreference } = useApp();
@@ -789,5 +790,13 @@ export default function GhostNumberScreen() {
       </View>
     </View>
     </TabScreenWrapper>
+  );
+}
+
+export default function GhostNumberScreen() {
+  return (
+    <SectionLock sectionKey="number" label="NUMBER">
+      <GhostNumberScreenInner />
+    </SectionLock>
   );
 }

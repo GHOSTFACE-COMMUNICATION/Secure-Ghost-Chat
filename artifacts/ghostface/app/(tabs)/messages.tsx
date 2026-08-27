@@ -1,3 +1,4 @@
+import { SectionLock } from "@/components/SectionLock";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
@@ -90,7 +91,7 @@ function inviteErrorMessage(reason: string): string {
 
 type PageTab = "messages" | "tools" | "invite";
 
-export default function MessagesScreen() {
+function MessagesScreenInner() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { conversations, addConversation, deleteConversation, wsConnected, alias, themePreference } = useApp();
@@ -691,5 +692,13 @@ export default function MessagesScreen() {
       </Modal>
     </View>
     </TabScreenWrapper>
+  );
+}
+
+export default function MessagesScreen() {
+  return (
+    <SectionLock sectionKey="messages" label="MESSAGES">
+      <MessagesScreenInner />
+    </SectionLock>
   );
 }

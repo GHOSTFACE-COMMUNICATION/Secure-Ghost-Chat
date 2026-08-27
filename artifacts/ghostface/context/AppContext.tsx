@@ -664,6 +664,9 @@ interface AppContextType extends AppState {
   hasDecoyPin: boolean;
   hasWalletPin: boolean;
   walletUnlocked: boolean;
+  lockedSections: string[];
+  isSectionLocked: (key: string) => boolean;
+  setSectionLocked: (key: string, locked: boolean) => Promise<void>;
   decoyMode: boolean;
   loadError: string | null;
   setAlias: (alias: string) => Promise<void>;
@@ -829,6 +832,8 @@ const SECURE_PIN_KEY = "ghostface_pin";
 const SECURE_DURESS_PIN_KEY = "ghostface_duress_pin";
 const SECURE_DECOY_PIN_KEY = "ghostface_decoy_pin";
 const SECURE_WALLET_PIN_KEY = "ghostface_wallet_pin";
+const SECURE_LOCKED_SECTIONS_KEY = "ghostface_locked_sections";
+export const LOCKABLE_SECTIONS = ["messages", "calls", "vpn", "wallet", "number", "settings"] as const;
 const CONVERSATIONS_KEY = "ghostface_conversations";
 const CALL_HISTORY_KEY = "ghostface_call_history";
 const OUTBOX_KEY = "ghostface_outbox";
@@ -1446,6 +1451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Session-scoped: cleared whenever the app (re)locks, same as the decoy/
   // duress model — a wallet PIN unlock doesn't outlive the app lock.
   const [walletUnlocked, setWalletUnlocked] = useState(false);
+  const [lockedSections, setLockedSections] = useState<string[]>([]);
   // In-memory only, never persisted — a decoy session must leave no trace
   // that distinguishes it from a normal one once the app is force-closed.
   const [decoyMode, setDecoyMode] = useState(false);
@@ -1491,12 +1497,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw, themeRaw, profileImageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, walletPinValue, lockedSectionsRaw, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw, themeRaw, profileImageRaw] = await Promise.all([
           AsyncStorage.getItem("alias"),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
           secureGet(SECURE_DECOY_PIN_KEY),
           secureGet(SECURE_WALLET_PIN_KEY),
+          secureGet(SECURE_LOCKED_SECTIONS_KEY),
           AsyncStorage.getItem("biometricEnabled"),
           AsyncStorage.getItem("isOnboarded"),
           readEncryptedString(CONVERSATIONS_KEY),
@@ -1530,6 +1537,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setHasDuressPin(!!duressValue);
         setHasDecoyPin(!!decoyValue);
         setHasWalletPin(!!walletPinValue);
+        // Which categories require the shared lock PIN. Migration: existing
+        // wallet-PIN users keep the wallet locked by default.
+        let parsedLocked: string[] = [];
+        try { if (lockedSectionsRaw) parsedLocked = JSON.parse(lockedSectionsRaw); } catch {}
+        if (!lockedSectionsRaw && !!walletPinValue) parsedLocked = ["wallet"];
+        setLockedSections(Array.isArray(parsedLocked) ? parsedLocked : []);
         const biometricOn = biometric === "true";
         const isOnboarded = onboarded === "true";
 
@@ -2195,6 +2208,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw err;
     }
   }, []);
+
+  const setSectionLocked = useCallback(async (key: string, locked: boolean) => {
+    setLockedSections((prev) => {
+      const next = locked
+        ? Array.from(new Set([...prev, key]))
+        : prev.filter((k) => k !== key);
+      secureSet(SECURE_LOCKED_SECTIONS_KEY, JSON.stringify(next)).catch((e) =>
+        console.error("[AppContext] Failed to persist locked sections:", e),
+      );
+      return next;
+    });
+  }, []);
+
+  const isSectionLocked = useCallback(
+    (key: string) => hasWalletPin && lockedSections.includes(key),
+    [hasWalletPin, lockedSections],
+  );
 
   const setWalletPin = useCallback(async (pin: string) => {
     try {
@@ -3386,6 +3416,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         secureDelete(SECURE_DURESS_PIN_KEY),
         secureDelete(SECURE_DECOY_PIN_KEY),
         secureDelete(SECURE_WALLET_PIN_KEY),
+        secureDelete(SECURE_LOCKED_SECTIONS_KEY),
         secureDelete(DEVICE_TOKEN_KEY),
         secureDelete(MY_IK_PRIV_KEY),
         secureDelete(MY_IK_PUB_KEY),
@@ -4654,6 +4685,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         hasDecoyPin,
         hasWalletPin,
         walletUnlocked,
+        lockedSections,
+        isSectionLocked,
+        setSectionLocked,
         decoyMode,
         loadError,
         setAlias,

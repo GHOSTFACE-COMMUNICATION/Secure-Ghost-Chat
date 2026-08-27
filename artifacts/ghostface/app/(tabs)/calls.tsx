@@ -1,3 +1,4 @@
+import { SectionLock } from "@/components/SectionLock";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
@@ -30,7 +31,7 @@ function formatDuration(secs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function CallScreen() {
+function CallScreenInner() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { callHistory, markCallsSeen, clearCallHistory } = useApp();
@@ -224,5 +225,13 @@ export default function CallScreen() {
         />
       </View>
     </TabScreenWrapper>
+  );
+}
+
+export default function CallScreen() {
+  return (
+    <SectionLock sectionKey="calls" label="CALLS">
+      <CallScreenInner />
+    </SectionLock>
   );
 }

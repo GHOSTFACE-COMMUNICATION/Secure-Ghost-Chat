@@ -54,6 +54,7 @@ export default function WalletScreen() {
     hasWalletPin,
     walletUnlocked,
     checkWalletPin,
+    isSectionLocked,
     themePreference,
   } = useApp();
   const isLight = themePreference === "light";
@@ -870,7 +871,7 @@ export default function WalletScreen() {
     unlockBtnTxt: { ...type.labelStrong, color: isLight ? colors.primaryForeground : "#FFFFFF", fontSize: 12 },
   });
 
-  if (hasWalletPin && !walletUnlocked) {
+  if (isSectionLocked("wallet") && !walletUnlocked) {
     return (
       <TabScreenWrapper>
         <View style={[styles.container, gateStyles.container, { paddingTop: insets.top + 40 }]}>
