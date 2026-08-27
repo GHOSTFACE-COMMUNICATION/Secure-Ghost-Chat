@@ -354,10 +354,14 @@ export default function MessagesScreen() {
       fontSize: 12,
       color: colors.mutedForeground,
     },
+    previewUnread: {
+      color: colors.foreground,
+    },
     itemDivider: {
-      height: 1,
+      height: StyleSheet.hairlineWidth,
       backgroundColor: colors.border,
       marginLeft: 80,
+      marginRight: 20,
     },
     empty: {
       alignItems: "center",
@@ -610,7 +614,7 @@ export default function MessagesScreen() {
                     </View>
                     <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
                   </View>
-                  <Text style={styles.preview} numberOfLines={1}>{item.lastMessage}</Text>
+                  <Text style={[styles.preview, item.unread > 0 && styles.previewUnread]} numberOfLines={1}>{item.lastMessage}</Text>
                 </View>
                 <StatusDot active={!item.destroyedAt} size={5} pulse={false} />
               </Pressable>
