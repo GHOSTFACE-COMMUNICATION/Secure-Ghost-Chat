@@ -32,7 +32,7 @@ const CODE_REGEX = /^GF-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
  * before. The two agree for a real client — the app sends its own alias.
  */
 router.post("/invites", async (req: Request, res: Response) => {
-  const auth = await checkAuth(req, res, "POST /invites");
+  const auth = await checkAuth(req, res, "POST /invites", "body-owner-alias");
   if (!auth.ok) return;
 
   if (!(await createLimiter.check(getIpKey(req))) || !(await createGlobal.check())) {

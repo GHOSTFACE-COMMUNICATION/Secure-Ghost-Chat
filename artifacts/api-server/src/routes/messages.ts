@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, messagesTable, identityKeysTable, deviceTokensTable } from "@workspace/db";
+import { db, messagesTable, identityKeysTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { hashToken } from "../lib/auth";
+import { getAuthedAlias } from "../lib/auth";
 import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
@@ -30,27 +30,6 @@ const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "au
 // bound total enumeration regardless of how many addresses it comes from.
 const userExistsLimiter = new RateLimiter({ windowMs: 60_000, max: 600, prefix: "userExists" });
 const userExistsGlobal = new GlobalLimiter({ windowMs: 60_000, max: 6_000, prefix: "userExistsGlobal" });
-
-async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
-  const alias = req.query.alias as string | undefined;
-  if (!alias) return null;
-  const normalizedAlias = normalizeAlias(alias);
-  if (!normalizedAlias) return null;
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(
-      and(
-        eq(deviceTokensTable.userId, normalizedAlias),
-        eq(deviceTokensTable.tokenHash, hash),
-      ),
-    );
-  return row ? normalizedAlias : null;
-}
 
 router.get("/users/exists/:alias", async (req: Request, res: Response) => {
   if (!(await userExistsLimiter.check(getIpKey(req))) || !(await userExistsGlobal.check())) {
@@ -94,7 +73,7 @@ router.get("/messages/pending", async (req: Request, res: Response) => {
     return res.status(429).json({ error: "Too many requests" });
   }
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) {
       await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Authorization required. Pass alias as query param." });

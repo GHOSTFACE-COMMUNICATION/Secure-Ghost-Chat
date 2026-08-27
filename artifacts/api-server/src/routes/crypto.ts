@@ -1,12 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { hashToken } from "../lib/auth";
+import { getAuthedAlias } from "../lib/auth";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { validateTransfer } from "@solana/pay";
 import BigNumber from "bignumber.js";
 import { eq, and } from "drizzle-orm";
-import { db, deviceTokensTable, ghostPaymentsTable, ghostEntitlementsTable } from "@workspace/db";
+import { db, ghostPaymentsTable, ghostEntitlementsTable } from "@workspace/db";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
-import { normalizeAlias } from "../utils/alias";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
 import {
@@ -41,28 +40,6 @@ const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "au
 // standard Drizzle schema (lib/db/src/schema/payments.ts) and applied via
 // `pnpm --filter db push` (see scripts/post-merge.sh) — the single source of
 // truth for the database schema.
-
-/** Resolve the authenticated alias from a Bearer device token + ?alias=. */
-async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
-  const alias = (req.query.alias as string | undefined) ?? (req.body?.alias as string | undefined);
-  if (!alias) return null;
-  const normalizedAlias = normalizeAlias(alias);
-  if (!normalizedAlias) return null;
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(
-      and(
-        eq(deviceTokensTable.userId, normalizedAlias),
-        eq(deviceTokensTable.tokenHash, hash),
-      ),
-    );
-  return row ? normalizedAlias : null;
-}
 
 /** True for a Postgres unique-constraint violation (replay), not a generic fault. */
 function isUniqueViolation(err: unknown): boolean {
@@ -117,7 +94,7 @@ router.post("/crypto/payment-intent", async (req: Request, res: Response) => {
         .status(503)
         .json({ error: "Payments are not configured. Set GHOST_WALLET_ADDRESS." });
     }
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query-or-body");
     if (!alias) {
       await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
@@ -183,7 +160,7 @@ router.get("/crypto/payment-status", async (req: Request, res: Response) => {
     if (!(await authFailureGate.allowed(ipKey))) {
       return res.status(429).json({ error: "Too many requests" });
     }
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query-or-body");
     if (!alias) {
       await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
@@ -315,7 +292,7 @@ router.get("/crypto/payment-status", async (req: Request, res: Response) => {
 // Authenticated. Returns the user's current active plan (or null).
 router.get("/crypto/entitlement", async (req: Request, res: Response) => {
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query-or-body");
     if (!alias) return res.status(401).json({ error: "Unauthorized" });
 
     const [row] = await db

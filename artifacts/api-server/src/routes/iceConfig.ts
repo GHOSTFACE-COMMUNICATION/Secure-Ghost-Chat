@@ -155,7 +155,7 @@ router.get("/ice-config", async (req: Request, res: Response) => {
   // (app/call.tsx) catches any failure and falls back to STUN-only, so a 401
   // here does not surface an error to the user — it silently breaks calls for
   // anyone behind a symmetric NAT. Nothing will alert.
-  const auth = await checkAuth(req, res, "GET /ice-config");
+  const auth = await checkAuth(req, res, "GET /ice-config", "query");
   if (!auth.ok) return;
 
   if (!(await limiter.check(getIpKey(req))) || !(await globalLimiter.check())) {

@@ -85,26 +85,39 @@ numbers, prekeys, push, vpn, ws/manager) now import the one in `lib/auth.ts`.
 Verified byte-identical before removal, so it is a pure no-op: 35 deletions,
 9 insertions, typecheck clean, tests 70/70, eslint clean on all 7.
 
-**Still to do — and NOT a mechanical change, do not batch it with the above.**
-The alias resolvers diverge, and one difference is security-relevant:
-- `messages.ts` and `numbers.ts` read `?alias=` **only**. Identical to each
-  other.
-- `crypto.ts` reads `?alias=` **or** `body.alias`.
-- `lib/auth.ts` (used by blobs/ice-config/invites) reads query, then
-  `body.alias`, then `body.ownerAlias` — the widest of the three.
-- `prekeys.ts`/`push.ts` share an identical `requireDeviceAuth` keyed on the
-  `:userId` path param; `vpn.ts`'s adds an IP failure gate.
-- `ws/manager.ts`'s `validateToken(alias, token)` is not request-shaped at all.
+**Resolver consolidation — DONE 27 Aug, explicit-source approach.**
+`lib/auth.ts` is now the only place any of this lives: `hashToken`,
+`verifyDeviceToken(alias, token)`, `getAuthedAlias(req, source)` and
+`checkAuth(req, res, label, source)`.
 
-⚠️ Migrating the query-only sites onto a query-or-body resolver **widens**
-them. The hazard: if a handler reads `req.query.alias` for its own logic while
-auth resolved the caller from `req.body.alias`, the request authenticates as
-one user and operates on another. Today's precedence (query first, body only
-as fallback) makes that unreachable, but it is one edit away and nothing
-enforces it. The right shape is an explicit source per call site — e.g.
-`getAuthedAlias(req, { allowBodyAlias: true })` — preserving each site's
-current behaviour rather than silently widening. **Each site needs checking
-against its own handler before it moves.**
+`AliasSource` is a **required** parameter with no default — `"query"`,
+`"query-or-body"`, or `"body-owner-alias"`. That is the enforcement: a new
+route cannot silently inherit a wider source than it means, and adding a call
+site without naming one is a compile error (this is exactly how the migration
+caught its own test file).
+
+Sources as migrated, each preserving that site's prior behaviour:
+`messages.ts` and `numbers.ts` → `"query"`; `crypto.ts` → `"query-or-body"`;
+`blobs.ts`/`iceConfig.ts` → `"query"`; `invites.ts` → `"body-owner-alias"`.
+The last three are a slight *narrowing* of what the 27 Aug deploy accepted
+(it read query, then `body.alias`, then `body.ownerAlias` for all three) —
+safe, because the clients send exactly the source now named, and unobservable
+anyway while enforcement is off. `ws/manager.ts`'s `validateToken` now calls
+`verifyDeviceToken`, keeping its deliberate never-throw wrapper: a DB fault
+during the WebSocket handshake must fail auth, not reject out of the handler.
+
+**Audit that made this safe (27 Aug):** every one of the 10 call sites uses
+the alias `getAuthedAlias` *returns* and none re-reads `req.query.alias` or
+`req.body.alias` itself. So the authenticate-as-one-user-act-on-another
+hazard was never reachable — it was a latent property, not a live bug. The
+required source parameter is what keeps it that way. If a handler ever starts
+reading the raw field, it must read the same source named at its call site.
+
+**Still not consolidated, on purpose:** the three `requireDeviceAuth` copies.
+`prekeys.ts` and `push.ts` are identical (path-param `:userId`, 401/403);
+`vpn.ts` adds an IP failure gate with a different limiter API
+(`allowed()`/`record()` rather than `check()`). Three shapes, not one — worth
+doing, but it is its own piece of work.
 
 ⚠️ **The ordering is the whole point. Step 2 must not deploy before an app
 release carrying step 1 is out.** No shipped build sends the header, so

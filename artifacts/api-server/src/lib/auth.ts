@@ -56,25 +56,46 @@ export function isAuthEnforced(): boolean {
 }
 
 /**
- * Resolve the authenticated alias from a Bearer token plus a claimed alias
- * (`?alias=` or `body.alias`/`body.ownerAlias`). Returns null when the
- * credential is absent, malformed, or does not match a stored device token.
+ * Where a route accepts the caller's *claimed* alias from.
  *
- * Never throws for a bad credential — callers decide what a null means.
+ * Required at every call site — there is deliberately no default. The alias
+ * a route reads for auth must be the same one its handler acts on, and a
+ * default would let a new route silently inherit a wider source than it
+ * means. Audited 27 Aug: every current handler uses the alias this function
+ * *returns* and never re-reads `req.query.alias` / `req.body.alias` itself,
+ * which is what makes the sources safe to differ. Keep it that way — if a
+ * handler starts reading the raw field, it must read the same source named
+ * here, or it will authenticate one user and act on another.
  */
-export async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
+export type AliasSource =
+  /** `?alias=` only. */
+  | "query"
+  /** `?alias=`, falling back to `body.alias`. */
+  | "query-or-body"
+  /** `body.ownerAlias` — POST /invites, whose body names the owner. */
+  | "body-owner-alias";
 
-  const claimed =
-    (req.query["alias"] as string | undefined) ??
-    (req.body?.alias as string | undefined) ??
-    (req.body?.ownerAlias as string | undefined);
-  if (!claimed) return null;
+function claimedAlias(req: Request, source: AliasSource): string | undefined {
+  switch (source) {
+    case "query":
+      return req.query["alias"] as string | undefined;
+    case "query-or-body":
+      return (
+        (req.query["alias"] as string | undefined) ?? (req.body?.alias as string | undefined)
+      );
+    case "body-owner-alias":
+      return req.body?.ownerAlias as string | undefined;
+  }
+}
 
-  const alias = normalizeAlias(claimed);
-  if (!alias) return null;
+/**
+ * Check a device token against a claimed alias. Returns the normalized alias
+ * on a match, else null. Throws only on an actual database fault — callers
+ * that must never throw (the WebSocket handshake) wrap this themselves.
+ */
+export async function verifyDeviceToken(alias: string, token: string): Promise<string | null> {
+  const normalized = normalizeAlias(alias);
+  if (!normalized) return null;
 
   // Imported lazily and only once a credential is actually present.
   // `@workspace/db` throws at import time when DATABASE_URL is unset, and a
@@ -87,10 +108,31 @@ export async function getAuthedAlias(req: Request): Promise<string | null> {
     .select()
     .from(deviceTokensTable)
     .where(
-      and(eq(deviceTokensTable.userId, alias), eq(deviceTokensTable.tokenHash, hashToken(token))),
+      and(
+        eq(deviceTokensTable.userId, normalized),
+        eq(deviceTokensTable.tokenHash, hashToken(token)),
+      ),
     );
 
-  return row ? alias : null;
+  return row ? normalized : null;
+}
+
+/**
+ * Resolve the authenticated alias from a Bearer token plus the alias claimed
+ * in `source`. Returns null when the credential is absent, malformed, or does
+ * not match a stored device token.
+ *
+ * Never throws for a bad credential — callers decide what a null means.
+ */
+export async function getAuthedAlias(req: Request, source: AliasSource): Promise<string | null> {
+  const auth = req.headers.authorization ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return null;
+
+  const claimed = claimedAlias(req, source);
+  if (!claimed) return null;
+
+  return verifyDeviceToken(claimed, token);
 }
 
 export type AuthOutcome =
@@ -108,7 +150,7 @@ export type AuthOutcome =
  * as they do today. With the flag on, a missing or bad credential is a 401.
  *
  * Usage:
- *   const auth = await checkAuth(req, res, "blobUpload");
+ *   const auth = await checkAuth(req, res, "blobUpload", "query");
  *   if (!auth.ok) return;            // response already sent
  *   // auth.alias is the caller, or null only while enforcement is off
  */
@@ -116,8 +158,9 @@ export async function checkAuth(
   req: Request,
   res: Response,
   label: string,
+  source: AliasSource,
 ): Promise<AuthOutcome> {
-  const alias = await getAuthedAlias(req);
+  const alias = await getAuthedAlias(req, source);
   if (alias) return { ok: true, alias };
 
   if (!isAuthEnforced()) {

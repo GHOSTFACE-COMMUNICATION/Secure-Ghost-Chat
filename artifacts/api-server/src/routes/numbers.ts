@@ -1,11 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, ghostNumbersTable, ghostSmsTable, deviceTokensTable } from "@workspace/db";
+import { db, ghostNumbersTable, ghostSmsTable } from "@workspace/db";
 import { eq, and, desc, or, sql } from "drizzle-orm";
-import { hashToken } from "../lib/auth";
+import { getAuthedAlias } from "../lib/auth";
 import { vonageClient } from "../lib/vonage";
 import { pool } from "@workspace/db";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
-import { normalizeAlias } from "../utils/alias";
 import { broadcastToAlias } from "../ws/manager";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
@@ -34,27 +33,6 @@ const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "au
 
 const ALLOWED_ROTATION_DAYS = new Set([0, 7, 30, 90]);
 
-async function getAuthedAlias(req: Request): Promise<string | null> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!token) return null;
-  const alias = req.query.alias as string | undefined;
-  if (!alias) return null;
-  const normalizedAlias = normalizeAlias(alias);
-  if (!normalizedAlias) return null;
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(
-      and(
-        eq(deviceTokensTable.userId, normalizedAlias),
-        eq(deviceTokensTable.tokenHash, hash),
-      ),
-    );
-  return row ? normalizedAlias : null;
-}
-
 const COUNTRY_NAMES: Record<string, string> = {
   NZ: "New Zealand",
   AU: "Australia",
@@ -73,7 +51,7 @@ const PLAN_PRICES: Record<string, number> = {
 // GET /api/numbers — list user's ghost numbers
 router.get("/numbers", async (req: Request, res: Response) => {
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) return res.status(401).json({ error: "Unauthorized" });
 
     const numbers = await db
@@ -95,7 +73,7 @@ router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
     return res.status(429).json({ error: "Too many requests" });
   }
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) {
       await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
@@ -130,7 +108,7 @@ router.post("/numbers/provision", async (req: Request, res: Response) => {
     return res.status(429).json({ error: "Too many requests" });
   }
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) {
       await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
@@ -217,7 +195,7 @@ router.post("/numbers/provision", async (req: Request, res: Response) => {
 // DELETE /api/numbers/:id — release a ghost number
 router.delete("/numbers/:id", async (req: Request, res: Response) => {
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) return res.status(401).json({ error: "Unauthorized" });
 
     const numberId = Number(req.params.id);
@@ -250,7 +228,7 @@ router.delete("/numbers/:id", async (req: Request, res: Response) => {
 // PATCH /api/numbers/:id/rotation — set or clear auto-rotation schedule
 router.patch("/numbers/:id/rotation", async (req: Request, res: Response) => {
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) return res.status(401).json({ error: "Unauthorized" });
 
     const numberId = Number(req.params.id);
@@ -297,7 +275,7 @@ router.patch("/numbers/:id/rotation", async (req: Request, res: Response) => {
 // Rate limit: 1 per USER per 24 hours (enforced atomically via user_rotation_limits table).
 router.post("/numbers/:id/rotate-now", async (req: Request, res: Response) => {
   try {
-    const alias = await getAuthedAlias(req);
+    const alias = await getAuthedAlias(req, "query");
     if (!alias) return res.status(401).json({ error: "Unauthorized" });
 
     const numberId = Number(req.params.id);

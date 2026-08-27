@@ -4,12 +4,11 @@ import {
   db,
   messagesTable,
   identityKeysTable,
-  deviceTokensTable,
   departuresTable,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { hashToken } from "../lib/auth";
+import { verifyDeviceToken } from "../lib/auth";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
@@ -235,15 +234,10 @@ async function endGhostpadSession(alias: string): Promise<void> {
 }
 
 async function validateToken(alias: string, token: string): Promise<boolean> {
+  // Swallows faults on purpose: a database error during the WebSocket
+  // handshake must fail the auth, never reject out of the handler.
   try {
-    const normalizedAlias = normalizeAlias(alias);
-    if (!normalizedAlias) return false;
-    const hash = hashToken(token);
-    const [row] = await db
-      .select()
-      .from(deviceTokensTable)
-      .where(and(eq(deviceTokensTable.userId, normalizedAlias), eq(deviceTokensTable.tokenHash, hash)));
-    return !!row;
+    return (await verifyDeviceToken(alias, token)) !== null;
   } catch {
     return false;
   }

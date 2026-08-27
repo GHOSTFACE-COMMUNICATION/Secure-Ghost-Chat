@@ -19,12 +19,17 @@ afterEach(() => {
 });
 
 /** Minimal Request stand-in. `ip` is varied so tests don't share a rate bucket. */
-function req(opts: { ip: string; authorization?: string; query?: Record<string, string> }): Request {
+function req(opts: {
+  ip: string;
+  authorization?: string;
+  query?: Record<string, string>;
+  body?: Record<string, string>;
+}): Request {
   return {
     ip: opts.ip,
     headers: opts.authorization ? { authorization: opts.authorization } : {},
     query: opts.query ?? {},
-    body: undefined,
+    body: opts.body,
   } as unknown as Request;
 }
 
@@ -67,7 +72,7 @@ describe("checkAuth", () => {
   it("passes an unauthenticated caller through with a null alias while off", async () => {
     delete process.env.ENFORCE_ENDPOINT_AUTH;
     const r = res();
-    const out = await checkAuth(req({ ip: "10.0.0.1" }), r, "test");
+    const out = await checkAuth(req({ ip: "10.0.0.1" }), r, "test", "query");
     expect(out).toEqual({ ok: true, alias: null });
     expect(r.statusCode).toBeUndefined();
   });
@@ -75,7 +80,7 @@ describe("checkAuth", () => {
   it("rejects an unauthenticated caller with 401 when enforcing", async () => {
     process.env.ENFORCE_ENDPOINT_AUTH = "1";
     const r = res();
-    const out = await checkAuth(req({ ip: "10.0.0.2" }), r, "test");
+    const out = await checkAuth(req({ ip: "10.0.0.2" }), r, "test", "query");
     expect(out).toEqual({ ok: false });
     expect(r.statusCode).toBe(401);
   });
@@ -85,7 +90,7 @@ describe("checkAuth", () => {
     // is unresolvable, not merely unverified.
     process.env.ENFORCE_ENDPOINT_AUTH = "1";
     const r = res();
-    const out = await checkAuth(req({ ip: "10.0.0.3", authorization: "Bearer abc" }), r, "test");
+    const out = await checkAuth(req({ ip: "10.0.0.3", authorization: "Bearer abc" }), r, "test", "query");
     expect(out).toEqual({ ok: false });
     expect(r.statusCode).toBe(401);
   });
@@ -97,6 +102,7 @@ describe("checkAuth", () => {
       req({ ip: "10.0.0.4", authorization: "Basic abc", query: { alias: "SOMEONE" } }),
       r,
       "test",
+      "query",
     );
     expect(out).toEqual({ ok: false });
     expect(r.statusCode).toBe(401);
@@ -110,6 +116,52 @@ describe("checkAuth", () => {
       req({ ip: "10.0.0.5", authorization: "Bearer abc", query: { alias: "no" } }),
       r,
       "test",
+      "query",
+    );
+    expect(out).toEqual({ ok: false });
+    expect(r.statusCode).toBe(401);
+  });
+});
+
+describe("AliasSource selection", () => {
+  // Each route names where its claimed alias comes from. A source that does
+  // not match the request shape must find nothing rather than fall through
+  // to a wider field — that fall-through is the whole hazard this guards.
+
+  it('"query" does not fall back to body.alias', async () => {
+    process.env.ENFORCE_ENDPOINT_AUTH = "1";
+    const r = res();
+    const out = await checkAuth(
+      req({ ip: "10.0.0.6", authorization: "Bearer abc", body: { alias: "SOMEONE" } }),
+      r,
+      "test",
+      "query",
+    );
+    expect(out).toEqual({ ok: false });
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('"query" does not fall back to body.ownerAlias', async () => {
+    process.env.ENFORCE_ENDPOINT_AUTH = "1";
+    const r = res();
+    const out = await checkAuth(
+      req({ ip: "10.0.0.7", authorization: "Bearer abc", body: { ownerAlias: "SOMEONE" } }),
+      r,
+      "test",
+      "query",
+    );
+    expect(out).toEqual({ ok: false });
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('"body-owner-alias" ignores ?alias= entirely', async () => {
+    process.env.ENFORCE_ENDPOINT_AUTH = "1";
+    const r = res();
+    const out = await checkAuth(
+      req({ ip: "10.0.0.8", authorization: "Bearer abc", query: { alias: "SOMEONE" } }),
+      r,
+      "test",
+      "body-owner-alias",
     );
     expect(out).toEqual({ ok: false });
     expect(r.statusCode).toBe(401);

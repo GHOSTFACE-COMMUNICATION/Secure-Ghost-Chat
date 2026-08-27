@@ -49,7 +49,7 @@ router.post(
     // Authenticated write — this costs server disk. Gated by
     // ENFORCE_ENDPOINT_AUTH; off (the default) this is a no-op and legacy
     // clients keep working. See lib/auth.ts for why the default matters.
-    const auth = await checkAuth(req, res, "POST /blobs");
+    const auth = await checkAuth(req, res, "POST /blobs", "query");
     if (!auth.ok) return;
 
     if (!(await uploadLimiter.check(getIpKey(req))) || !(await uploadGlobal.check())) {
