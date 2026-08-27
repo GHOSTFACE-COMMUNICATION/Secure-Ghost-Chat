@@ -515,24 +515,35 @@ function ScratchOverlay({ onEnter, biometricEnabled, onBiometric }: { onEnter: (
       onPressOut={fingerprintReady ? undefined : cancelScan}
       style={StyleSheet.absoluteFill}
     >
+      {/* frosted gold-glass base — the GHOSTFACE gate shows faintly through it */}
+      {USE_NATIVE_GLASS ? (
+        <GlassView
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+          glassEffectStyle="regular"
+          tintColor="rgba(186,164,92,0.28)"
+        />
+      ) : (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(186,164,92,0.32)" }]} />
+      )}
       {tiles.map((t, i) => {
         const r = Math.floor(i / COLS), c = i % COLS;
         return (
           <Animated.View key={i} style={{
-            position: "absolute", left: c * tw - 0.5, top: r * th - 0.5,
-            width: tw + 1, height: th + 1,
-            backgroundColor: "#CDA23E",
+            position: "absolute", left: c * tw, top: r * th,
+            width: tw + 0.5, height: th + 0.5,
+            backgroundColor: "rgba(200,178,104,0.22)",
             opacity: t,
           }} />
         );
       })}
       <LinearGradient
         pointerEvents="none"
-        colors={["#E7C765", "#CDA23E", "#B98C2E"]}
+        colors={["#EFE7B6", "#C6B45C", "#8C7A34"]}
         locations={[0, 0.5, 1]}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
-        style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
+        style={[StyleSheet.absoluteFill, { opacity: 0.28 }]}
       />
 
       {/* tiny embossed corner sign — top right */}
