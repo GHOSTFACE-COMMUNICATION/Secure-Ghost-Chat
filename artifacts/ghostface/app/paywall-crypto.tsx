@@ -71,7 +71,7 @@ const PLANS: Plan[] = [
     color: "#F5D26B",
     features: [
       "Everything in SPECTER",
-      "Crypto wallet (FD + GFC)",
+      "Crypto wallet (FANTASMA + GFC)",
       "Panic wipe with dead man's switch",
       "Priority ghost routing",
       "Biometric app lock",

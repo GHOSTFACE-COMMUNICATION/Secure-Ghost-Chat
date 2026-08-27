@@ -40,7 +40,7 @@ export default function WalletScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    fdBalance,
+    fantasmaBalance,
     gfcBalance,
     appTokens,
     walletAddress,
@@ -82,7 +82,7 @@ export default function WalletScreen() {
 
   const [copied, setCopied] = useState(false);
   const [copiedConnected, setCopiedConnected] = useState(false);
-  const [activeToken, setActiveToken] = useState<"FD" | "GFC">("FD");
+  const [activeToken, setActiveToken] = useState<"FANTASMA" | "GFC">("FANTASMA");
   const [showSend, setShowSend] = useState(false);
   const [showReceive, setShowReceive] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
@@ -215,9 +215,9 @@ export default function WalletScreen() {
   };
 
   // Funds the wallet with SOL or USDC. Deliberately NOT tied to activeToken:
-  // FZ and GFC are GHOSTFACE's own SPL tokens and no card on-ramp lists
+  // FSM and GFC are GHOSTFACE's own SPL tokens and no card on-ramp lists
   // them, so deriving the purchase currency from the selected tab meant
-  // "BUY" while viewing FZ silently opened a USDC checkout. The asset is now
+  // "BUY" while viewing FSM silently opened a USDC checkout. The asset is now
   // chosen explicitly.
   const handleBuy = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -240,7 +240,7 @@ export default function WalletScreen() {
     const destination = connectedWalletAddress;
     Alert.alert(
       "FUND WALLET",
-      "Buy with a card. Funds go to your linked Solana wallet.\n\nFZ and GFC can't be bought with a card — they aren't listed on any on-ramp.",
+      "Buy with a card. Funds go to your linked Solana wallet.\n\nFSM and GFC can't be bought with a card — they aren't listed on any on-ramp.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "USDC", onPress: () => void openMoonPay("usdc_sol", destination) },
@@ -269,13 +269,13 @@ export default function WalletScreen() {
     );
   };
 
-  const balance = activeToken === "FD" ? fdBalance : gfcBalance;
+  const balance = activeToken === "FANTASMA" ? fantasmaBalance : gfcBalance;
   // appTokens is ordered by id ascending (id 1 = GFC, id 2 = the second
   // app token) — fetched live from the api-server rather than hardcoded, so
   // renaming/redeploying a token doesn't need a client release.
   const gfcSymbol = appTokens[0]?.symbol ?? "GFC";
-  const secondTokenSymbol = appTokens[1]?.symbol ?? "FD";
-  const activeSymbol = activeToken === "FD" ? secondTokenSymbol : gfcSymbol;
+  const secondTokenSymbol = appTokens[1]?.symbol ?? "FSM";
+  const activeSymbol = activeToken === "FANTASMA" ? secondTokenSymbol : gfcSymbol;
   const filteredTx = transactions.filter((t) => t.token === activeToken);
 
   const styles = StyleSheet.create({
@@ -992,18 +992,18 @@ export default function WalletScreen() {
             style={styles.tokenTab}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setActiveToken("FD");
+              setActiveToken("FANTASMA");
             }}
           >
             <GoldGradient
-              style={[StyleSheet.absoluteFill, activeToken === "FD" && { borderColor: colors.primary }]}
+              style={[StyleSheet.absoluteFill, activeToken === "FANTASMA" && { borderColor: colors.primary }]}
             />
             <Text
               style={[
                 styles.tokenTabText,
                 {
                   color:
-                    activeToken === "FD"
+                    activeToken === "FANTASMA"
                       ? isLight
                         ? colors.primaryForeground
                         : "#FFFFFF"
@@ -1159,7 +1159,7 @@ export default function WalletScreen() {
         </Text>
         <Text style={styles.buyHelp}>
           {connectedWalletAddress
-            ? "Buy SOL or USDC with a card — funds go to your linked Solana wallet. FZ and GFC can't be bought with a card."
+            ? "Buy SOL or USDC with a card — funds go to your linked Solana wallet. FSM and GFC can't be bought with a card."
             : "Link a Solana wallet to buy SOL or USDC with a card."}
         </Text>
 

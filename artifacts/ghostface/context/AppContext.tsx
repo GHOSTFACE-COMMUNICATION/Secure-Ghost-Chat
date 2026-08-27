@@ -512,7 +512,7 @@ export { evaluateExpiredHandshake };
 export interface Transaction {
   id: string;
   type: "send" | "receive";
-  token: "FD" | "GFC";
+  token: "FANTASMA" | "GFC";
   amount: number;
   address: string;
   timestamp: number;
@@ -607,7 +607,7 @@ interface AppState {
   vpnServer: VPNServer | null;
   conversations: Conversation[];
   callHistory: CallLogEntry[];
-  fdBalance: number;
+  fantasmaBalance: number;
   gfcBalance: number;
   appTokens: AppToken[];
   /**
@@ -1469,7 +1469,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     vpnServer: null,
     conversations: createDefaultConversations(),
     callHistory: [],
-    fdBalance: 0,
+    fantasmaBalance: 0,
     gfcBalance: 0,
     appTokens: [],
     walletAddress: null,
@@ -1731,7 +1731,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ...prev,
             appTokens: tokens,
             gfcBalance: balances[0] ?? prev.gfcBalance,
-            fdBalance: balances[1] ?? prev.fdBalance,
+            fantasmaBalance: balances[1] ?? prev.fantasmaBalance,
           }));
         });
 
@@ -3168,7 +3168,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // GFC, id 2 is the second app token (Fantasma). Falls back to the
       // previous value rather than 0 if the list ever comes back shorter.
       gfcBalance: balances[0] ?? prev.gfcBalance,
-      fdBalance: balances[1] ?? prev.fdBalance,
+      fantasmaBalance: balances[1] ?? prev.fantasmaBalance,
     }));
   }, []);
 
@@ -3179,7 +3179,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       await AsyncStorage.setItem(CONNECTED_WALLET_KEY, trimmed);
-      setState((prev) => ({ ...prev, connectedWalletAddress: trimmed, solBalance: 0, fdBalance: 0, gfcBalance: 0 }));
+      setState((prev) => ({ ...prev, connectedWalletAddress: trimmed, solBalance: 0, fantasmaBalance: 0, gfcBalance: 0 }));
       fetchSolBalance(trimmed).then((bal) =>
         setState((prev) => ({ ...prev, solBalance: bal }))
       );
@@ -3189,7 +3189,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...prev,
           appTokens: tokens,
           gfcBalance: balances[0] ?? 0,
-          fdBalance: balances[1] ?? 0,
+          fantasmaBalance: balances[1] ?? 0,
         }));
       });
       return {};
@@ -3204,7 +3204,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Token balances belonged to the wallet that just disconnected — zero
     // them out too, but keep appTokens (name/symbol/mint) so the tabs don't
     // flash back to placeholder labels.
-    setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0, fdBalance: 0, gfcBalance: 0 }));
+    setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0, fantasmaBalance: 0, gfcBalance: 0 }));
   }, []);
 
   /**
@@ -3460,7 +3460,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vpnServer: null,
       conversations: [],
       callHistory: [],
-      fdBalance: 0,
+      fantasmaBalance: 0,
       gfcBalance: 0,
       appTokens: [],
       walletAddress: null,

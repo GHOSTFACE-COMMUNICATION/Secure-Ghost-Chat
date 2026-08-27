@@ -92,7 +92,7 @@ function requireTokenAdmin(req: Request, res: Response, next: NextFunction): voi
   next();
 }
 
-// ── Seed GFC + FaceZero on first run ───────────────────────────────────────
+// ── Seed GFC + FANTASMA on first run ───────────────────────────────────────
 async function ensureSeedTokens() {
   const existing = await db.select().from(tokensTable);
   if (existing.length > 0) return;
@@ -108,10 +108,10 @@ async function ensureSeedTokens() {
       notes: "Core ecosystem token — governance, staking, and utility.",
     },
     {
-      name: "FaceZero",
-      symbol: "FZ",
+      name: "FANTASMA",
+      symbol: "FSM",
       description:
-        "FaceZero (FZ) is the privacy-first payment rail for GHOSTFACE. Peer-to-peer transfers, paywall access, and cross-chain bridging.",
+        "FANTASMA (FSM) is the privacy-first payment rail for GHOSTFACE. Peer-to-peer transfers, paywall access, and cross-chain bridging.",
       decimals: 6,
       totalSupply: 500_000_000,
       logoColor: "#9945FF",
