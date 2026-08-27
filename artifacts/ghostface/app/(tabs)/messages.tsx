@@ -614,7 +614,13 @@ export default function MessagesScreen() {
                     </View>
                     <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
                   </View>
-                  <Text style={[styles.preview, item.unread > 0 && styles.previewUnread]} numberOfLines={1}>{item.lastMessage}</Text>
+                  <Text style={[styles.preview, item.unread > 0 && styles.previewUnread]} numberOfLines={1}>
+                    {item.destroyedAt
+                      ? "Conversation ended"
+                      : item.unread > 0
+                        ? `${item.unread} new message${item.unread === 1 ? "" : "s"}`
+                        : "Encrypted"}
+                  </Text>
                 </View>
                 <StatusDot active={!item.destroyedAt} size={5} pulse={false} />
               </Pressable>
