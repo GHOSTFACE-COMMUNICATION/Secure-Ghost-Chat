@@ -6,8 +6,9 @@ sessions re-derive context wrong.
 
 Last updated: 2026-08-27 (Claude Code session — two pieces of work. FIRST,
 the auth-posture pass on the three unauthenticated endpoints: step 1 of 2
-landed, see the OPEN LOOP directly below — **read it before deploying the
-api-server**. SECOND, a STATUS/TRACKER reconciliation: TRACKER.md's
+landed and step 2 written but shipping DISABLED behind a flag; see the
+OPEN LOOP directly below — **read it before deploying the api-server or
+flipping that flag**. SECOND, a STATUS/TRACKER reconciliation: TRACKER.md's
 Incidents table still carried the VPN peer agent as
 "🔴 OPEN, P0, nothing fixed" while this file recorded it RESOLVED on 24 Aug.
 Verified the fix against the repo before deciding which side was stale —
@@ -37,11 +38,17 @@ Earlier the same day: WireGuard native client — PacketTunnelProvider.swift +
 native bridge module both written; full-app build blocked by an unrelated
 fmt/Clang compiler bug — needs Benji's call on how to proceed)
 
-## 🚧 OPEN LOOP — auth posture: step 1 of 2 landed, DO NOT DEPLOY STEP 2 YET
+## 🚧 OPEN LOOP — auth posture: code complete, ENFORCEMENT FLAG OFF
 
-`POST /blobs`, `GET /ice-config` and `POST /invites` are unauthenticated (see
-their TRACKER rows). The fix is necessarily two-phase, because Railway deploys
-in seconds and App Store review takes days.
+`POST /blobs`, `GET /ice-config` and `POST /invites` shipped unauthenticated
+(see their TRACKER rows). Both halves of the fix are now written, but
+enforcement is **off** and must stay off until an app release carrying the
+client half is in users' hands — Railway deploys in seconds, App Store review
+takes days, so the fix is necessarily two-phase.
+
+**Deploying the server half is safe. Flipping the flag is the irreversible-
+feeling step, and it is the one to think about.** (It is in fact reversible —
+it is a variable, not a deploy.)
 
 **Step 1 — DONE, committed `19db682` (client only).** The app now sends
 `Authorization: Bearer <device-token>` on all three, plus the alias (query
@@ -54,11 +61,26 @@ were private and unreachable from `lib/blobStore.ts`, `components/GhostInvite`
 and the module-scope ICE fetch in `app/call.tsx`. **This is a no-op against
 production** — today's server accepts and ignores the header.
 
-**Step 2 — NOT STARTED (server enforcement).** Planned: `src/lib/auth.ts`
-shared helper, enforce on the three endpoints, and derive `ownerAlias` from
-the token in `POST /invites` instead of trusting the body. Then, as a
-*separate* commit, migrate the 7 duplicated `hashToken` copies and the two
-divergent `getAuthedAlias` variants across the routes and `ws/manager.ts`.
+**Step 2 — WRITTEN, SHIPS DISABLED.** `src/lib/auth.ts` (`checkAuth`) gates
+all three endpoints, and `POST /invites` now takes `ownerAlias` from the
+authenticated token instead of the body. **All of it is behind
+`ENFORCE_ENDPOINT_AUTH`, which defaults OFF and ships OFF** — production
+behaviour is unchanged by the deploy itself. While the flag is off, every
+unauthenticated call is logged at `warn` ("ENFORCE_ENDPOINT_AUTH is off"):
+when those stop appearing in Railway logs, every live client is sending the
+header and it is safe to flip. Flipping is a Railway variable change, not a
+deploy, so it is instantly reversible.
+
+`lib/auth.ts` imports `@workspace/db` **lazily**, on purpose: a static import
+would drag a `DATABASE_URL` requirement into every module that gates on auth,
+and it broke `blobs.test.ts`, which is deliberately hermetic. Don't make it
+static.
+
+**Still to do:** migrate the 7 duplicated `hashToken` copies and the two
+divergent `getAuthedAlias` variants (`crypto.ts` reads body-or-query,
+`messages.ts` query-only) across the routes and `ws/manager.ts` onto the
+shared helper — deliberately left as a *separate* commit so any behaviour
+change there is bisectable.
 
 ⚠️ **The ordering is the whole point. Step 2 must not deploy before an app
 release carrying step 1 is out.** No shipped build sends the header, so
@@ -76,13 +98,20 @@ gates below). Coordination is already being paid for there.
 never reaches the server — auth is defence-in-depth only there) and the invite
 lookup/consume routes (the code is itself the bearer credential).
 
-**Verification status, honestly:** step 1 is verified by `tsc --noEmit` clean
-and the app suite at 112/112 — but that suite does **not** exercise
-`uploadEncryptedBlob`, `fetchIceConfig` or `registerInviteOnServer`. It is a
-regression check on the AppContext extraction, not coverage of the new
-behaviour. There are no `invites`/`iceConfig` tests on the api-server side at
-all, and `blobs.test.ts` posts unauthenticated in four tests — those break and
-need a 401 case when step 2 lands.
+**Verification status, honestly:** the *server* half is covered — api-server
+tests went 53 → 70: `auth.test.ts` (9, the shared gate, including both flag
+states), `iceConfig.test.ts` (5, new), `blobs.test.ts` +3. Typecheck clean,
+`npx eslint` clean on the changed files (repo-wide `pnpm run lint` still fails
+on the pre-existing `lib/inviteRepository.ts` warning — not ours).
+
+The *client* half is still typecheck-only. The app suite is 112/112 but does
+not exercise `uploadEncryptedBlob`, `fetchIceConfig` or
+`registerInviteOnServer`. There is also no route-level test for
+`POST /invites`, because `routes/invites.ts` imports `@workspace/db` at module
+load and cannot run without a database — its gate is covered in
+`auth.test.ts` instead, which is the shared logic but not the route wiring.
+**The invites route wiring and all three client call sites are unproven until
+someone exercises them on a device.**
 
 ## ✅ RESOLVED INCIDENT — VPN peer agent down, box unfirewalled (24 Aug)
 

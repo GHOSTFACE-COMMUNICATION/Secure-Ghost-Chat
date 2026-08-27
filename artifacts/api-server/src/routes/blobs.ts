@@ -6,6 +6,7 @@ import { join, resolve } from "path";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
+import { checkAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -24,8 +25,9 @@ const BLOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Per-IP rate limiters. Uploads cost disk; downloads are cheap but we
 // still cap them so a single client can't tarpit the server.
 const uploadLimiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 1_200, prefix: "blobUpload" });
-// Unauthenticated write surface: per-IP cannot discriminate under carrier NAT,
-// so the disk itself gets the ceiling. See TRACKER — the real fix is auth.
+// Per-IP cannot discriminate under carrier NAT, so the disk itself gets a
+// ceiling regardless of auth. Retained after auth landed: it still bounds a
+// single compromised or misbehaving account.
 const uploadGlobal = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 12_000, prefix: "blobUploadGlobal" });
 const downloadLimiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 6_000, prefix: "blobDownload" });
 const downloadGlobal = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 60_000, prefix: "blobDownloadGlobal" });
@@ -44,6 +46,12 @@ router.post(
   "/blobs",
   express.raw({ type: "application/octet-stream", limit: MAX_BLOB_BYTES }),
   async (req: Request, res: Response) => {
+    // Authenticated write — this costs server disk. Gated by
+    // ENFORCE_ENDPOINT_AUTH; off (the default) this is a no-op and legacy
+    // clients keep working. See lib/auth.ts for why the default matters.
+    const auth = await checkAuth(req, res, "POST /blobs");
+    if (!auth.ok) return;
+
     if (!(await uploadLimiter.check(getIpKey(req))) || !(await uploadGlobal.check())) {
       res.status(429).json({ error: "Too many uploads" });
       return;

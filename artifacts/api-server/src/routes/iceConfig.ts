@@ -2,6 +2,7 @@ import { createHmac } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { logger } from "../lib/logger";
 import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
+import { checkAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -147,6 +148,16 @@ async function twilioConfig(): Promise<IceConfigResponse | null> {
 }
 
 router.get("/ice-config", async (req: Request, res: Response) => {
+  // Authenticated read — the TURN credentials handed out here are our spend.
+  // Gated by ENFORCE_ENDPOINT_AUTH; off (the default) this is a no-op.
+  //
+  // ⚠️ Flip the flag for this endpoint LAST and watch calls. The client
+  // (app/call.tsx) catches any failure and falls back to STUN-only, so a 401
+  // here does not surface an error to the user — it silently breaks calls for
+  // anyone behind a symmetric NAT. Nothing will alert.
+  const auth = await checkAuth(req, res, "GET /ice-config");
+  if (!auth.ok) return;
+
   if (!(await limiter.check(getIpKey(req))) || !(await globalLimiter.check())) {
     res.status(429).json({ error: "Too many requests" });
     return;

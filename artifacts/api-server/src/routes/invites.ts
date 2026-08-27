@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, invitesTable, identityKeysTable } from "@workspace/db";
 import { and, eq, gt } from "drizzle-orm";
 import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
+import { checkAuth } from "../lib/auth";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
 import { logger } from "../lib/logger";
@@ -22,8 +23,18 @@ const CODE_REGEX = /^GF-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
  * Registers a new invite code tied to the owner's alias.
  * Body: { code: string, ownerAlias: string, expiresAt: number (unix ms) }
  * Responds 201 on success, 400 on bad input, 409 if code already exists.
+ *
+ * Authenticated. Without auth anyone could mint invite codes attributed to
+ * any alias, since `ownerAlias` arrives in the body and the only check was
+ * that the alias exists. When authenticated the owner is taken from the
+ * token and the body field is ignored; while ENFORCE_ENDPOINT_AUTH is off
+ * an unauthenticated caller still falls back to the body value, exactly as
+ * before. The two agree for a real client — the app sends its own alias.
  */
 router.post("/invites", async (req: Request, res: Response) => {
+  const auth = await checkAuth(req, res, "POST /invites");
+  if (!auth.ok) return;
+
   if (!(await createLimiter.check(getIpKey(req))) || !(await createGlobal.check())) {
     return res.status(429).json({ error: "Too many requests" });
   }
@@ -45,7 +56,10 @@ router.post("/invites", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid invite parameters" });
   }
 
-  const normalizedAlias = normalizeAlias(ownerAlias);
+  // Prefer the authenticated identity over anything the body claims. When
+  // enforcement is off and the caller sent no credential, auth.alias is null
+  // and we fall back to the body — the pre-auth behaviour.
+  const normalizedAlias = auth.alias ?? normalizeAlias(ownerAlias);
   if (!normalizedAlias) {
     return res.status(400).json({ error: "ownerAlias must be 3-20 characters: A-Z, 0-9, underscore only" });
   }

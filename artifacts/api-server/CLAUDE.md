@@ -99,8 +99,18 @@ them. Real quotas are charged to the authenticated alias. Do not "simplify" this
 back to per-IP.
 
 Four endpoints have no alias to key on (`invites`, `blobs`, `iceConfig`,
-`integrity`) and are capped by a `GlobalLimiter` on the resource instead. Three
-of them are unauthenticated — see TRACKER for the open auth-posture decision.
+`integrity`) and are capped by a `GlobalLimiter` on the resource instead.
+
+`POST /blobs`, `GET /ice-config` and `POST /invites` now authenticate via
+`lib/auth.ts` (`checkAuth`), **but only when `ENFORCE_ENDPOINT_AUTH` is set
+to `1`/`true`**. It defaults to OFF and ships that way deliberately: no app
+build before 27 Aug 2026 sends the header, so enforcing early breaks every
+existing install. `/ice-config` is the one to watch — the client fails open
+to STUN-only, so a 401 there silently degrades calls instead of erroring.
+While the flag is off, every unauthenticated call is logged at `warn`
+("ENFORCE_ENDPOINT_AUTH is off") — when those stop appearing, it is safe to
+flip. Flipping is a Railway variable change, not a deploy, so it is
+instantly reversible. `integrity` remains unauthenticated by design.
 
 ## Before reporting work done
 

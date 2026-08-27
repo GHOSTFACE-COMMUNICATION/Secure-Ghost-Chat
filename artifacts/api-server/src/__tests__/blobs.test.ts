@@ -85,4 +85,49 @@ describe("blobs route", () => {
     const r = await request("GET", "/api/blobs/00000000-0000-0000-0000-000000000000");
     expect(r.status).toBe(404);
   });
+
+  // ── Auth enforcement (ENFORCE_ENDPOINT_AUTH) ────────────────────────────
+  //
+  // These assert the flag's two states without a database. An unauthenticated
+  // request carries no Bearer token, so getAuthedAlias() returns before it
+  // would touch @workspace/db — which is what keeps this suite hermetic.
+
+  it("allows an unauthenticated upload while enforcement is off", async () => {
+    delete process.env.ENFORCE_ENDPOINT_AUTH;
+    const r = await request("POST", "/api/blobs", {
+      body: Buffer.from([42]),
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it("rejects an unauthenticated upload when enforcement is on", async () => {
+    process.env.ENFORCE_ENDPOINT_AUTH = "1";
+    try {
+      const r = await request("POST", "/api/blobs", {
+        body: Buffer.from([42]),
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+      expect(r.status).toBe(401);
+    } finally {
+      delete process.env.ENFORCE_ENDPOINT_AUTH;
+    }
+  });
+
+  it("still serves downloads when enforcement is on (GET is not gated)", async () => {
+    const up = await request("POST", "/api/blobs", {
+      body: Buffer.from([7, 7, 7]),
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+    const { blobId } = up.body as { blobId: string };
+
+    process.env.ENFORCE_ENDPOINT_AUTH = "1";
+    try {
+      const down = await request("GET", `/api/blobs/${blobId}`);
+      expect(down.status).toBe(200);
+      expect(down.raw.equals(Buffer.from([7, 7, 7]))).toBe(true);
+    } finally {
+      delete process.env.ENFORCE_ENDPOINT_AUTH;
+    }
+  });
 });
