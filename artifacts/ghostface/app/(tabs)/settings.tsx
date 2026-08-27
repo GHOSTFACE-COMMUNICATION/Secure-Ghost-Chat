@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as LocalAuthentication from "expo-local-authentication";
+import * as ScreenCapture from "expo-screen-capture";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 
@@ -432,6 +433,19 @@ function SettingsScreenInner() {
   const [recoveryPinInput, setRecoveryPinInput] = useState("");
   const [recoveryPinError, setRecoveryPinError] = useState("");
   const [recoveryPhraseValue, setRecoveryPhraseValue] = useState("");
+
+  // The whole app blocks screen capture (usePreventScreenCapture in _layout).
+  // That is self-defeating on the ONE screen the user must save — the recovery
+  // phrase — so lift the block only while the 24 words are on screen, and
+  // restore it the moment the modal closes or leaves the phrase stage.
+  useEffect(() => {
+    if (showRecoveryPhrase && recoveryPhraseStage === "phrase") {
+      ScreenCapture.allowScreenCaptureAsync();
+      return () => {
+        ScreenCapture.preventScreenCaptureAsync();
+      };
+    }
+  }, [showRecoveryPhrase, recoveryPhraseStage]);
 
   // ── Satellite SMS fallback (Task #113) ───────────────────────────────────
   const [showSmsFallback, setShowSmsFallback] = useState(false);

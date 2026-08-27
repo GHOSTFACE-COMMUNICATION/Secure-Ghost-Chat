@@ -18,6 +18,7 @@ import { GoldGradient } from "@/components/GoldGradient";
 import { getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { normalizeAlias } from "@/utils/alias";
+import * as ScreenCapture from "expo-screen-capture";
 import { recoveryPhraseToKey } from "@/lib/recoveryPhrase";
 import { type } from "@/constants/typography";
 
@@ -66,6 +67,18 @@ export default function OnboardingScreen() {
   const isLight = themePreference === "light";
   const [alias, setAliasText] = useState("");
   const [step, setStep] = useState<"alias" | "pin" | "recovery" | "restore">("alias");
+
+  // Recovery phrase is the one thing the user MUST save — lift the app-wide
+  // screen-capture block while it's shown so they can screenshot it, then
+  // restore the block when they leave the step.
+  useEffect(() => {
+    if (step === "recovery") {
+      ScreenCapture.allowScreenCaptureAsync();
+      return () => {
+        ScreenCapture.preventScreenCaptureAsync();
+      };
+    }
+  }, [step]);
   const [pin, setPinText] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
   const [pinError, setPinError] = useState("");
