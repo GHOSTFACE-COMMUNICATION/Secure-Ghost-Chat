@@ -1,43 +1,36 @@
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef } from "react";
-import { Animated, Easing, PanResponder } from "react-native";
+import React, { useRef } from "react";
+import { Animated, Easing, Image, PanResponder, View } from "react-native";
+
+import { boxShadow } from "@/lib/shadow";
 
 interface GhostLogoProps {
   size?: number;
   color?: string;
+  /** Render as a metallic coin (silver rim + disc face + edge band that flashes
+   *  when edge-on) that you TAP to flip, matching the home-screen radial coin.
+   *  When false (default) it's the flat gold trademark mark. */
+  coin?: boolean;
+  /** Called when the coin is tapped (coin mode) — e.g. to trigger a reward reveal. */
+  onTap?: () => void;
 }
 
-export function GhostLogo({ size = 64 }: GhostLogoProps) {
+export function GhostLogo({ size = 64, coin = false, onTap }: GhostLogoProps) {
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const spin = useRef(new Animated.Value(0)).current;
-  const loopRef = useRef<Animated.CompositeAnimation | null>(null);
-  const touching = useRef(false);
+  // Accumulated rotation in full turns; each tap adds more and eases out.
+  const spinTargetRef = useRef(0);
 
-  const startLoop = () => {
-    // Slow continuous rotation (was an opacity fade). 12s per turn reads as a
-    // gentle drift; touching pauses it (see panResponder) and release resumes.
-    spin.setValue(0);
-    loopRef.current = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 12000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    loopRef.current.start();
+  const flip = () => {
+    spinTargetRef.current += 3; // three full turns per tap, ends face-front
+    Animated.timing(spin, {
+      toValue: spinTargetRef.current,
+      duration: 1600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
   };
-
-  const stopLoop = () => {
-    loopRef.current?.stop();
-    loopRef.current = null;
-  };
-
-  useEffect(() => {
-    startLoop();
-    return () => stopLoop();
-  }, []);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -45,63 +38,133 @@ export function GhostLogo({ size = 64 }: GhostLogoProps) {
       onMoveShouldSetPanResponder: () => true,
 
       onPanResponderGrant: () => {
-        touching.current = true;
-        stopLoop();
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        Animated.parallel([
-          Animated.spring(opacity, {
-            toValue: 1,
-            useNativeDriver: true,
-            speed: 40,
-            bounciness: 0,
-          }),
-          Animated.spring(scale, {
-            toValue: 1.06,
-            useNativeDriver: true,
-            speed: 30,
-            bounciness: 8,
-          }),
-        ]).start();
-      },
-
-      onPanResponderMove: () => {
-        if (!touching.current) return;
-        opacity.setValue(1);
+        if (coin) { flip(); onTap?.(); }
+        Animated.spring(scale, {
+          toValue: 1.06,
+          useNativeDriver: true,
+          speed: 30,
+          bounciness: 8,
+        }).start();
       },
 
       onPanResponderRelease: () => {
-        touching.current = false;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         Animated.spring(scale, {
           toValue: 1,
           useNativeDriver: true,
           speed: 20,
           bounciness: 4,
         }).start();
-        // Brief hold at full opacity then restart the loop
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 0,
-          useNativeDriver: true,
-        }).start(() => {
-          if (!touching.current) startLoop();
-        });
       },
 
       onPanResponderTerminate: () => {
-        touching.current = false;
         Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 0 }).start();
-        if (!touching.current) startLoop();
       },
     })
   ).current;
 
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  // extend so accumulated turns keep rotating past 360°
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"], extrapolate: "extend" });
 
+  if (coin) {
+    // Edge band peaks near the edge-on angles (every 90° / 270° of each turn).
+    const edgeOpacity = spin.interpolate({
+      inputRange: [0, 0.25, 0.5, 0.75, 1],
+      outputRange: [0, 1, 0, 1, 0],
+      extrapolate: "extend",
+    });
+    const rim = size * 0.028;
+    const face = size - rim * 2;
+    const band = Math.max(8, size * 0.084);
+    // Diamond-cut milled edge: alternating bright/dark facets around the rim.
+    const facetCount = 84;
+    const facetR = size / 2 - rim / 2;
+    const facetW = Math.max(1.5, size * 0.016);
+    const facetH = rim * 1.2;
+
+    return (
+      <Animated.View
+        style={{
+          width: size,
+          height: size,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity,
+          transform: [{ scale }],
+        }}
+        {...panResponder.panHandlers}
+      >
+        {/* fake thickness: edge band flashes when edge-on */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            width: band,
+            height: size,
+            borderRadius: band / 2,
+            backgroundColor: "#8a8a92",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: edgeOpacity,
+            boxShadow: [boxShadow("#FFFFFF", 0.5, 14), "inset 0 0 4px rgba(20,20,24,0.7)"].join(", "),
+          }}
+        >
+          <View style={{ width: Math.max(2, band * 0.25), height: face, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.85)" }} />
+        </Animated.View>
+
+        {/* the coin: metallic rim + disc face */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            padding: rim,
+            backgroundColor: "#c4c7cf",
+            alignItems: "center",
+            justifyContent: "center",
+            transform: [{ perspective: 800 }, { rotateY: rotate }],
+            boxShadow: [
+              boxShadow("#FFFFFF", 0.35, 16),
+              "inset 0 1.5px 4px rgba(255,255,255,0.9)",
+              "inset 0 -5px 10px rgba(16,16,20,0.65)",
+            ].join(", "),
+          }}
+        >
+          <Image
+            source={require("../assets/images/ghostface-logo.jpeg")}
+            resizeMode="cover"
+            style={{ width: face, height: face, borderRadius: face / 2 }}
+          />
+          {/* diamond-cut milled edge */}
+          <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+            {Array.from({ length: facetCount }).map((_, i) => (
+              <View
+                key={i}
+                style={{
+                  position: "absolute",
+                  top: size / 2 - facetH / 2,
+                  left: size / 2 - facetW / 2,
+                  width: facetW,
+                  height: facetH,
+                  borderRadius: facetW / 2,
+                  backgroundColor: i % 2 === 0 ? "#ffffff" : "#5c5c66",
+                  opacity: i % 2 === 0 ? 1 : 0.92,
+                  transform: [{ rotate: `${(360 / facetCount) * i}deg` }, { translateY: -facetR }],
+                }}
+              />
+            ))}
+          </View>
+        </Animated.View>
+      </Animated.View>
+    );
+  }
+
+  // Default: the flat gold trademark mark (static), with a touch bounce.
   return (
     <Animated.Image
       source={require("../assets/images/ghostface-mark-gold.webp")}
-      style={{ width: size, height: size, opacity, transform: [{ scale }, { rotate }] }}
+      style={{ width: size, height: size, opacity, transform: [{ scale }] }}
       resizeMode="contain"
       {...panResponder.panHandlers}
     />

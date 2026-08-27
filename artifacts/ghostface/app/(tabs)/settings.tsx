@@ -195,6 +195,7 @@ function SettingsScreenInner() {
     setWalletPin,
     clearWalletPin,
     getRecoveryPhrase,
+    checkRecoveryPin,
     setLocked,
     panicWipe,
     setAutoLockTimeout,
@@ -709,14 +710,21 @@ function SettingsScreenInner() {
   };
 
   const handleRecoveryPinSubmit = async () => {
-    const correct = await checkPin(recoveryPinInput);
+    if (!alias) {
+      setRecoveryPinError("NO IDENTITY ON THIS DEVICE");
+      return;
+    }
+    // Gate on the RECOVERY PIN — it's what actually regenerates the (blinded)
+    // phrase, and validating it here stops a mistyped PIN from showing a
+    // plausible-but-wrong phrase the user might save.
+    const correct = await checkRecoveryPin(recoveryPinInput, alias);
     if (!correct) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRecoveryPinError("INCORRECT PIN");
+      setRecoveryPinError("INCORRECT RECOVERY PIN");
       setRecoveryPinInput("");
       return;
     }
-    const phrase = await getRecoveryPhrase();
+    const phrase = await getRecoveryPhrase(recoveryPinInput, alias);
     if (!phrase) {
       setRecoveryPinError("NO IDENTITY KEY FOUND ON THIS DEVICE");
       return;
@@ -2011,28 +2019,28 @@ function SettingsScreenInner() {
                 <>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
                     <Ionicons name="key-outline" size={20} color={colors.primary} />
-                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>CONFIRM YOUR PIN</Text>
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>ENTER YOUR RECOVERY PIN</Text>
                   </View>
                   <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
-                    ANYONE WHO SEES YOUR RECOVERY PHRASE CAN TAKE OVER YOUR IDENTITY — CONFIRM IT'S YOU
+                    YOUR RECOVERY PHRASE ONLY WORKS WITH THIS 6-DIGIT PIN — ENTER IT TO REVEAL THE MATCHING PHRASE
                   </Text>
                   <TextInput
                     style={styles.input}
                     value={recoveryPinInput}
-                    onChangeText={(t) => { setRecoveryPinInput(t); setRecoveryPinError(""); }}
-                    placeholder="MAIN PIN"
+                    onChangeText={(t) => { setRecoveryPinInput(t.replace(/\D/g, "")); setRecoveryPinError(""); }}
+                    placeholder="6-DIGIT RECOVERY PIN"
                     placeholderTextColor={colors.mutedForeground}
                     keyboardType="numeric"
                     secureTextEntry
-                    maxLength={8}
+                    maxLength={6}
                     testID="recovery-pin-input"
                     autoFocus
                   />
                   {recoveryPinError ? <Text style={styles.errorText}>{recoveryPinError}</Text> : null}
                   <Pressable
-                    style={[styles.modalBtnGold, recoveryPinInput.length < 4 && { opacity: 0.4 }]}
+                    style={[styles.modalBtnGold, recoveryPinInput.length < 6 && { opacity: 0.4 }]}
                     onPress={handleRecoveryPinSubmit}
-                    disabled={recoveryPinInput.length < 4}
+                    disabled={recoveryPinInput.length < 6}
                     testID="recovery-pin-submit"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>

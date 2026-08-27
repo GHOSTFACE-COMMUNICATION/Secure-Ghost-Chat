@@ -261,6 +261,9 @@ importers:
       '@config-plugins/react-native-webrtc':
         specifier: ^13.0.0
         version: 13.0.0(expo@54.0.35)
+      '@expo-google-fonts/cinzel':
+        specifier: ^0.4.2
+        version: 0.4.2
       '@expo-google-fonts/share-tech-mono':
         specifier: ^0.4.1
         version: 0.4.1
@@ -342,6 +345,9 @@ importers:
       react-native:
         specifier: 0.81.5
         version: 0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(bufferutil@4.1.0)(react@19.1.0)
+      react-native-argon2:
+        specifier: ^4.0.0
+        version: 4.0.0
       react-native-callkeep:
         specifier: ^4.3.16
         version: 4.3.16(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(bufferutil@4.1.0)(react@19.1.0))
@@ -1162,6 +1168,9 @@ packages:
   '@eslint/plugin-kit@0.7.1':
     resolution: {integrity: sha512-rZAP3aVgB9ds9KOeUSL+zZ21hPmo8dh6fnIFwRQj5EAZl9gzR7wxYbYXYysAM8CTqGmUGyp2S4kUdV17MnGuWQ==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
+
+  '@expo-google-fonts/cinzel@0.4.2':
+    resolution: {integrity: sha512-UAlyuHCGjmKpMt2MoCKYueHz8ZEzjHO1VEol2G7NcPW54UH+85SWIGzpor05YNqUvr/aoqS8Qrfnswxg1RsNMw==}
 
   '@expo-google-fonts/inter@0.4.2':
     resolution: {integrity: sha512-syfiImMaDmq7cFi0of+waE2M4uSCyd16zgyWxdPOY7fN2VBmSLKEzkfbZgeOjJq61kSqPBNNtXjggiQiSD6gMQ==}
@@ -5145,6 +5154,9 @@ packages:
   react-is@19.2.4:
     resolution: {integrity: sha512-W+EWGn2v0ApPKgKKCy/7s7WHXkboGcsrXE+2joLyVxkbyVQfO3MUEaUQDHoSmb8TFFrSKYa9mw64WZHNHSDzYA==}
 
+  react-native-argon2@4.0.0:
+    resolution: {integrity: sha512-K6qIg9nBCHtu9/t5BdaGtmqKvmYjUy4aDrG2CeI4WNEMeQPlj91uDb9KP6AnFiFX3W7Unqo4f3uEgKcDUpZxcg==}
+
   react-native-callkeep@4.3.16:
     resolution: {integrity: sha512-aIxn02T5zW4jNPyzRdFGTWv6xD3Vy/1AkBMB6iYvWZEHWnfmgNGF0hELqg03Vbc2BNUhfqpu17aIydos+5Hurg==}
     peerDependencies:
@@ -6975,6 +6987,8 @@ snapshots:
     dependencies:
       '@eslint/core': 1.2.1
       levn: 0.4.1
+
+  '@expo-google-fonts/cinzel@0.4.2': {}
 
   '@expo-google-fonts/inter@0.4.2': {}
 
@@ -11823,6 +11837,8 @@ snapshots:
   react-is@18.3.1: {}
 
   react-is@19.2.4: {}
+
+  react-native-argon2@4.0.0: {}
 
   react-native-callkeep@4.3.16(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(bufferutil@4.1.0)(react@19.1.0)):
     dependencies:
