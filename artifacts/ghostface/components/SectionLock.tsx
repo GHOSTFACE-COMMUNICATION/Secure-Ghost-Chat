@@ -2,6 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -95,6 +97,10 @@ export function SectionLock({
   });
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
     <View style={styles.container}>
       <Ionicons name="lock-closed" size={40} color={colors.primary} />
       <Text style={styles.title}>{label} LOCKED</Text>
@@ -128,5 +134,6 @@ export function SectionLock({
         </GoldGradient>
       </Pressable>
     </View>
+    </KeyboardAvoidingView>
   );
 }

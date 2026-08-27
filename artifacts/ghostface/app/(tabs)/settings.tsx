@@ -11,6 +11,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -22,7 +23,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { KeyboardAvoidingView, KeyboardAwareScrollView, KeyboardProvider } from "react-native-keyboard-controller";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GOLD_OUTLINE_COLOR, GoldGradient } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
@@ -1646,7 +1646,6 @@ function SettingsScreenInner() {
           setPinSimilar(false);
         }}
       >
-        <KeyboardProvider>
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => {
             setShowPinChange(false);
@@ -1728,7 +1727,6 @@ function SettingsScreenInner() {
               )}
             </View>
         </KeyboardAvoidingView>
-        </KeyboardProvider>
       </Modal>
 
       {/* Duress PIN modal */}
@@ -1738,7 +1736,6 @@ function SettingsScreenInner() {
         animationType="slide"
         onRequestClose={() => setShowDuressPin(false)}
       >
-        <KeyboardProvider>
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDuressPin(false)} />
             <View style={styles.modalContent}>
@@ -1814,7 +1811,6 @@ function SettingsScreenInner() {
               )}
             </View>
         </KeyboardAvoidingView>
-        </KeyboardProvider>
       </Modal>
 
       {/* Decoy PIN modal */}
@@ -1824,7 +1820,6 @@ function SettingsScreenInner() {
         animationType="slide"
         onRequestClose={() => setShowDecoyPin(false)}
       >
-        <KeyboardProvider>
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDecoyPin(false)} />
             <View style={styles.modalContent}>
@@ -1901,7 +1896,6 @@ function SettingsScreenInner() {
               )}
             </View>
         </KeyboardAvoidingView>
-        </KeyboardProvider>
       </Modal>
 
       {/* Wallet PIN modal */}
@@ -1911,14 +1905,7 @@ function SettingsScreenInner() {
         animationType="slide"
         onRequestClose={() => setShowWalletPin(false)}
       >
-        <KeyboardProvider>
-        <KeyboardAwareScrollView
-          style={styles.modalOverlay}
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end" }}
-          keyboardShouldPersistTaps="handled"
-          bottomOffset={40}
-          showsVerticalScrollIndicator={false}
-        >
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletPin(false)} />
             <View style={styles.modalContent}>
               {walletPinSaved ? (
@@ -1993,8 +1980,7 @@ function SettingsScreenInner() {
                 </>
               )}
             </View>
-        </KeyboardAwareScrollView>
-        </KeyboardProvider>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Recovery Phrase modal */}
@@ -2004,7 +1990,6 @@ function SettingsScreenInner() {
         animationType="slide"
         onRequestClose={() => setShowRecoveryPhrase(false)}
       >
-        <KeyboardProvider>
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRecoveryPhrase(false)} />
             <View style={styles.modalContent}>
@@ -2076,7 +2061,6 @@ function SettingsScreenInner() {
               )}
             </View>
         </KeyboardAvoidingView>
-        </KeyboardProvider>
       </Modal>
 
       {/* Language picker modal */}
@@ -2121,7 +2105,6 @@ function SettingsScreenInner() {
         animationType="slide"
         onRequestClose={() => setShowSmsFallback(false)}
       >
-        <KeyboardProvider>
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowSmsFallback(false)} />
           <View style={styles.modalContent}>
@@ -2243,7 +2226,6 @@ function SettingsScreenInner() {
             </Pressable>
           </View>
         </KeyboardAvoidingView>
-        </KeyboardProvider>
       </Modal>
 
     </View>
