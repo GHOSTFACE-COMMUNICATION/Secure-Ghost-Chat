@@ -35,6 +35,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Alert, AppState as RNAppState, Platform } from "react-native";
+import * as ImageManipulator from "expo-image-manipulator";
 import React, {
   createContext,
   useCallback,
@@ -254,6 +255,10 @@ interface SealedEnvelope {
   x?: number;
   /** Reaction: target message id, emoji, and explicit add(true)/remove(false) intent. */
   r?: { m: string; e: string; o: boolean };
+  /** Profile photo control message: a small `data:image/jpeg;base64,...` avatar
+   *  (or "" to clear). When present this is a silent control message — never
+   *  rendered as a Message; the recipient stores it as this contact's avatar. */
+  p?: string;
 }
 
 function wrapPayload(
@@ -263,13 +268,17 @@ function wrapPayload(
   attachment?: Attachment,
   ttlMs?: number,
   reaction?: { m: string; e: string; o: boolean },
+  profilePhoto?: string,
 ): string {
+  // A reaction OR a profile-photo update is a control message: no text body,
+  // no attachment, no disappear timer.
+  const isControl = !!reaction || profilePhoto !== undefined;
   // image-ref carries a local-only `uri` for the sender's own preview that
   // must NOT be sent over the wire — strip it so the recipient only ever
   // sees the blob reference + key. Not applicable to a reaction, which
   // carries no attachment.
   let wireAttachment: Attachment | undefined;
-  if (!reaction && attachment) {
+  if (!isControl && attachment) {
     if (attachment.kind === "image-ref") {
       const { kind, blobId, key, mimeType, width, height } = attachment;
       wireAttachment = { kind, blobId, key, mimeType, width, height };
@@ -277,10 +286,11 @@ function wrapPayload(
       wireAttachment = attachment;
     }
   }
-  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, i: id, t: reaction ? "" : text };
+  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, i: id, t: isControl ? "" : text };
   if (wireAttachment) env.a = wireAttachment;
-  if (!reaction && ttlMs) env.x = ttlMs;
+  if (!isControl && ttlMs) env.x = ttlMs;
   if (reaction) env.r = reaction;
+  if (profilePhoto !== undefined) env.p = profilePhoto;
   return JSON.stringify(env);
 }
 
@@ -299,6 +309,10 @@ const MAX_ATTACHMENT_NAME_LEN = 200;
 // validation time (both on send and on receive) so a malicious peer cannot
 // force the client to decode an arbitrarily large blob.
 export const MAX_ATTACHMENT_B64_CHARS = 7 * 1024 * 1024 + 512 * 1024;
+
+// Profile-photo avatars are resized to ~128px JPEG (a few KB); cap the E2E
+// data URI generously at 400 KB of base64 so a peer cannot ship a huge image.
+export const MAX_PROFILE_PHOTO_CHARS = 400 * 1024;
 
 // Validates a blob reference for the image-ref attachment kind.
 const BLOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -363,6 +377,9 @@ function unwrapPayload(plaintext: string): {
    *  recover an id from in that case. */
   id?: string;
   reaction?: { m: string; e: string; o: boolean };
+  /** Present for a profile-photo control message: a data:image/jpeg URI, or ""
+   *  to clear. Distinct from `undefined` (no profile-photo field at all). */
+  profilePhoto?: string;
 } {
   // v4 sealed-sender envelope — recovers the sender alias (`f`), stable
   // message id (`i`), body, optional attachment, optional disappearing TTL
@@ -371,11 +388,16 @@ function unwrapPayload(plaintext: string): {
     try {
       const parsed = JSON.parse(plaintext) as {
         _gf?: unknown; f?: unknown; i?: unknown; t?: unknown; a?: unknown; x?: unknown;
-        r?: { m?: unknown; e?: unknown; o?: unknown };
+        r?: { m?: unknown; e?: unknown; o?: unknown }; p?: unknown;
       };
       const reactionOk =
         parsed.r === undefined ||
         (typeof parsed.r.m === "string" && typeof parsed.r.e === "string" && typeof parsed.r.o === "boolean");
+      const photoOk =
+        parsed.p === undefined ||
+        (typeof parsed.p === "string" &&
+          (parsed.p === "" ||
+            (parsed.p.length <= MAX_PROFILE_PHOTO_CHARS && DATA_IMAGE_URI_RE.test(parsed.p))));
       if (
         parsed._gf === SEALED_ENVELOPE_VERSION &&
         typeof parsed.f === "string" &&
@@ -383,7 +405,8 @@ function unwrapPayload(plaintext: string): {
         typeof parsed.t === "string" &&
         (parsed.a === undefined || isValidAttachment(parsed.a)) &&
         (parsed.x === undefined || (typeof parsed.x === "number" && parsed.x > 0)) &&
-        reactionOk
+        reactionOk &&
+        photoOk
       ) {
         return {
           text: parsed.t,
@@ -392,6 +415,7 @@ function unwrapPayload(plaintext: string): {
           ...(parsed.a !== undefined ? { attachment: parsed.a as Attachment } : {}),
           ...(parsed.x !== undefined ? { ttlMs: parsed.x as number } : {}),
           ...(parsed.r !== undefined ? { reaction: parsed.r as { m: string; e: string; o: boolean } } : {}),
+          ...(parsed.p !== undefined ? { profilePhoto: parsed.p as string } : {}),
         };
       }
     } catch {
@@ -417,6 +441,24 @@ function unwrapPayload(plaintext: string): {
     }
   }
   return { text: plaintext };
+}
+
+/** Resize a picked profile photo down to a ~128px JPEG data URI for E2E
+ *  transport. Returns null on failure or if the result exceeds the cap. */
+async function compressAvatar(uri: string): Promise<string | null> {
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 128, height: 128 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+    );
+    if (!result.base64) return null;
+    const dataUri = `data:image/jpeg;base64,${result.base64}`;
+    return dataUri.length <= MAX_PROFILE_PHOTO_CHARS ? dataUri : null;
+  } catch (e) {
+    console.warn("[ProfilePhoto] compress failed:", e);
+    return null;
+  }
 }
 
 /**
@@ -488,6 +530,10 @@ export interface Conversation {
   pendingX3DHHeader?: string;
   isRealContact?: boolean;
   verified?: boolean;
+  /** The contact's profile photo (data:image/jpeg;base64), received E2E via a
+   *  profile-photo control message. Rendered as the avatar with a letter
+   *  fallback. Small; lives inside the encrypted conversation blob. */
+  contactPhoto?: string;
   /**
    * Opaque per-recipient routing token (task #128). Messages are addressed to
    * this instead of the human alias so the server never sees who is talking to
@@ -1923,6 +1969,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const wsRef = React.useRef<WebSocket | null>(null);
+  // Broadcast the profile photo to contacts once per session on first connect
+  // (not on every reconnect — that would spam avatars + advance ratchets).
+  const profileBroadcastedRef = React.useRef(false);
   // Gates the WS reconnect-on-close logic below so a backgrounded app stays
   // disconnected (see the AppState effect further down) instead of the
   // generic 5s reconnect timer reopening the socket seconds later while
@@ -3277,6 +3326,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // pickProfileImage in settings.tsx) — this only persists the reference
   // and deletes the previous file, mirroring setConversationBgImage/
   // removeBgImageFile's split of responsibilities.
+  // Broadcast my current profile photo to every real contact as an E2E
+  // control message (silent — never a bubble). Best-effort over a live WS;
+  // offline contacts pick it up on the next connect broadcast. Each send
+  // advances that contact's ratchet, exactly like a reaction.
+  const broadcastProfilePhoto = useCallback(async (overrideUri?: string | null) => {
+    const uri = overrideUri !== undefined ? overrideUri : latestStateRef.current.profileImageUri;
+    const dataUri = uri ? await compressAvatar(uri) : "";
+    if (dataUri === null) return; // compression failed — don't send garbage
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1) return; // best-effort; re-broadcast on connect
+    const myAlias = (latestStateRef.current.alias ?? "GHOST_USER").toUpperCase();
+    for (const conv of latestStateRef.current.conversations) {
+      if (!conv.isRealContact || !conv.drSession || !conv.recipientDeliveryId) continue;
+      try {
+        const photoId = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+        const wireText = wrapPayload(myAlias, photoId, "", undefined, undefined, undefined, dataUri);
+        const { state: newAlice, message: msg } = ratchetEncrypt(conv.drSession.alice, wireText);
+        ws.send(JSON.stringify({
+          type: "msg",
+          to: conv.recipientDeliveryId,
+          payload: JSON.stringify(msg),
+          x3dhHeader: conv.pendingX3DHHeader,
+        }));
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === conv.id && c.drSession
+              ? { ...c, drSession: { ...c.drSession, alice: newAlice }, pendingX3DHHeader: undefined }
+              : c
+          );
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+      } catch (e) {
+        console.warn("[ProfilePhoto] send failed for", conv.alias, e);
+      }
+    }
+  }, [persistConversations]);
+
   const setProfileImage = useCallback(async (uri: string | null) => {
     const previous = latestStateRef.current.profileImageUri;
     if (previous && previous !== uri) {
@@ -3288,7 +3375,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.removeItem(PROFILE_IMAGE_KEY);
     }
     setState((prev) => ({ ...prev, profileImageUri: uri }));
-  }, []);
+    // Push the new (or cleared) avatar to contacts, E2E.
+    void broadcastProfilePhoto(uri);
+  }, [broadcastProfilePhoto]);
 
   // SILENCE CONTRACT: panicWipe must never produce any haptic or audio
   // feedback. A bystander must not be able to detect that a wipe occurred
@@ -4119,6 +4208,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // ── Profile photo: silent control message that sets this contact's
+      // avatar; never rendered as a Message. Ratchet advance still commits.
+      if (unwrapped.profilePhoto !== undefined) {
+        const photo = unwrapped.profilePhoto;
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === conv.id
+              ? { ...c, contactPhoto: photo === "" ? undefined : photo, drSession: updatedSession }
+              : c
+          );
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
       // ── ID-collision guard: received ids are peer-controlled (sender-
       // generated, v4). A collision with an existing message id — stale
       // replay, retried outbox duplicate, or malicious — must never clobber
@@ -4296,6 +4401,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               : c.messages; // unknown/purged target — drop silently, no placeholder
             return { ...c, messages, drSession: { ...bobSession, alice: newAlice }, safetyNumber };
           });
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
+      // Profile photo arriving on a session-establishing message: store it on
+      // the existing conversation shell (if any) and commit the ratchet.
+      if (unwrappedFirst.profilePhoto !== undefined) {
+        const existingConv = latestStateRef.current.conversations.find((c) => c.alias === senderAlias);
+        if (!existingConv) return;
+        const photo = unwrappedFirst.profilePhoto;
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === existingConv.id
+              ? { ...c, contactPhoto: photo === "" ? undefined : photo, drSession: { ...bobSession, alice: newAlice }, safetyNumber }
+              : c
+          );
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
@@ -4488,6 +4611,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ws.onopen = () => {
           ws.send(JSON.stringify({ type: "auth", alias, token: deviceToken }));
           schedulePing();
+          // One-time avatar re-broadcast so contacts who were offline when we
+          // last changed it still receive it. Delay lets auth settle.
+          if (!profileBroadcastedRef.current && latestStateRef.current.profileImageUri) {
+            profileBroadcastedRef.current = true;
+            setTimeout(() => { void broadcastProfilePhoto(); }, 2500);
+          }
         };
 
         // Auth-error flag: set by onmessage when server sends { type:"error", message:"auth failed" }.

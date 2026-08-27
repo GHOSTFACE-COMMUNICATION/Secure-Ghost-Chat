@@ -1213,11 +1213,15 @@ export default function ChatScreen() {
         <Pressable style={{ padding: 4 }} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={22} color={colors.foreground} />
         </Pressable>
-        <View style={[styles.headerAvatar, { backgroundColor: getProfileColor(conv.alias) }]}>
-          <Text style={[styles.headerAvatarTxt, { color: getContrastText(getProfileColor(conv.alias)) }]}>
-            {conv.alias.slice(0, 2)}
-          </Text>
-        </View>
+        {conv.contactPhoto ? (
+          <Image source={{ uri: conv.contactPhoto }} style={styles.headerAvatar} contentFit="cover" />
+        ) : (
+          <View style={[styles.headerAvatar, { backgroundColor: getProfileColor(conv.alias) }]}>
+            <Text style={[styles.headerAvatarTxt, { color: getContrastText(getProfileColor(conv.alias)) }]}>
+              {conv.alias.slice(0, 2)}
+            </Text>
+          </View>
+        )}
         <View style={styles.headerInfo}>
           <Text style={styles.headerAlias}>{conv.alias}</Text>
           <View style={styles.headerSub}>

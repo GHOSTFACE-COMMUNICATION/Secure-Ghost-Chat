@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import EncryptionTools from "@/components/EncryptionTools";
@@ -588,11 +589,15 @@ function MessagesScreenInner() {
                 testID={`conversation-${item.id}`}
               >
                 <View style={styles.avatarWrap}>
-                  <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
-                    <Text style={[styles.avatarTxt, { color: getContrastText(getProfileColor(item.alias)) }]}>
-                      {item.alias.slice(0, 2)}
-                    </Text>
-                  </View>
+                  {item.contactPhoto ? (
+                    <Image source={{ uri: item.contactPhoto }} style={styles.avatar} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
+                      <Text style={[styles.avatarTxt, { color: getContrastText(getProfileColor(item.alias)) }]}>
+                        {item.alias.slice(0, 2)}
+                      </Text>
+                    </View>
+                  )}
                   {item.unread > 0 && (
                     <GoldGradient style={styles.badge}>
                       <Text style={styles.badgeTxt}>{item.unread}</Text>
