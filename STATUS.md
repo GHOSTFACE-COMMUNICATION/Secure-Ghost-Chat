@@ -66,9 +66,13 @@ all three endpoints, and `POST /invites` now takes `ownerAlias` from the
 authenticated token instead of the body. **All of it is behind
 `ENFORCE_ENDPOINT_AUTH`, which defaults OFF and ships OFF** — production
 behaviour is unchanged by the deploy itself. While the flag is off, every
-unauthenticated call is logged at `warn` ("ENFORCE_ENDPOINT_AUTH is off"):
-when those stop appearing in Railway logs, every live client is sending the
-header and it is safe to flip. Flipping is a Railway variable change, not a
+unauthenticated call is logged ("ENFORCE_ENDPOINT_AUTH is off"): when those
+stop appearing in Railway logs, every live client is sending the header and it
+is safe to flip. **Filter by the message text, not by severity** — verified in
+prod 27 Aug: Railway surfaces pino `warn` as `info` (the pre-existing
+`logger.warn` at `iceConfig.ts:183` shows the same way), so a severity filter
+finds nothing. `ENFORCE_ENDPOINT_AUTH` as a log filter works, and each line
+carries `endpoint` and `ip` attributes. Flipping is a Railway variable change, not a
 deploy, so it is instantly reversible.
 
 `lib/auth.ts` imports `@workspace/db` **lazily**, on purpose: a static import
