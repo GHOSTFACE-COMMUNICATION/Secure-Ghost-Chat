@@ -4,8 +4,11 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-27 (Claude Code session — bookkeeping only, no code
-changed. TRACKER.md's Incidents table still carried the VPN peer agent as
+Last updated: 2026-08-27 (Claude Code session — two pieces of work. FIRST,
+the auth-posture pass on the three unauthenticated endpoints: step 1 of 2
+landed, see the OPEN LOOP directly below — **read it before deploying the
+api-server**. SECOND, a STATUS/TRACKER reconciliation: TRACKER.md's
+Incidents table still carried the VPN peer agent as
 "🔴 OPEN, P0, nothing fixed" while this file recorded it RESOLVED on 24 Aug.
 Verified the fix against the repo before deciding which side was stale —
 `infra/vpn-agent/agent.py` (`9a68f07`) really does have `/healthz`, the config
@@ -33,6 +36,53 @@ peer registration ever, verified end to end. See RESOLVED INCIDENT below.
 Earlier the same day: WireGuard native client — PacketTunnelProvider.swift +
 native bridge module both written; full-app build blocked by an unrelated
 fmt/Clang compiler bug — needs Benji's call on how to proceed)
+
+## 🚧 OPEN LOOP — auth posture: step 1 of 2 landed, DO NOT DEPLOY STEP 2 YET
+
+`POST /blobs`, `GET /ice-config` and `POST /invites` are unauthenticated (see
+their TRACKER rows). The fix is necessarily two-phase, because Railway deploys
+in seconds and App Store review takes days.
+
+**Step 1 — DONE, committed `19db682` (client only).** The app now sends
+`Authorization: Bearer <device-token>` on all three, plus the alias (query
+string for blobs/ice-config, already in the body for invites) — the server
+matches a token against the `device_tokens` row for a given alias, and
+`token_hash` is not unique, only `user_id` is. New `lib/deviceAuth.ts` holds
+the shared token/alias reader; `secureGet`/`secureSet`/`secureDelete` and
+`DEVICE_TOKEN_KEY`/`ALIAS_KEY` moved there out of `AppContext.tsx`, where they
+were private and unreachable from `lib/blobStore.ts`, `components/GhostInvite`
+and the module-scope ICE fetch in `app/call.tsx`. **This is a no-op against
+production** — today's server accepts and ignores the header.
+
+**Step 2 — NOT STARTED (server enforcement).** Planned: `src/lib/auth.ts`
+shared helper, enforce on the three endpoints, and derive `ownerAlias` from
+the token in `POST /invites` instead of trusting the body. Then, as a
+*separate* commit, migrate the 7 duplicated `hashToken` copies and the two
+divergent `getAuthedAlias` variants across the routes and `ws/manager.ts`.
+
+⚠️ **The ordering is the whole point. Step 2 must not deploy before an app
+release carrying step 1 is out.** No shipped build sends the header, so
+enforcing first breaks builds 63 and 99 — the two devices from the 25 Aug
+field test, and 63 is the build that reached App Store Connect.
+**`/ice-config` is the dangerous one:** `app/call.tsx` fails OPEN to
+STUN-only, so a 401 there does not error — it silently degrades calls for
+anyone behind a symmetric NAT. Nothing would alert.
+
+**Recommended window:** fold it into the build-72 AD cutover, which is already
+a coordinated hard update where testers must move together (see the pre-ship
+gates below). Coordination is already being paid for there.
+
+**Deliberately unchanged:** `GET /blobs/:id` (UUIDv4 ids, ciphertext, key
+never reaches the server — auth is defence-in-depth only there) and the invite
+lookup/consume routes (the code is itself the bearer credential).
+
+**Verification status, honestly:** step 1 is verified by `tsc --noEmit` clean
+and the app suite at 112/112 — but that suite does **not** exercise
+`uploadEncryptedBlob`, `fetchIceConfig` or `registerInviteOnServer`. It is a
+regression check on the AppContext extraction, not coverage of the new
+behaviour. There are no `invites`/`iceConfig` tests on the api-server side at
+all, and `blobs.test.ts` posts unauthenticated in four tests — those break and
+need a 401 case when step 2 lands.
 
 ## ✅ RESOLVED INCIDENT — VPN peer agent down, box unfirewalled (24 Aug)
 

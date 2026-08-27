@@ -66,17 +66,3 @@ export async function getDeviceAuth(): Promise<DeviceAuth | null> {
   if (!token || !alias) return null;
   return { token, alias };
 }
-
-/**
- * Authorization header for an authenticated request, or an empty object
- * when unregistered.
- *
- * Empty rather than throwing: these endpoints do not enforce auth yet, so
- * an unregistered caller must keep working exactly as it does today. Once
- * enforcement lands server-side the same call returns 401, which is the
- * correct outcome for a caller with no identity.
- */
-export async function authHeader(): Promise<Record<string, string>> {
-  const auth = await getDeviceAuth();
-  return auth ? { Authorization: `Bearer ${auth.token}` } : {};
-}

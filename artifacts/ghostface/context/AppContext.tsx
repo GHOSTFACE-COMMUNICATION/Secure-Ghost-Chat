@@ -2,6 +2,7 @@ import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
 import {
+  ALIAS_KEY,
   DEVICE_TOKEN_KEY,
   secureGet,
   secureSet,
@@ -865,7 +866,7 @@ const MY_PQKEM_PUB_KEY = "ghostface_my_pqkem_pub";
 // after a panic wipe.
 const LOCAL_WALLET_PRIV_KEY = "ghostface_local_wallet_priv";
 const APP_STORAGE_KEYS = [
-  "alias",
+  ALIAS_KEY,
   "isOnboarded",
   "biometricEnabled",
   CONVERSATIONS_KEY,
@@ -1481,7 +1482,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async function load() {
       try {
         const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw, themeRaw, profileImageRaw] = await Promise.all([
-          AsyncStorage.getItem("alias"),
+          AsyncStorage.getItem(ALIAS_KEY),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
           secureGet(SECURE_DECOY_PIN_KEY),
@@ -1963,7 +1964,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setAlias = useCallback(async (alias: string) => {
     try {
-      await AsyncStorage.setItem("alias", alias);
+      await AsyncStorage.setItem(ALIAS_KEY, alias);
       await AsyncStorage.setItem("isOnboarded", "true");
       setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false }));
     } catch (err) {
@@ -2081,7 +2082,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await secureSet(MY_PQKEM_PRIV_KEY, result.pqkemPriv);
     await secureSet(MY_PQKEM_PUB_KEY, result.pqkemPub);
 
-    await AsyncStorage.setItem("alias", alias);
+    await AsyncStorage.setItem(ALIAS_KEY, alias);
     await AsyncStorage.setItem("isOnboarded", "true");
     setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false, deviceToken: result.token }));
 
@@ -3102,7 +3103,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       (async () => {
         try {
           const token = await secureGet(DEVICE_TOKEN_KEY);
-          const currentAlias = (await AsyncStorage.getItem("alias")) ?? "";
+          const currentAlias = (await AsyncStorage.getItem(ALIAS_KEY)) ?? "";
           if (token && currentAlias) {
             await replenishOPKsIfNeeded(currentAlias, token);
           }
