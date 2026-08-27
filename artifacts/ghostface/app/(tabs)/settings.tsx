@@ -1907,7 +1907,8 @@ function SettingsScreenInner() {
       >
         <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletPin(false)} />
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, { maxHeight: "88%" }]}>
+              <ScrollView keyboardShouldPersistTaps="handled" bounces={false} showsVerticalScrollIndicator={false}>
               {walletPinSaved ? (
                 <Text style={styles.successText}>LOCK PIN SAVED</Text>
               ) : (
@@ -1979,6 +1980,7 @@ function SettingsScreenInner() {
                   </Pressable>
                 </>
               )}
+              </ScrollView>
             </View>
         </KeyboardAvoidingView>
       </Modal>
