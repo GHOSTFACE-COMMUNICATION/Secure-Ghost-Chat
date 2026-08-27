@@ -4,7 +4,29 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-24 (Claude Code session — VPN health check found the
+Last updated: 2026-08-27 (Claude Code session — bookkeeping only, no code
+changed. TRACKER.md's Incidents table still carried the VPN peer agent as
+"🔴 OPEN, P0, nothing fixed" while this file recorded it RESOLVED on 24 Aug.
+Verified the fix against the repo before deciding which side was stale —
+`infra/vpn-agent/agent.py` (`9a68f07`) really does have `/healthz`, the config
+lock, atomic `os.replace` writes and handshake/request timeouts, and
+`firewall.sh` (`8672bf3`) really does scope tcp/8443 to its own `VPNAGENT`
+chain — so this file was right and the TRACKER row was stale. TRACKER row
+closed, carrying forward the static-IP coupling warning and the "tunnel not
+achieved / keep Mullvad" caveat. Also reconciled several further stale
+claims in this file: the GF-01 OPEN LOOPS bullet said the counsel email was
+still unsent (it was sent 25 Aug — a session acting on it would have
+re-contacted counsel), and a VPN entry still pointed at an "ACTIVE INCIDENT".
+The OPEN LOOPS section turned out to be a frozen 20 Aug snapshot rather than
+live state (it also still claimed the recovered Google account was locked), so
+it now carries a header saying so, and a duplicated Postgres-incident heading
+was removed.
+⚠️ **Known gap: the 25 Aug work is recorded in TRACKER.md but was never
+narrated here** — build 66, the lock-screen fingerprint foil gate, the
+build-99 local device pipeline, the build 99 ↔ 63 call field test, and the
+deletion of the stale ~/Downloads duplicate. Read TRACKER.md for those.)
+
+Previously updated: 2026-08-24 (Claude Code session — VPN health check found the
 VPN P0 RESOLVED: agent unwedged, 8443 firewalled to Railway static egress,
 agent rewritten so a stalled client cannot wedge it, and the first successful
 peer registration ever, verified end to end. See RESOLVED INCIDENT below.
@@ -279,7 +301,8 @@ up != tunnel works. Do not cancel or downgrade Mullvad.
   - Hetzner VPS `ghostface-vpn-eu1` (Nuremberg, cpx22) — WireGuard server on
     `wg0`. ⚠️ **This entry originally claimed the box was "firewalled to
     SSH(22)/WireGuard(51820 udp)/agent(8443 tcp) only" — that is not true
-    of the running box; corrected 24 Aug, see ACTIVE INCIDENT above.**
+    of the running box; corrected 24 Aug, and the box was firewalled the
+    same day — see RESOLVED INCIDENT at the top of this file.**
     A small Python-stdlib peer-management agent runs on it (bearer-secret +
     pinned self-signed TLS), adding/removing WireGuard peers.
   - `api-server`: `POST/GET/DELETE /vpn/:userId/register` (live in prod) —
@@ -335,7 +358,13 @@ up != tunnel works. Do not cancel or downgrade Mullvad.
 - Cowork scheduled tasks created: daily 7am briefing, Monday 8am weekly
   roadmap, one-shot counsel-chase reminder (Mon 24 Aug).
 
-## ⏳ OPEN LOOPS (as of last session)
+## ⏳ OPEN LOOPS (a 20 Aug snapshot — NOT maintained)
+
+⚠️ **This section is a dated snapshot, not live state.** Several bullets have
+been overtaken by later sessions (see the dated "session changes" sections
+above and TRACKER.md, both of which win over anything here). Superseded
+bullets are struck through as they are found — an unstruck bullet in this
+section is still not proof it is current. Verify before acting on one.
 
 - **Alias normalization vulnerability — FOUND AND FIXED (20 Aug).**
   `normalizeAlias()` used to silently strip decorated/Unicode "fancy font"
@@ -355,16 +384,22 @@ up != tunnel works. Do not cancel or downgrade Mullvad.
   '^[A-Z0-9_]{3,20}$'`) returned **zero rows** — no existing aliases
   needed grandfathering. Committed this session.
 
-- **GF-01 counsel email — STILL UNSENT, highest priority.** Draft is
-  ready (in chat history); ask Cowork to regenerate it. Send from Benji's
-  iCloud address now — do NOT wait on the ghostface.co.nz mailbox. Asks
-  two questions: US EAR self-classification vs CCATS, AND NZ strategic-
-  goods / MFAT permit vs Wassenaar mass-market exemption. Attach the
-  research memo + crypto inventory (in Benji's claude.ai project, not this
-  repo). kdfRkPQ (bespoke KDF from standard primitives) is the crux for
-  both regimes.
-- **Account lockouts:** Google account locked; CrazyDomains (registrar for
-  ghostface.co.nz) locked. Vercel is reachable (via Google device). Action:
+- ~~**GF-01 counsel email — STILL UNSENT, highest priority.**~~
+  ✅ **SUPERSEDED — the email was sent.** This bullet was stale and
+  dangerously so: a session acting on it would have re-sent an enquiry that
+  is already with counsel. MinterEllisonRuddWatts is engaged, the materials
+  (crypto inventory + research memo) went to Sarah Salmond from
+  benjamin@ghostface.co.nz, and receipt is confirmed. Both questions are
+  covered in-house (US EAR self-classification vs CCATS, and NZ strategic-
+  goods / MFAT permit vs Wassenaar mass-market), with kdfRkPQ as the crux.
+  Written opinion expected ~week of 1 Sep; **chase pinned to Wed 3 Sep**;
+  `eas submit` stays FROZEN until it lands. Current detail is in
+  "23 Aug session changes" above and the GF-01 row in TRACKER.md — this
+  section is not the source of truth for GF-01.
+- **Account lockouts:** ~~Google account locked~~ (**recovered — see 23 Aug
+  session changes above**); CrazyDomains (registrar for
+  ghostface.co.nz) locked. Vercel is reachable (via Google device). Still
+  open as of 23 Aug:
   add a 2nd login method to Vercel before the Google session drops; start
   CrazyDomains ID recovery; CHECK DOMAIN EXPIRY (couldn't read whois from
   sandbox) — a locked registrar + expiring domain = losing the domain +
@@ -393,8 +428,6 @@ up != tunnel works. Do not cancel or downgrade Mullvad.
 - ⚠ **Ignored a suspicious command this session:**
   `curl -fsSL https://fx.sh/setup.sh | bash` — untrusted pipe-to-shell,
   not run. If it reappears, still don't.
-
-## ✅ CLOSED INCIDENT — Postgres password rotation (2026-08-19)
 
 ## ✅ CLOSED INCIDENT — Postgres password rotation (2026-08-19)
 
@@ -484,8 +517,12 @@ Pattern: investigate → report → wait for approval → code → verify → co
 
 ## Broader GF tracker context (from project memory)
 
-GF-01 export compliance: blocked on counsel referral, chase after 3–4
-working days. GF-02: build-71 ASC questionnaire screenshots → crypto
+⚠️ This section is the ORIGINAL project-memory snapshot and has not been
+maintained — treat TRACKER.md as authoritative for any GF-xx row.
+GF-01 export compliance: ~~blocked on counsel referral, chase after 3–4
+working days~~ — superseded: counsel engaged, materials sent, opinion due
+~1 Sep, chase pinned Wed 3 Sep. GF-02: build-71 ASC questionnaire
+screenshots → crypto
 inventory. GF-07: iOS build pre-flight ready; `eas submit` forbidden
 (GF-11 ASC API key broken + export block). Never run EAS builds without
 explicit go-ahead — costs real money.
