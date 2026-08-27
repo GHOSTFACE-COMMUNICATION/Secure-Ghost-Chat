@@ -22,7 +22,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GOLD_OUTLINE_COLOR, GoldGradient } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
@@ -1905,10 +1905,15 @@ function SettingsScreenInner() {
         animationType="slide"
         onRequestClose={() => setShowWalletPin(false)}
       >
-        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
+        <KeyboardAwareScrollView
+          style={styles.modalOverlay}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end" }}
+          keyboardShouldPersistTaps="handled"
+          bottomOffset={40}
+          showsVerticalScrollIndicator={false}
+        >
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletPin(false)} />
-            <View style={[styles.modalContent, { maxHeight: "88%" }]}>
-              <ScrollView keyboardShouldPersistTaps="handled" bounces={false} showsVerticalScrollIndicator={false}>
+            <View style={styles.modalContent}>
               {walletPinSaved ? (
                 <Text style={styles.successText}>LOCK PIN SAVED</Text>
               ) : (
@@ -1980,9 +1985,8 @@ function SettingsScreenInner() {
                   </Pressable>
                 </>
               )}
-              </ScrollView>
             </View>
-        </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       </Modal>
 
       {/* Recovery Phrase modal */}
