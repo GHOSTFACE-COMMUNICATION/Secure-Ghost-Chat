@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef } from "react";
-import { Animated, PanResponder } from "react-native";
+import { Animated, Easing, PanResponder } from "react-native";
 
 interface GhostLogoProps {
   size?: number;
@@ -10,30 +10,21 @@ interface GhostLogoProps {
 export function GhostLogo({ size = 64 }: GhostLogoProps) {
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
+  const spin = useRef(new Animated.Value(0)).current;
   const loopRef = useRef<Animated.CompositeAnimation | null>(null);
   const touching = useRef(false);
 
   const startLoop = () => {
+    // Slow continuous rotation (was an opacity fade). 12s per turn reads as a
+    // gentle drift; touching pauses it (see panResponder) and release resumes.
+    spin.setValue(0);
     loopRef.current = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.delay(1200),
-        Animated.timing(opacity, {
-          toValue: 0.08,
-          duration: 1600,
-          useNativeDriver: true,
-        }),
-        Animated.delay(300),
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 12000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
     );
     loopRef.current.start();
   };
@@ -105,10 +96,12 @@ export function GhostLogo({ size = 64 }: GhostLogoProps) {
     })
   ).current;
 
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
   return (
     <Animated.Image
-      source={require("../assets/images/ghostlogo.png")}
-      style={{ width: size, height: size, opacity, transform: [{ scale }] }}
+      source={require("../assets/images/ghostface-mark-gold.webp")}
+      style={{ width: size, height: size, opacity, transform: [{ scale }, { rotate }] }}
       resizeMode="contain"
       {...panResponder.panHandlers}
     />
