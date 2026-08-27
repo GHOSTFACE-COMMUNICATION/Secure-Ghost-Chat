@@ -80,11 +80,31 @@ would drag a `DATABASE_URL` requirement into every module that gates on auth,
 and it broke `blobs.test.ts`, which is deliberately hermetic. Don't make it
 static.
 
-**Still to do:** migrate the 7 duplicated `hashToken` copies and the two
-divergent `getAuthedAlias` variants (`crypto.ts` reads body-or-query,
-`messages.ts` query-only) across the routes and `ws/manager.ts` onto the
-shared helper — deliberately left as a *separate* commit so any behaviour
-change there is bisectable.
+**`hashToken` consolidation — DONE 27 Aug.** All 7 copies (crypto, messages,
+numbers, prekeys, push, vpn, ws/manager) now import the one in `lib/auth.ts`.
+Verified byte-identical before removal, so it is a pure no-op: 35 deletions,
+9 insertions, typecheck clean, tests 70/70, eslint clean on all 7.
+
+**Still to do — and NOT a mechanical change, do not batch it with the above.**
+The alias resolvers diverge, and one difference is security-relevant:
+- `messages.ts` and `numbers.ts` read `?alias=` **only**. Identical to each
+  other.
+- `crypto.ts` reads `?alias=` **or** `body.alias`.
+- `lib/auth.ts` (used by blobs/ice-config/invites) reads query, then
+  `body.alias`, then `body.ownerAlias` — the widest of the three.
+- `prekeys.ts`/`push.ts` share an identical `requireDeviceAuth` keyed on the
+  `:userId` path param; `vpn.ts`'s adds an IP failure gate.
+- `ws/manager.ts`'s `validateToken(alias, token)` is not request-shaped at all.
+
+⚠️ Migrating the query-only sites onto a query-or-body resolver **widens**
+them. The hazard: if a handler reads `req.query.alias` for its own logic while
+auth resolved the caller from `req.body.alias`, the request authenticates as
+one user and operates on another. Today's precedence (query first, body only
+as fallback) makes that unreachable, but it is one edit away and nothing
+enforces it. The right shape is an explicit source per call site — e.g.
+`getAuthedAlias(req, { allowBodyAlias: true })` — preserving each site's
+current behaviour rather than silently widening. **Each site needs checking
+against its own handler before it moves.**
 
 ⚠️ **The ordering is the whole point. Step 2 must not deploy before an app
 release carrying step 1 is out.** No shipped build sends the header, so

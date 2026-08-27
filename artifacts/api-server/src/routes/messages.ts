@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, messagesTable, identityKeysTable, deviceTokensTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { createHash } from "crypto";
+import { hashToken } from "../lib/auth";
 import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
@@ -30,10 +30,6 @@ const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "au
 // bound total enumeration regardless of how many addresses it comes from.
 const userExistsLimiter = new RateLimiter({ windowMs: 60_000, max: 600, prefix: "userExists" });
 const userExistsGlobal = new GlobalLimiter({ windowMs: 60_000, max: 6_000, prefix: "userExistsGlobal" });
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 async function getAuthedAlias(req: Request): Promise<string | null> {
   const auth = req.headers.authorization ?? "";

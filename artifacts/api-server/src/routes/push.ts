@@ -1,15 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, identityKeysTable, deviceTokensTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { createHash } from "crypto";
+import { hashToken } from "../lib/auth";
 import { toErrorMessage } from "../utils/error";
 import { normalizeAlias } from "../utils/alias";
 
 const router: IRouter = Router();
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 /** Same bearer-device-token-vs-path-userId check used by the prekey routes. */
 async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {

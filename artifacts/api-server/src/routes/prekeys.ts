@@ -1,7 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, prekeysTable, identityKeysTable, deviceTokensTable, reclaimChallengesTable, pool } from "@workspace/db";
 import { eq, and, lt, count as drizzleCount } from "drizzle-orm";
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
+import { hashToken } from "../lib/auth";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -68,10 +69,6 @@ function requestIp(req: Request): string {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 /** Validate a hex string with an exact expected length in chars. */
 function isValidHex(k: unknown, chars: number): k is string {

@@ -8,7 +8,8 @@ import {
   departuresTable,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
+import { hashToken } from "../lib/auth";
 import { inflateRawSync } from "zlib";
 import { logger } from "../lib/logger";
 import { normalizeAlias } from "../utils/alias";
@@ -231,10 +232,6 @@ async function endGhostpadSession(alias: string): Promise<void> {
   const partnerAlias = await shared.clearGhostpadPair(alias);
   if (!partnerAlias) return;
   await router.sendToAlias(partnerAlias, { type: "ghostpad-ended" });
-}
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 async function validateToken(alias: string, token: string): Promise<boolean> {

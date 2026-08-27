@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { hashToken } from "../lib/auth";
 import * as https from "https";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, deviceTokensTable, vpnPeersTable } from "@workspace/db";
@@ -9,10 +9,6 @@ import { logger } from "../lib/logger";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
 
 const router: IRouter = Router();
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 // See messages.ts for the reasoning: only failed auth charges this, so carrier
 // NAT and our own VPN egress cannot make real users share one budget.

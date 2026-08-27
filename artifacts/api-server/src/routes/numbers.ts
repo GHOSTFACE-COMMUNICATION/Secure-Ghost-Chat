@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, ghostNumbersTable, ghostSmsTable, deviceTokensTable } from "@workspace/db";
 import { eq, and, desc, or, sql } from "drizzle-orm";
-import { createHash } from "crypto";
+import { hashToken } from "../lib/auth";
 import { vonageClient } from "../lib/vonage";
 import { pool } from "@workspace/db";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
@@ -33,10 +33,6 @@ const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "au
 // source of truth for the database schema.
 
 const ALLOWED_ROTATION_DAYS = new Set([0, 7, 30, 90]);
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 async function getAuthedAlias(req: Request): Promise<string | null> {
   const auth = req.headers.authorization ?? "";

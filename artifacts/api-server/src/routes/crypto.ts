@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash } from "crypto";
+import { hashToken } from "../lib/auth";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { validateTransfer } from "@solana/pay";
 import BigNumber from "bignumber.js";
@@ -41,10 +41,6 @@ const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "au
 // standard Drizzle schema (lib/db/src/schema/payments.ts) and applied via
 // `pnpm --filter db push` (see scripts/post-merge.sh) — the single source of
 // truth for the database schema.
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 /** Resolve the authenticated alias from a Bearer device token + ?alias=. */
 async function getAuthedAlias(req: Request): Promise<string | null> {
