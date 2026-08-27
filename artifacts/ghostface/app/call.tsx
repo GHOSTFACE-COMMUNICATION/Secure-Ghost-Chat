@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { wasCallEnded } from "@/lib/endedCalls";
+import { getDeviceAuth } from "@/lib/deviceAuth";
 import { GoldGradient } from "@/components/GoldGradient";
 import { StatusDot } from "@/components/StatusDot";
 import { useColors } from "@/hooks/useColors";
@@ -124,7 +125,24 @@ async function fetchIceConfig(): Promise<IceConfig> {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch(`https://${domain}/api/ice-config`, { signal: ctrl.signal });
+    // TURN credentials are our spend, so this becomes an authenticated
+    // read. The alias rides in the query string because the server matches
+    // the Bearer token against the device_tokens row for that alias
+    // (token_hash alone is not unique — only user_id is). Sent
+    // unconditionally; the server does not enforce it yet.
+    //
+    // NOTE for the enforcement deploy: the catch below fails OPEN to
+    // STUN-only, so a 401 here degrades calls silently rather than
+    // erroring. Enforcement must not ship ahead of a client that sends
+    // this header.
+    const auth = await getDeviceAuth();
+    const iceUrl = auth
+      ? `https://${domain}/api/ice-config?alias=${encodeURIComponent(auth.alias)}`
+      : `https://${domain}/api/ice-config`;
+    const res = await fetch(iceUrl, {
+      signal: ctrl.signal,
+      headers: auth ? { Authorization: `Bearer ${auth.token}` } : {},
+    });
     clearTimeout(t);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = (await res.json()) as { iceServers?: IceServer[]; ttl?: number };

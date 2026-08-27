@@ -16,6 +16,7 @@
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { managedNonce } from "@noble/ciphers/utils.js";
 import { randomBytes } from "@/lib/csprng";
+import { getDeviceAuth } from "@/lib/deviceAuth";
 
 // btoa/atob are provided by Hermes (React Native) and the browser, but
 // aren't declared in the Expo TS lib set. Declare them locally so we get
@@ -65,9 +66,22 @@ export async function uploadEncryptedBlob(
   const cipher = managedNonce(chacha20poly1305)(keyBytes);
   const ciphertext = cipher.encrypt(plain);
 
-  const res = await fetch(`${apiBase()}/blobs`, {
+  // Upload is an authenticated write: it costs server disk. The alias rides
+  // along in the query string because the server matches the Bearer token
+  // against the device_tokens row for that alias (token_hash alone is not
+  // unique — only user_id is). Sent unconditionally; the server does not
+  // enforce this yet, so an unregistered caller behaves exactly as before.
+  const auth = await getDeviceAuth();
+  const url = auth
+    ? `${apiBase()}/blobs?alias=${encodeURIComponent(auth.alias)}`
+    : `${apiBase()}/blobs`;
+
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: {
+      "Content-Type": "application/octet-stream",
+      ...(auth ? { Authorization: `Bearer ${auth.token}` } : {}),
+    },
     // RN/Hermes fetch accepts an ArrayBuffer body for binary uploads.
     body: ciphertext.buffer.slice(
       ciphertext.byteOffset,

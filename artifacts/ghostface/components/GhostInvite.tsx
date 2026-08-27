@@ -17,6 +17,7 @@ import { useColors } from "@/hooks/useColors";
 import { QRScanner, encodeContactQR, encodeInviteQR } from "@/components/QRScanner";
 import { GoldGradient } from "@/components/GoldGradient";
 import { CODE_REGEX, type RedeemFailReason, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
+import { getDeviceAuth } from "@/lib/deviceAuth";
 import { getApiBase } from "@/lib/apiBase";
 import { type } from "@/constants/typography";
 
@@ -60,9 +61,18 @@ async function registerInviteOnServer(
   const apiBase = getApiBase();
   if (!apiBase || !ownerAlias) return;
   try {
+    // Authenticated: without it anyone can mint invite codes attributed to
+    // any alias. `ownerAlias` stays in the body for the current server, but
+    // once enforcement lands the server derives it from the token and
+    // ignores the body field — the two agree here, because ownerAlias is
+    // this device's own alias from useApp().
+    const auth = await getDeviceAuth();
     await fetch(`${apiBase}/invites`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(auth ? { Authorization: `Bearer ${auth.token}` } : {}),
+      },
       body: JSON.stringify({ code: code.toUpperCase(), ownerAlias, expiresAt }),
     });
   } catch {

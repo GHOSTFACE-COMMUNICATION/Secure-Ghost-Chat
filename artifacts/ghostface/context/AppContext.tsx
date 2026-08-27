@@ -1,6 +1,12 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
+import {
+  DEVICE_TOKEN_KEY,
+  secureGet,
+  secureSet,
+  secureDelete,
+} from "@/lib/deviceAuth";
 import { normalizeAlias } from "@/utils/alias";
 import { notifyCallEnded } from "@/hooks/usePushNotifications";
 import { markCallEnded } from "@/lib/endedCalls";
@@ -33,8 +39,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
-import * as SecureStore from "expo-secure-store";
-import { Alert, AppState as RNAppState, Platform } from "react-native";
+import { Alert, AppState as RNAppState } from "react-native";
 import React, {
   createContext,
   useCallback,
@@ -835,7 +840,6 @@ const OUTBOX_KEY = "ghostface_outbox";
 const CONNECTED_WALLET_KEY = "ghostface_connected_wallet";
 const OPK_STORE_KEY = "ghostface_opk_store";
 const OPK_BATCH_SIZE = 10;
-const DEVICE_TOKEN_KEY = "ghostface_device_token";
 const AUTO_LOCK_TIMEOUT_KEY = "ghostface_auto_lock_timeout";
 const DURESS_GRACE_KEY = "ghostface_duress_grace_period";
 const LANGUAGE_KEY = "ghostface_language";
@@ -1413,21 +1417,6 @@ async function fetchAppTokensAndBalances(
   } catch {
     return { tokens: [], balances: [] };
   }
-}
-
-async function secureGet(key: string): Promise<string | null> {
-  if (Platform.OS === "web") return AsyncStorage.getItem(key);
-  return SecureStore.getItemAsync(key);
-}
-
-async function secureSet(key: string, value: string): Promise<void> {
-  if (Platform.OS === "web") { await AsyncStorage.setItem(key, value); return; }
-  await SecureStore.setItemAsync(key, value);
-}
-
-async function secureDelete(key: string): Promise<void> {
-  if (Platform.OS === "web") { await AsyncStorage.removeItem(key); return; }
-  await SecureStore.deleteItemAsync(key);
 }
 
 const AppContext = createContext<AppContextType | null>(null);
