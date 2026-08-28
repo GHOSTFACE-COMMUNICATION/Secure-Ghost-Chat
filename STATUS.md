@@ -4,7 +4,69 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-28 (Claude Code — continuation of the 27 Aug session,
+Last updated: 2026-08-28 (Claude Code — correspondence day, plus one build
+result. THREE things. FIRST, **GF-01: Sarah replied, but this is NOT the
+opinion.** Her reply answers only the territory follow-up, and all three of
+those questions are OUT OF SCOPE. She declines "which destinations must be
+excluded as a matter of law" and "which territories require registration or a
+local entity" outright — both need jurisdiction-specific advice across
+telecommunications, cybersecurity, privacy, sanctions and export controls, and
+NZ counsel are not qualified to give it. She does answer the third, and it is
+the one that matters: **mass-market treatment does NOT change either answer.**
+It governs export-control classification and the availability of exemption
+pathways only; it does not determine whether local telecoms, licensing,
+registration, cybersecurity or privacy requirements apply. So the
+classification opinion is **still pending** (~1 Sep, chase pinned 3 Sep),
+`ITSAppUsesNonExemptEncryption` is still undecided, and **`eas submit` stays
+blocked**. Consequence: worldwide distribution has **no legal owner**, and
+mass-market treatment will not fill that gap. Decision taken and put on the
+record with counsel: **launch with App Store availability limited to NZ / AU /
+UK / US** — the same four the API already knows via `COUNTRY_NAMES` — and take
+local advice before opening any further market.
+SECOND, **Vonage answered, and it is not a clean yes.** Aaron justifies
+assigning numbers to end users via *masked calling*, where the platform holds
+the number and proxies two parties. That is not what GhostNumber does — it
+gives each user their own persistent number — and the words *sub-allocation*
+and *resale*, the framing TRACKER flagged as the real risk, appear nowhere.
+Re-asked in those exact terms and escalated past the SDR to someone who can
+bind Vonage. Two answers change the product: **end-user KYC is ours** (we are
+data controller and must collect and retain identity/address records,
+producible on request), which is a structural conflict with an alias-only,
+no-PII product rather than a paperwork task; and **released numbers age 90
+days** before re-entering the pool, so `lib/rotationScheduler.ts` can never
+recycle its own inventory — every rotation permanently consumes new numbers,
+and the released one is still billed that month (~double MRC during overlap).
+Also open: NZ is absent from his SMS+Voice combined list, 10DLC wants each
+end customer registered as a separate brand (does not scale to consumers, and
+its 3-month campaign minimum collides with rotation), and inbound OTP/2FA on
+our numbers is blocked at platform level — users WILL try to register
+WhatsApp/Google/banks with a GhostNumber and those messages are filtered.
+THIRD, **the WireGuardKit EAS fix is proven.** Build
+`d176c63d-de45-4b2a-9099-cabdf82b23f9` from commit `b63b233` finished clean —
+FINISHED, no error, 5.9 min, v1.0.2 build 66. The `eas-build-post-install`
+link step and the `eas-build-pre-install` Go install hook both ran, and `no
+such module 'WireGuardKit'` is gone. ⚠️ The profile was `development:device`,
+**NOT production** — this proves the hooks run and WireGuardKit links, not
+that a store build passes; re-check on the first production build carrying the
+tunnel target. Separately, the watcher polling that build had looped for over
+5h without ever reporting: its command used `eas build:view <id> --json
+--non-interactive`, and `--non-interactive` is not a valid flag for
+`build:view`, so every poll errored and the `until` loop never matched a
+status. Drop the flag when polling.
+⚠️ **~~NEW HAZARD — this file and TRACKER.md are NOT in the current HEAD's
+git tree.~~ RETRACTED 28 Aug — the claim was false, on all three counts.**
+`STATUS.md` and `TRACKER.md` were tracked at `3c58b67` the whole time
+(`git ls-tree -r 3c58b67` lists both), `artifacts/` was in that tree too, and
+the Expo app was never at the repo root. `git status` showed both files as
+` M`, not `??`. Today's edits are committed on `feat/push-notifications` as a
+modification, not an add — 187 insertions / 4 deletions across 3 files, and the
+one `create mode` in that commit is `compliance/vonage-followup-draft.md`,
+which genuinely was new. No cross-session memory was ever at risk from a `git clean`. Cause of the
+bad claim not established — most likely inspected from a different branch or
+worktree. Kept rather than deleted so a session that remembers the warning can
+see it was withdrawn.)
+
+Previously updated: 2026-08-28 (Claude Code — continuation of the 27 Aug session,
 now VERIFIED ON HARDWARE. Two things that were code-only are proven against
 production: the **welcome gift grants** (first ever — `MAYYBACHHFKU`, specter,
 until 27 Sep; both `welcome_gifts` and `ghost_entitlements` were empty before,
