@@ -1,8 +1,13 @@
 # Vonage — reply to onboarding email (SMS API + virtual numbers)
 
-Draft 27 Aug 2026. Send from benjamin@ghostface.co.nz, replying on the
-existing thread with Aaron Lee (Sales Development Representative,
-aaron.lee@vonage.com).
+**SENT 27 Aug 2026** to aaron.lee@vonage.com from benjamin@ghostface.co.nz
+(Gmail message id `1a046911af7a4b96`).
+
+Sent as a NEW thread, not a reply: Aaron's message is not in the
+benjamin@ghostface.co.nz mailbox — prior correspondence with him was from
+Benji's personal mayyybachhh@icloud.com. A line was added to the top of the
+sent email noting the address change so he can place it. Subject used:
+"Re: Vonage SMS API and virtual numbers — GHOSTFACE / Ghostface Limited".
 
 **Deliberately says nothing about the app's cryptography.** Export
 classification is the open question with MinterEllison (GF-01) and no
