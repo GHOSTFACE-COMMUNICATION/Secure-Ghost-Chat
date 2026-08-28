@@ -4,7 +4,21 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-27 (Claude Code session — three pieces of work.
+Last updated: 2026-08-28 (Claude Code — continuation of the 27 Aug session,
+now VERIFIED ON HARDWARE. Two things that were code-only are proven against
+production: the **welcome gift grants** (first ever — `MAYYBACHHFKU`, specter,
+until 27 Sep; both `welcome_gifts` and `ghost_entitlements` were empty before,
+so nobody has ever paid) and **self-destruct properly releases an alias** via
+the sanctioned DELETE path — the route that was unavailable for GHOSTFACE.
+Also: the language setting offered 12 languages and did nothing (no i18n at
+all) and is now English-only; the Pig-Latin nudge is gone; the coin halo was
+strobing and now tracks the coin angle; the recovery step's confirm button was
+unreachable (`flex` vs `flexGrow` on a ScrollView content container). Dev
+builds are on all three handsets. ⚠️ **The dev client is not reaching Metro**,
+so every JS change since `f1df8a0` is committed but invisible on device — see
+TRACKER. Prior session summary follows.)
+
+Previously updated: 2026-08-27 (Claude Code session — three pieces of work.
 FIRST, the auth-posture pass on the three unauthenticated endpoints: both
 halves written, server half DEPLOYED with enforcement DISABLED behind
 `ENFORCE_ENDPOINT_AUTH`; see the OPEN LOOP directly below — **read it before
