@@ -565,10 +565,11 @@ section is still not proof it is current. Verify before acting on one.
   reports to admin@).
   DKIM record published 27 Aug (`google._domainkey`, 2048-bit, verified
   reassembling intact at 408 chars). ⚠️ Still open: **"Start authentication"
-  must be clicked in Google Admin** — publishing the record does not enable
-  signing. Do not tighten DMARC past `p=none` until a sent message shows
-  `dkim=pass`, or legitimate forwarded mail starts failing. And a mailbox password was pasted into a
-  session transcript on 27 Aug and needs rotating.
+  must be clicked in Google Admin** — publishing the record does not
+  enable signing. Do not tighten DMARC past `p=none` until a sent message
+  shows `dkim=pass`, or legitimate forwarded mail starts failing. And a
+  mailbox password was pasted into a session transcript on 27 Aug and needs
+  rotating.
 - ⚠ **Vercel access token was pasted into chat this session** (vcp_… ,
   redacted). Assistant refused to use it. Benji to REVOKE it (Vercel →
   Account Settings → Tokens) if not already done. Never paste secrets in
