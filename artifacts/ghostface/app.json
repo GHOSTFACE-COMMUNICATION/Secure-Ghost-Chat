@@ -42,6 +42,9 @@
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.ghostface.app"
+        ],
+        "com.apple.developer.networking.networkextension": [
+          "packet-tunnel-provider"
         ]
       }
     },
