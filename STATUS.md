@@ -561,7 +561,8 @@ section is still not proof it is current. Verify before acting on one.
   Live DNS: MX `1 smtp.google.com`, SPF `v=spf1 include:_spf.google.com ~all`.
   Workspace took the domain over around 23 Aug. Five addresses now exist and
   all accept mail (delivery-tested 27 Aug, no bounces): benjamin@, support@,
-  info@, legal@, admin@. DMARC added 27 Aug (`p=none`, monitor only, reports to admin@).
+  info@, legal@, admin@. DMARC added 27 Aug (`p=none`, monitor only,
+  reports to admin@).
   ⚠️ Still open: **Workspace DKIM is not enabled** — no `google._domainkey`
   record — so do not tighten DMARC past `p=none` until it is, or legitimate
   forwarded mail starts failing. And a mailbox password was pasted into a
