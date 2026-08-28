@@ -563,13 +563,13 @@ section is still not proof it is current. Verify before acting on one.
   all accept mail (delivery-tested 27 Aug, no bounces): benjamin@, support@,
   info@, legal@, admin@. DMARC added 27 Aug (`p=none`, monitor only,
   reports to admin@).
-  DKIM record published 27 Aug (`google._domainkey`, 2048-bit, verified
-  reassembling intact at 408 chars). ⚠️ Still open: **"Start authentication"
-  must be clicked in Google Admin** — publishing the record does not
-  enable signing. Do not tighten DMARC past `p=none` until a sent message
-  shows `dkim=pass`, or legitimate forwarded mail starts failing. And a
-  mailbox password was pasted into a session transcript on 27 Aug and needs
-  rotating.
+  DKIM published and **enabled** 27 Aug (`google._domainkey`, 2048-bit,
+  selector `google`). Verified end to end by an external authentication
+  check: SPF pass, DKIM pass (`header.d=ghostface.co.nz`), iprev pass, both
+  aligned with the From domain. Next step, not urgent: let `rua` reports
+  accumulate at admin@ for a week or two, then tighten `p=none` →
+  `p=quarantine`. ⚠️ Still open: a mailbox password was pasted into a session
+  transcript on 27 Aug and needs rotating.
 - ⚠ **Vercel access token was pasted into chat this session** (vcp_… ,
   redacted). Assistant refused to use it. Benji to REVOKE it (Vercel →
   Account Settings → Tokens) if not already done. Never paste secrets in
