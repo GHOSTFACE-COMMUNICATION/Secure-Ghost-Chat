@@ -156,7 +156,7 @@ export default function SecurityAuditScreen() {
               { label: "PIN LOCK", active: hasPin },
               { label: "BIOMETRIC LOCK", active: biometricEnabled },
               { label: "SECURE STORAGE (KEYCHAIN)", active: Platform.OS !== "web" },
-              { label: "SELF DESTRUCT", active: true },
+              { label: "WIPE DEVICE", active: true },
               { label: "ENCRYPTED KEY DERIVATION", active: true },
             ].map((item) => (
               <View key={item.label} style={s.deviceRow}>

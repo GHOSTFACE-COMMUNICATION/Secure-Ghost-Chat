@@ -323,7 +323,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
               )}
               <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
               <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
-                {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
+                {panicHeld ? "WIPING..." : "WIPE DEVICE"}
               </Text>
             </GlassView>
           ) : (
@@ -343,7 +343,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
               )}
               <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
               <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
-                {panicHeld ? "WIPING..." : "SELF DESTRUCT"}
+                {panicHeld ? "WIPING..." : "WIPE DEVICE"}
               </Text>
             </BlurView>
           )}
