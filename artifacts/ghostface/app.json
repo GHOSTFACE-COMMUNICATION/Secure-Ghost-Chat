@@ -122,9 +122,9 @@
       "reactCompiler": true
     },
     "extra": {
-      "privacyPolicyUrl": "https://ghostface.app/privacy",
-      "marketingUrl": "https://ghostface.app",
-      "supportUrl": "mailto:support@ghostface.app",
+      "privacyPolicyUrl": "https://ghostface.co.nz/privacy",
+      "marketingUrl": "https://ghostface.co.nz",
+      "supportUrl": "mailto:support@ghostface.co.nz",
       "router": {},
       "eas": {
         "projectId": "1955ab0c-ad35-40bd-9428-543e6dd8d293"
