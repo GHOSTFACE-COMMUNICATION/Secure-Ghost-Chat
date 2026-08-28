@@ -638,9 +638,12 @@ Typecheck: `npx tsc -p tsconfig.json --noEmit`, clean.
 
 ## Pre-ship gates for build 72 (all must pass before any EAS build)
 
-1. **DB prekey check — PASSED 2026-08-19**: all 9 registered users have
-   complete signing + PQ prekey material (query in the Claude Code
-   session; re-run if new registrations happen before shipping).
+1. **DB prekey check — RE-PASSED 2026-08-27**: 9/9 identities have complete
+   signing + PQ material, all have a `delivery_id`, none is short of OPKs
+   (8-10 unconsumed each). The 19 Aug pass was also 9/9 but had gone stale —
+   every row in the table today was created 25 Aug or later, so it had been
+   verified against a user population that has since turned over entirely.
+   Re-run if anyone registers before shipping.
 2. **CSPRNG on-device smoke test — NOT DONE**: physical iOS + Android,
    clean install, verify clean boot (assert runs before router entry);
    plan approved, see session notes.
