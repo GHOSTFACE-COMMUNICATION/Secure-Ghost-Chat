@@ -177,15 +177,20 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
       extrapolate: "extend",
     });
     const edgeOpacity = live ? liveEdge : flipEdgeOpacity;
-    const rim = size * 0.017;
+    const rim = size * 0.012;
     const face = size - rim * 2;
     const band = Math.max(8, size * 0.084);
     // Thin sparkling diamond edge: fine high-contrast facets with a brighter
     // glint every few facets — the sparkle carries it, not thickness.
-    const facetCount = 84;
+    const facetCount = 132;
     const facetR = size / 2 - rim / 2;
-    const facetW = Math.max(2, size * 0.014);
-    const facetH = rim * 1.7;
+    // Derive facet width from the actual pitch so the cuts nearly touch,
+    // separated only by a thin dark line. A fixed width leaves gaps that read
+    // as a bead chain rather than milled reeding — at 132 facets on a 180pt
+    // coin the pitch is ~4.2pt, so a 1.5pt facet was only ~35% duty cycle.
+    const facetPitch = (2 * Math.PI * facetR) / facetCount;
+    const facetW = Math.max(1.2, facetPitch * 0.72);
+    const facetH = rim * 2.1;
 
     return (
       <Animated.View
@@ -199,6 +204,25 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
         }}
         {...panResponder.panHandlers}
       >
+        {/* Soft white halo. Deliberately OUTSIDE the rotating element: a glow
+            that spun with the coin would squash to a sliver every half turn,
+            which reads as flicker rather than light. Kept subtle — it should
+            lift the coin off the black, not announce itself. */}
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            width: size * 0.92,
+            height: size * 0.92,
+            borderRadius: size,
+            backgroundColor: "rgba(255,255,255,0.05)",
+            boxShadow: [
+              boxShadow("#FFFFFF", 0.28, size * 0.30),
+              boxShadow("#FFFFFF", 0.18, size * 0.13),
+            ].join(", "),
+          }}
+        />
+
         {/* fake thickness: edge band flashes when edge-on */}
         <Animated.View
           pointerEvents="none"
@@ -270,8 +294,32 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
           {/* diamond-cut milled edge */}
           <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
             {Array.from({ length: facetCount }).map((_, i) => {
-              const glint = i % 4 === 0; // frequent gemstone sparkle points
-              const bright = i % 2 === 0;
+              // Directional lighting is what makes milled reeding read as
+              // metal rather than a dashed circle. A real diamond-cut edge is
+              // lit from one side: facets facing the light blow out to white,
+              // facets on the far side fall to near-black, and the two blend
+              // through a gradient around the rim. The previous alternating
+              // bright/dark pattern was uniform all the way round, which is
+              // why it looked printed.
+              const theta = (2 * Math.PI * i) / facetCount;
+              // Light from upper-left, the convention the rest of the coin's
+              // inset highlights already assume.
+              const LIGHT = -Math.PI * 0.75;
+              const facing = Math.cos(theta - LIGHT); // -1 (away) .. 1 (toward)
+              const lit = Math.pow(Math.max(0, facing), 1.6); // 0..1 diffuse
+              // Alternating cut faces: every other facet is the opposing
+              // flank of the groove, so it catches noticeably less light.
+              const flank = i % 2 === 0 ? 1 : 0.42;
+              const shade = lit * flank;
+              // Specular: a tight highlight only where a facet points almost
+              // straight at the light, so sparkle is localised instead of
+              // sprinkled evenly around the circumference.
+              const spec = Math.pow(Math.max(0, facing), 22);
+              const isGlint = spec > 0.35 && i % 2 === 0;
+              // Blend near-black → warm steel → white with the shade term.
+              const lo = [22, 22, 30];
+              const hi = [248, 250, 255];
+              const c = lo.map((v, k) => Math.round(v + (hi[k] - v) * shade));
               return (
                 <View
                   key={i}
@@ -279,12 +327,13 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
                     position: "absolute",
                     top: size / 2 - facetH / 2,
                     left: size / 2 - facetW / 2,
-                    width: glint ? facetW * 1.25 : facetW,
-                    height: glint ? facetH * 1.7 : facetH,
+                    width: isGlint ? facetW * 1.5 : facetW,
+                    height: isGlint ? facetH * 1.35 : facetH,
                     borderRadius: facetW,
-                    backgroundColor: glint ? "#ffffff" : bright ? "#f4f6fb" : "#1c1c26",
-                    boxShadow: glint
-                      ? [boxShadow("#FFFFFF", 1, 7), boxShadow("#FFFFFF", 0.8, 3)].join(", ")
+                    backgroundColor: `rgb(${c[0]}, ${c[1]}, ${c[2]})`,
+                    opacity: 0.55 + 0.45 * shade,
+                    boxShadow: isGlint
+                      ? [boxShadow("#FFFFFF", spec, 8), boxShadow("#FFFFFF", spec * 0.8, 3)].join(", ")
                       : undefined,
                     transform: [{ rotate: `${(360 / facetCount) * i}deg` }, { translateY: -facetR }],
                   }}
