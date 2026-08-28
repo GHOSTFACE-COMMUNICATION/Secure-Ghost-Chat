@@ -556,11 +556,14 @@ section is still not proof it is current. Verify before acting on one.
   CrazyDomains ID recovery; CHECK DOMAIN EXPIRY (couldn't read whois from
   sandbox) — a locked registrar + expiring domain = losing the domain +
   api.ghostface.co.nz with it.
-- **Company email setup — DONE (19 Aug):** iCloud Custom Email Domain for
-  ghostface.co.nz verified; DNS records live in Vercel panel. Confirm the
-  addresses (benjamin@ / support@ / legal@) exist and do one test-send to
-  benjamin@ to prove delivery. Use benjamin@ghostface.co.nz on the counsel
-  email from here on.
+- ~~**Company email setup — DONE (19 Aug):** iCloud Custom Email Domain~~
+  ✅ **SUPERSEDED 27 Aug — the domain is on Google Workspace, not iCloud.**
+  Live DNS: MX `1 smtp.google.com`, SPF `v=spf1 include:_spf.google.com ~all`.
+  Workspace took the domain over around 23 Aug. Five addresses now exist and
+  all accept mail (delivery-tested 27 Aug, no bounces): benjamin@, support@,
+  info@, legal@, admin@. ⚠️ Still open: **no DMARC record** on the domain, and
+  a mailbox password was pasted into a session transcript on 27 Aug and needs
+  rotating.
 - ⚠ **Vercel access token was pasted into chat this session** (vcp_… ,
   redacted). Assistant refused to use it. Benji to REVOKE it (Vercel →
   Account Settings → Tokens) if not already done. Never paste secrets in
