@@ -215,10 +215,14 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
             width: size * 0.92,
             height: size * 0.92,
             borderRadius: size,
-            backgroundColor: "rgba(255,255,255,0.05)",
+            backgroundColor: "rgba(255,255,255,0.09)",
             boxShadow: [
-              boxShadow("#FFFFFF", 0.28, size * 0.30),
-              boxShadow("#FFFFFF", 0.18, size * 0.13),
+              // Three stacked layers: a wide soft bloom, a mid falloff, and a
+              // tight bright core. Stacking beats a single huge blur, which
+              // just goes evenly grey — the layers give the falloff a shape.
+              boxShadow("#FFFFFF", 0.34, size * 0.62),
+              boxShadow("#FFFFFF", 0.40, size * 0.30),
+              boxShadow("#FFFFFF", 0.34, size * 0.12),
             ].join(", "),
           }}
         />
