@@ -73,14 +73,15 @@ export function GhostLogo({ size = 64, coin = false, onTap }: GhostLogoProps) {
       outputRange: [0, 1, 0, 1, 0],
       extrapolate: "extend",
     });
-    const rim = size * 0.028;
+    const rim = size * 0.017;
     const face = size - rim * 2;
     const band = Math.max(8, size * 0.084);
-    // Diamond-cut milled edge: alternating bright/dark facets around the rim.
+    // Thin sparkling diamond edge: fine high-contrast facets with a brighter
+    // glint every few facets — the sparkle carries it, not thickness.
     const facetCount = 84;
     const facetR = size / 2 - rim / 2;
-    const facetW = Math.max(1.5, size * 0.016);
-    const facetH = rim * 1.2;
+    const facetW = Math.max(2, size * 0.014);
+    const facetH = rim * 1.7;
 
     return (
       <Animated.View
@@ -120,14 +121,16 @@ export function GhostLogo({ size = 64, coin = false, onTap }: GhostLogoProps) {
             height: size,
             borderRadius: size / 2,
             padding: rim,
-            backgroundColor: "#c4c7cf",
+            backgroundColor: "#dfe1e6",
+            borderWidth: Math.max(1, size * 0.006),
+            borderColor: "rgba(255,255,255,0.92)",
             alignItems: "center",
             justifyContent: "center",
             transform: [{ perspective: 800 }, { rotateY: rotate }],
             boxShadow: [
-              boxShadow("#FFFFFF", 0.35, 16),
-              "inset 0 1.5px 4px rgba(255,255,255,0.9)",
-              "inset 0 -5px 10px rgba(16,16,20,0.65)",
+              boxShadow("#FFFFFF", 0.5, 20),
+              "inset 0 2px 5px rgba(255,255,255,0.95)",
+              "inset 0 -6px 12px rgba(14,14,18,0.7)",
             ].join(", "),
           }}
         >
@@ -138,22 +141,28 @@ export function GhostLogo({ size = 64, coin = false, onTap }: GhostLogoProps) {
           />
           {/* diamond-cut milled edge */}
           <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
-            {Array.from({ length: facetCount }).map((_, i) => (
-              <View
-                key={i}
-                style={{
-                  position: "absolute",
-                  top: size / 2 - facetH / 2,
-                  left: size / 2 - facetW / 2,
-                  width: facetW,
-                  height: facetH,
-                  borderRadius: facetW / 2,
-                  backgroundColor: i % 2 === 0 ? "#ffffff" : "#5c5c66",
-                  opacity: i % 2 === 0 ? 1 : 0.92,
-                  transform: [{ rotate: `${(360 / facetCount) * i}deg` }, { translateY: -facetR }],
-                }}
-              />
-            ))}
+            {Array.from({ length: facetCount }).map((_, i) => {
+              const glint = i % 4 === 0; // frequent gemstone sparkle points
+              const bright = i % 2 === 0;
+              return (
+                <View
+                  key={i}
+                  style={{
+                    position: "absolute",
+                    top: size / 2 - facetH / 2,
+                    left: size / 2 - facetW / 2,
+                    width: glint ? facetW * 1.25 : facetW,
+                    height: glint ? facetH * 1.7 : facetH,
+                    borderRadius: facetW,
+                    backgroundColor: glint ? "#ffffff" : bright ? "#f4f6fb" : "#1c1c26",
+                    boxShadow: glint
+                      ? [boxShadow("#FFFFFF", 1, 7), boxShadow("#FFFFFF", 0.8, 3)].join(", ")
+                      : undefined,
+                    transform: [{ rotate: `${(360 / facetCount) * i}deg` }, { translateY: -facetR }],
+                  }}
+                />
+              );
+            })}
           </View>
         </Animated.View>
       </Animated.View>

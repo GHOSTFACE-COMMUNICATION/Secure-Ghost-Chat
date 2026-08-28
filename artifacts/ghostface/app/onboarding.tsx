@@ -35,12 +35,6 @@ const ALIAS_POOL = [
 const SUGGESTIONS_SHOWN = 6;
 const ROTATE_INTERVAL_MS = 4500;
 
-// Spin-to-win welcome prizes — every spin lands on one of these three.
-const WELCOME_PRIZES = [
-  { emoji: "👻", eyebrow: "YOU WON — SPECTER", title: "1 MONTH OF SPECTER FREE" },
-  { emoji: "🎭", eyebrow: "YOU WON — PHANTOM", title: "1 MONTH OF PHANTOM FREE" },
-  { emoji: "📞", eyebrow: "YOU WON — GHOST NUMBER", title: "VIRTUAL NUMBER — 1 MONTH FREE" },
-] as const;
 
 function sampleAliases(count: number): string[] {
   const pool = [...ALIAS_POOL];
@@ -94,23 +88,16 @@ export default function OnboardingScreen() {
     if (signupPendingAlias && step === "alias") setStep("resume");
   }, [signupPendingAlias, step]);
 
-  // First-login welcome gift: spin the coin to win one of three prizes. Every
-  // spin wins something (no losing outcome, nothing to buy to play) — the coin
-  // just lands on which. Presentation only; the actual entitlement grant +
-  // one-per-account cap is enforced server-side once setup completes.
-  const [gift, setGift] = useState<"idle" | "revealing" | "won">("idle");
-  const [prize, setPrize] = useState<(typeof WELCOME_PRIZES)[number] | null>(null);
-  const giftAnim = useRef(new Animated.Value(0)).current;
-  const handleCoinTap = () => {
-    if (gift !== "idle") return;
-    setGift("revealing");
-    // Reveal as the coin flip settles.
-    setTimeout(() => {
-      setPrize(WELCOME_PRIZES[Math.floor(Math.random() * WELCOME_PRIZES.length)]);
-      setGift("won");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      Animated.spring(giftAnim, { toValue: 1, useNativeDriver: true, speed: 12, bounciness: 10 }).start();
-    }, 1400);
+  // Hidden refer-a-friend perk: a cryptic Pig-Latin nudge next to the coin.
+  // Tapping it reveals a chance to earn a free month by inviting a friend.
+  // Presentation only — the actual referral tracking + grant is server-side.
+  const [referralOpen, setReferralOpen] = useState(false);
+  const referralAnim = useRef(new Animated.Value(0)).current;
+  const revealReferral = () => {
+    if (referralOpen) return;
+    setReferralOpen(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Animated.spring(referralAnim, { toValue: 1, useNativeDriver: true, speed: 12, bounciness: 10 }).start();
   };
 
   // Recovery phrase is the one thing the user MUST save — lift the app-wide
@@ -346,6 +333,20 @@ export default function OnboardingScreen() {
       marginTop: 8,
       marginBottom: 30,
     },
+    pigLatinNudge: {
+      position: "absolute",
+      right: 8,
+      top: 64,
+      paddingVertical: 4,
+      paddingHorizontal: 6,
+    },
+    pigLatinText: {
+      fontFamily: "ShareTechMono_400Regular",
+      fontSize: 11,
+      lineHeight: 15,
+      letterSpacing: 1,
+      color: "rgba(201,154,60,0.8)",
+    },
     tagline: {
       ...type.labelStrong,
       fontSize: 12,
@@ -371,10 +372,10 @@ export default function OnboardingScreen() {
       ...type.title,
       fontSize: 18,
       letterSpacing: 1.5,
-      backgroundColor: colors.card,
+      backgroundColor: "rgba(255,255,255,0.06)",
       color: colors.foreground,
       borderWidth: 1,
-      borderColor: "rgba(201,154,60,0.30)",
+      borderColor: "rgba(255,255,255,0.85)",
       borderRadius: colors.radius,
       paddingHorizontal: 16,
       paddingVertical: 14,
@@ -408,8 +409,8 @@ export default function OnboardingScreen() {
     confirmBtn: {
       borderRadius: colors.radius,
       marginBottom: 12,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: "rgba(214,180,96,0.55)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.85)",
       overflow: "hidden",
     },
     confirmBtnInner: {
@@ -629,18 +630,27 @@ export default function OnboardingScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <GhostLogo size={180} coin onTap={handleCoinTap} />
+          <View style={{ width: "100%", alignItems: "center", justifyContent: "center" }}>
+            <GhostLogo size={180} coin />
+            {/* Cryptic Pig-Latin nudge tucked beside the coin — tap to reveal
+                a refer-a-friend perk. */}
+            {!referralOpen && (
+              <Pressable onPress={revealReferral} hitSlop={12} style={styles.pigLatinNudge}>
+                <Text style={styles.pigLatinText}>sst…{"\n"}apTay{"\n"}erehay</Text>
+              </Pressable>
+            )}
+          </View>
           <Text style={styles.tagline}>NO FACE. NO TRACE.</Text>
           <Text style={styles.appName}>GHOSTFACE®</Text>
         </View>
 
-        {gift === "won" ? (
+        {referralOpen && (
           <Animated.View
             style={{
               alignItems: "center",
               marginBottom: 20,
-              opacity: giftAnim,
-              transform: [{ scale: giftAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
+              opacity: referralAnim,
+              transform: [{ scale: referralAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
             }}
           >
             <View
@@ -649,33 +659,27 @@ export default function OnboardingScreen() {
                 alignItems: "center",
                 gap: 10,
                 borderWidth: 1,
-                borderColor: "rgba(201,154,60,0.6)",
-                backgroundColor: "rgba(201,154,60,0.12)",
+                borderColor: "rgba(255,255,255,0.85)",
+                backgroundColor: "rgba(255,255,255,0.06)",
                 borderRadius: colors.radius,
                 paddingHorizontal: 16,
                 paddingVertical: 10,
               }}
             >
-              <Text style={{ fontSize: 18 }}>{prize?.emoji ?? "🎉"}</Text>
-              <View>
+              <Text style={{ fontSize: 18 }}>🎁</Text>
+              <View style={{ flexShrink: 1 }}>
                 <Text style={{ ...type.labelStrong, fontSize: 9, color: "#C99A3C", letterSpacing: 1.5 }}>
-                  {prize?.eyebrow ?? "YOU WON — WELCOME GIFT"}
+                  REFER A FRIEND
                 </Text>
                 <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground }}>
-                  {prize?.title ?? "1 MONTH FREE"}
+                  You both get 1 MONTH OF GHOSTFACE+ FREE
                 </Text>
               </View>
             </View>
-            <Text style={{ ...type.caption, fontSize: 10, color: colors.mutedForeground, marginTop: 6 }}>
-              Applied automatically once you finish setup.
+            <Text style={{ ...type.caption, fontSize: 10, color: colors.mutedForeground, marginTop: 6, textAlign: "center" }}>
+              Share your invite once you're set up — the free month lands when they join.
             </Text>
           </Animated.View>
-        ) : (
-          <Pressable onPress={handleCoinTap} style={{ alignItems: "center", marginBottom: 20 }}>
-            <Text style={{ ...type.labelStrong, fontSize: 11, color: colors.primary, letterSpacing: 1 }}>
-              {gift === "revealing" ? "SPINNING…" : "🎁 SPIN THE COIN TO WIN — 3 PRIZES"}
-            </Text>
-          </Pressable>
         )}
 
         {step === "alias" ? (
