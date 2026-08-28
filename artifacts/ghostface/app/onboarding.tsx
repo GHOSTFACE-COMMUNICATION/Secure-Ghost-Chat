@@ -449,6 +449,19 @@ export default function OnboardingScreen() {
       gap: 8,
       marginBottom: 20,
     },
+    giftCard: {
+      borderRadius: colors.radius,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.9)",
+    },
+    giftCardInner: {
+      borderRadius: colors.radius,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     suggestionChip: { borderRadius: colors.radius, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)" },
     suggestionChipInner: {
       borderRadius: colors.radius,
@@ -739,23 +752,19 @@ export default function OnboardingScreen() {
               transform: [{ scale: giftAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
             }}
           >
-            <View
-              style={{
-                borderWidth: 1,
-                borderColor: "rgba(201,154,60,0.6)",
-                backgroundColor: "rgba(201,154,60,0.12)",
-                borderRadius: colors.radius,
-                paddingHorizontal: 16,
-                paddingVertical: 10,
-                alignItems: "center",
-              }}
-            >
-              <Text style={{ ...type.labelStrong, fontSize: 9, color: "#C99A3C", letterSpacing: 1.5 }}>
-                {prize?.eyebrow ?? "YOU WON — WELCOME GIFT"}
-              </Text>
-              <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground }}>
-                {prize?.title ?? "1 MONTH FREE"}
-              </Text>
+            {/* Same glass treatment as the alias chips: a GoldGradient surface
+                inside a thin white rim. Was a flat rgba(201,154,60) fill, which
+                read as brown against the black backdrop and matched nothing
+                else in the app. */}
+            <View style={styles.giftCard}>
+              <GoldGradient style={styles.giftCardInner}>
+                <Text style={{ ...type.labelStrong, fontSize: 9, color: "#F5D26B", letterSpacing: 1.5 }}>
+                  {prize?.eyebrow ?? "YOUR WELCOME GIFT"}
+                </Text>
+                <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground, marginTop: 2 }}>
+                  {prize?.title ?? "1 MONTH FREE"}
+                </Text>
+              </GoldGradient>
             </View>
             <Text style={{ ...type.caption, fontSize: 10, color: colors.mutedForeground, marginTop: 6, textAlign: "center" }}>
               Applied automatically once you finish setup.
