@@ -215,7 +215,7 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
             width: size * 0.92,
             height: size * 0.92,
             borderRadius: size,
-            backgroundColor: "rgba(255,255,255,0.07)",
+            backgroundColor: "rgba(255,255,255,0.035)",
             // Fade the halo as the coin turns edge-on. A constant full-circle
             // glow around a coin that collapses to a sliver twice per
             // revolution reads as a strobe, not as light — the silhouette
@@ -232,9 +232,9 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
               // Three stacked layers: a wide soft bloom, a mid falloff, and a
               // tight bright core. Stacking beats a single huge blur, which
               // just goes evenly grey — the layers give the falloff a shape.
-              boxShadow("#FFFFFF", 0.26, size * 0.55),
-              boxShadow("#FFFFFF", 0.32, size * 0.26),
-              boxShadow("#FFFFFF", 0.28, size * 0.11),
+              boxShadow("#FFFFFF", 0.13, size * 0.42),
+              boxShadow("#FFFFFF", 0.16, size * 0.20),
+              boxShadow("#FFFFFF", 0.14, size * 0.08),
             ].join(", "),
           }}
         />
