@@ -362,8 +362,14 @@ const styles = StyleSheet.create({
   },
   btnWrap: {
     borderWidth: 1,
-    borderColor: "#ffffff",
-    boxShadow: boxShadow("#ef4444", 0.45, 16, 0, 4),
+    // Hairline light edge, matching every other glass surface in the app. The
+    // surface behind it is already clear glass; a solid #ffffff outline around
+    // it reads as a painted button edge rather than the rim of a glass panel.
+    borderColor: "rgba(255,255,255,0.32)",
+    // Glow nudged up slightly to carry the edge now that the border is not
+    // doing that work. No overflow:hidden here — this view owns the red glow,
+    // and clipping to its own bounds suppresses the shadow on iOS.
+    boxShadow: boxShadow("#ef4444", 0.5, 18, 0, 4),
   },
   btn: {
     flexDirection: "row",
