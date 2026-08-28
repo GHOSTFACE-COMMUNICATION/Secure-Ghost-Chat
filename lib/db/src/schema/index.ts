@@ -7,3 +7,4 @@ export * from "./departures";
 export * from "./payments";
 export * from "./reclaim";
 export * from "./vpn";
+export * from "./welcomeGifts";

@@ -12,6 +12,7 @@ import blobsRouter from "./blobs";
 import integrityRouter from "./integrity";
 import pushRouter from "./push";
 import vpnRouter from "./vpn";
+import welcomeGiftRouter from "./welcomeGift";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(blobsRouter);
 router.use(integrityRouter);
 router.use(pushRouter);
 router.use(vpnRouter);
+router.use(welcomeGiftRouter);
 
 export default router;

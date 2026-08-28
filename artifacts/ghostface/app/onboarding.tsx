@@ -22,6 +22,7 @@ import { normalizeAlias } from "@/utils/alias";
 import * as ScreenCapture from "expo-screen-capture";
 import { recoveryPhraseToKey } from "@/lib/recoveryPhrase";
 import { formatInviteCodeInput, redeemInvite } from "@/lib/invites";
+import { claimWelcomeGift } from "@/lib/welcomeGift";
 import { type } from "@/constants/typography";
 
 // Larger pool than we ever show at once — the suggestion row rotates through
@@ -33,14 +34,21 @@ const ALIAS_POOL = [
   "MASK_404", "HOLLOW_7", "CINDER_Q", "SIGNAL_0", "REDACT_9", "GHOST_X1",
   "OBLIVION4", "SPECTRE_2", "UNKNOWN_7", "GLITCH_99", "VAPOR_ID", "NIGHT_OPS",
 ];
-// Welcome prizes — every spin lands on one of these three. There is no losing
-// outcome and nothing to buy to play; the coin only decides which. Deliberately
-// no emoji: the card carries itself typographically, like the rest of the app.
-const WELCOME_PRIZES = [
-  { eyebrow: "YOU WON — SPECTER", title: "1 MONTH OF SPECTER FREE" },
-  { eyebrow: "YOU WON — PHANTOM", title: "1 MONTH OF PHANTOM FREE" },
-  { eyebrow: "YOU WON — GHOST NUMBER", title: "VIRTUAL NUMBER — 1 MONTH FREE" },
-] as const;
+// The welcome gift. One fixed offer, not a draw:
+//  - The coin is tappable BEFORE an identity exists, so a client-side pick
+//    could never be authoritative about what the server actually grants.
+//  - A guaranteed gift is not a prize draw, so it carries none of Apple's
+//    sweepstakes requirements or NZ promotional-competition rules — which
+//    would otherwise apply in every territory the app ships to.
+//  - SPECTER is software, so marginal cost is zero: this is an acquisition
+//    trial, not a liability. PHANTOM stays the paid upgrade, and GHOST
+//    NUMBER is excluded — it is the only offer with a real recurring cash
+//    cost, and whether numbers may be assigned to end users at all is still
+//    an open question with the supplier.
+const WELCOME_GIFT = {
+  eyebrow: "YOUR WELCOME GIFT",
+  title: "1 MONTH OF SPECTER FREE",
+} as const;
 
 const SUGGESTIONS_SHOWN = 6;
 const ROTATE_INTERVAL_MS = 4500;
@@ -103,7 +111,6 @@ export default function OnboardingScreen() {
   // Tapping it reveals a chance to earn a free month by inviting a friend.
   // Presentation only — the actual referral tracking + grant is server-side.
   const [gift, setGift] = useState<"idle" | "revealing" | "won">("idle");
-  const [prize, setPrize] = useState<(typeof WELCOME_PRIZES)[number] | null>(null);
   const giftAnim = useRef(new Animated.Value(0)).current;
 
   // Both the coin and the Pig-Latin nudge beside it run this — the nudge is
@@ -113,7 +120,6 @@ export default function OnboardingScreen() {
     setGift("revealing");
     // Reveal as the coin flip settles.
     setTimeout(() => {
-      setPrize(WELCOME_PRIZES[Math.floor(Math.random() * WELCOME_PRIZES.length)]);
       setGift("won");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       Animated.spring(giftAnim, { toValue: 1, useNativeDriver: true, speed: 12, bounciness: 10 }).start();
@@ -312,6 +318,12 @@ export default function OnboardingScreen() {
     // into the app, with a pointer to where the invite can be retried. The
     // one thing that must never happen is a bad code from someone else
     // blocking an account that already exists.
+    // Claim the welcome gift now that an identity exists. Fire-and-forget by
+    // design: it is idempotent server-side, and a promotional grant must
+    // never be able to hold up the end of sign-up. If it fails the user still
+    // gets into the app; the grant can be retried on a later launch.
+    void claimWelcomeGift();
+
     if (inviteCode) {
       setInviteBusy(true);
       const result = await redeemInvite(inviteCode, addConversation);
@@ -759,10 +771,10 @@ export default function OnboardingScreen() {
             <View style={styles.giftCard}>
               <GoldGradient style={styles.giftCardInner}>
                 <Text style={{ ...type.labelStrong, fontSize: 9, color: "#F5D26B", letterSpacing: 1.5 }}>
-                  {prize?.eyebrow ?? "YOUR WELCOME GIFT"}
+                  {WELCOME_GIFT.eyebrow}
                 </Text>
                 <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground, marginTop: 2 }}>
-                  {prize?.title ?? "1 MONTH FREE"}
+                  {WELCOME_GIFT.title}
                 </Text>
               </GoldGradient>
             </View>
@@ -775,7 +787,7 @@ export default function OnboardingScreen() {
             <Text
               style={{ ...type.labelStrong, fontSize: 11, color: colors.primary, letterSpacing: 1, textAlign: "center" }}
             >
-              {gift === "revealing" ? "SPINNING…" : "REFER A FRIEND AND TAP THE COIN FOR A CHANCE TO WIN"}
+              {gift === "revealing" ? "OPENING…" : "REFER A FRIEND — TAP THE COIN FOR YOUR WELCOME GIFT"}
             </Text>
           </Pressable>
         )}
