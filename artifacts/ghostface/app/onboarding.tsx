@@ -716,7 +716,7 @@ export default function OnboardingScreen() {
       >
         <View style={styles.header}>
           <View style={{ width: "100%", alignItems: "center", justifyContent: "center" }}>
-            <GhostLogo size={180} coin onTap={handleCoinTap} />
+            <GhostLogo size={180} coin live onTap={handleCoinTap} />
             {/* Cryptic Pig-Latin nudge tucked beside the coin — "psst, tap
                 here". It points at the coin, so it runs the same handler:
                 whichever the eye lands on first should work. */}
