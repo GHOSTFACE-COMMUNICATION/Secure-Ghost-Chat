@@ -337,19 +337,18 @@ function SettingsScreenInner() {
     }
   };
 
+  // English only, on purpose. The eleven other languages that used to be
+  // listed here did nothing: this app has no i18n library, no translation
+  // files and not one translation call site — every string is a hardcoded
+  // English literal. Selecting "ESPAÑOL" persisted language: "es" and changed
+  // nothing on screen, which reads as a broken app rather than an unfinished
+  // feature, and is functionality advertised but not delivered.
+  //
+  // Restore the full list only alongside real translations. Note Arabic is
+  // not just strings — it needs RTL layout, mirrored icons and alignment
+  // throughout, so it should come later than the LTR languages.
   const LANGUAGE_OPTIONS: { label: string; flag: string; code: string }[] = [
     { code: "en", flag: "🇬🇧", label: "ENGLISH" },
-    { code: "es", flag: "🇪🇸", label: "ESPAÑOL" },
-    { code: "fr", flag: "🇫🇷", label: "FRANÇAIS" },
-    { code: "de", flag: "🇩🇪", label: "DEUTSCH" },
-    { code: "ja", flag: "🇯🇵", label: "日本語" },
-    { code: "zh", flag: "🇨🇳", label: "中文" },
-    { code: "ar", flag: "🇸🇦", label: "العربية" },
-    { code: "pt", flag: "🇧🇷", label: "PORTUGUÊS" },
-    { code: "ru", flag: "🇷🇺", label: "РУССКИЙ" },
-    { code: "ko", flag: "🇰🇷", label: "한국어" },
-    { code: "hi", flag: "🇮🇳", label: "हिन्दी" },
-    { code: "it", flag: "🇮🇹", label: "ITALIANO" },
   ];
 
   const currentLanguage = LANGUAGE_OPTIONS.find((l) => l.code === language) ?? LANGUAGE_OPTIONS[0];

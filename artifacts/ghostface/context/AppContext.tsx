@@ -917,6 +917,13 @@ const OPK_BATCH_SIZE = 10;
 const AUTO_LOCK_TIMEOUT_KEY = "ghostface_auto_lock_timeout";
 const DURESS_GRACE_KEY = "ghostface_duress_grace_period";
 const LANGUAGE_KEY = "ghostface_language";
+// English only until real translations exist. The app has no i18n library,
+// no translation files and no translation call sites — every string is a
+// hardcoded English literal — so a stored non-English code did nothing but
+// make Settings claim a language the UI never spoke. Narrowing this also
+// migrates anyone who previously picked one: an unrecognised stored value
+// falls back to "en" on load. Widen it only alongside actual translations.
+const VALID_LANGUAGES = ["en"];
 // Set (to the alias) between successful registration and the user confirming
 // they've saved their recovery phrase. Present + a stored device token ⇒ an
 // interrupted signup to resume at the phrase step. Lives only in AsyncStorage
@@ -1714,7 +1721,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ? (VPN_SERVERS.find((s) => s.id === lastVpnServerId) ?? null)
           : null;
 
-        const VALID_LANGUAGES = ["en","es","fr","de","ja","zh","ar","pt","ru","ko","hi","it"];
         const language = (languageRaw && VALID_LANGUAGES.includes(languageRaw)) ? languageRaw : "en";
 
         const themePreference: "dark" | "light" = themeRaw === "light" ? "light" : "dark";
@@ -3419,7 +3425,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setLanguage = useCallback(async (code: string) => {
-    const VALID_LANGUAGES = ["en","es","fr","de","ja","zh","ar","pt","ru","ko","hi","it"];
     if (!VALID_LANGUAGES.includes(code)) return;
     await AsyncStorage.setItem(LANGUAGE_KEY, code);
     setState((prev) => ({ ...prev, language: code }));
