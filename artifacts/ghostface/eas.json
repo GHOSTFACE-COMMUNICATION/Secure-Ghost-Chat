@@ -24,6 +24,9 @@
       },
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "api-server-production-b252.up.railway.app"
       }
     },
     "preview": {
