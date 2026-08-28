@@ -733,13 +733,12 @@ export default function OnboardingScreen() {
                 paddingVertical: 10,
               }}
             >
-              <Text style={{ fontSize: 18 }}>🎁</Text>
               <View style={{ flexShrink: 1 }}>
                 <Text style={{ ...type.labelStrong, fontSize: 9, color: "#C99A3C", letterSpacing: 1.5 }}>
                   REFER A FRIEND
                 </Text>
                 <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground }}>
-                  You both get 1 MONTH OF GHOSTFACE+ FREE
+                  Refer a friend and tap the coin for a chance to win
                 </Text>
               </View>
             </View>
