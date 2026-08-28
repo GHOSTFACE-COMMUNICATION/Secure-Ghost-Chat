@@ -14,15 +14,20 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { boxShadow } from "@/lib/shadow";
-import { SpecularHighlight } from "@/components/GoldGradient";
+import { GLASS_TINT_BLACK, SpecularHighlight } from "@/components/GoldGradient";
 import { type } from "@/constants/typography";
 
-// Same reasoning as GoldGradient's GLASS_TINT_BLACK/GOLD_GLASS_TINT: this
-// button's backdrop (Settings' flat black DANGER ZONE section) has nothing
-// behind it to refract, and low-alpha tints read as dead/brown against pure
-// black — so this needs the same high-alpha treatment as gold, just red.
-const RED_GLASS_TINT = "rgba(239,68,68,0.75)";
+// The surface is the app's ordinary black glass — the same GLASS_TINT_BLACK as
+// every other glass button — and the danger signal lives in the RIM rather than
+// the fill. A red-tinted surface made this the one control whose material
+// differed from everything around it; a red outline warns without making the
+// panel itself a different substance.
+//
+// The tint still has to be this opaque. Both call sites sit on flat black
+// (Settings' DANGER ZONE section, and the home screen's panicWrap pinned over
+// BG "#000"), so there is nothing behind the glass to refract — the
+// GLASS_SOLID_FILL case GoldGradient documents, where clear glass over black
+// renders as black and a low-alpha tint composites to dead grey.
 const useNativeGlass = isLiquidGlassAvailable();
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -300,7 +305,9 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
         <Pressable
           style={({ pressed }) => [
             styles.btnWrap,
-            { borderRadius: colors.radius },
+            // The rim carries the danger signal now, so it comes from the
+            // theme's destructive colour rather than being hardcoded here.
+            { borderRadius: colors.radius, borderColor: colors.destructive },
             pressed && { opacity: 0.9 },
           ]}
           onPressIn={startPanic}
@@ -314,7 +321,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
                 { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
               ]}
               glassEffectStyle="clear"
-              tintColor={RED_GLASS_TINT}
+              tintColor={GLASS_TINT_BLACK}
               isInteractive
             >
               <SpecularHighlight intensity={0.22} />
@@ -336,7 +343,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
               ]}
             >
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000000" }]} />
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: RED_GLASS_TINT }]} />
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS_TINT_BLACK }]} />
               <SpecularHighlight intensity={0.22} />
               {panicHeld && (
                 <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
@@ -361,15 +368,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   btnWrap: {
+    // borderColor is applied at the call site from colors.destructive. The red
+    // outline is the whole danger signal now, so the previous red boxShadow is
+    // gone: a glow and a rim in the same colour, both sitting outside the
+    // glass, read as a coloured leak around the panel rather than as one
+    // deliberate edge.
     borderWidth: 1,
-    // Hairline light edge, matching every other glass surface in the app. The
-    // surface behind it is already clear glass; a solid #ffffff outline around
-    // it reads as a painted button edge rather than the rim of a glass panel.
-    borderColor: "rgba(255,255,255,0.32)",
-    // Glow nudged up slightly to carry the edge now that the border is not
-    // doing that work. No overflow:hidden here — this view owns the red glow,
-    // and clipping to its own bounds suppresses the shadow on iOS.
-    boxShadow: boxShadow("#ef4444", 0.5, 18, 0, 4),
   },
   btn: {
     flexDirection: "row",
@@ -384,7 +388,11 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: "rgba(255,255,255,0.22)",
+    // Was rgba(255,255,255,0.22), tuned against the old opaque red fill. Over
+    // GLASS_TINT_BLACK that washes out, and this sweep is the only feedback
+    // that the 3-second hold is progressing — so it goes red, which also puts
+    // the danger colour back exactly when it matters most.
+    backgroundColor: "rgba(255,59,48,0.32)",
   },
   btnText: {
     ...type.labelStrong,
