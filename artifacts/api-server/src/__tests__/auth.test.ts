@@ -12,7 +12,8 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import type { Request, Response } from "express";
-import { checkAuth, isAuthEnforced, hashToken } from "../lib/auth";
+import { checkAuth, deviceAuthMiddleware, isAuthEnforced, hashToken } from "../lib/auth";
+import { RateLimiter } from "../lib/rateLimiter";
 
 afterEach(() => {
   delete process.env.ENFORCE_ENDPOINT_AUTH;
@@ -165,6 +166,80 @@ describe("AliasSource selection", () => {
     );
     expect(out).toEqual({ ok: false });
     expect(r.statusCode).toBe(401);
+  });
+});
+
+describe("deviceAuthMiddleware", () => {
+  // Path-param routes (prekeys, push, vpn). Every case here is one that
+  // returns before the device-token lookup, so no database is involved.
+
+  function paramReq(opts: { ip: string; authorization?: string; userId?: string }): Request {
+    return {
+      ip: opts.ip,
+      headers: opts.authorization ? { authorization: opts.authorization } : {},
+      params: opts.userId === undefined ? {} : { userId: opts.userId },
+      query: {},
+    } as unknown as Request;
+  }
+
+  it("401s with no Bearer token, and does not call next", async () => {
+    const r = res();
+    let called = false;
+    await deviceAuthMiddleware()(paramReq({ ip: "10.1.0.1", userId: "SOMEONE" }), r, () => {
+      called = true;
+    });
+    expect(r.statusCode).toBe(401);
+    expect(called).toBe(false);
+  });
+
+  it("400s on a userId that is not a valid alias", async () => {
+    const r = res();
+    await deviceAuthMiddleware()(
+      paramReq({ ip: "10.1.0.2", authorization: "Bearer abc", userId: "no" }),
+      r,
+      () => undefined,
+    );
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("429s when a supplied failure gate is already exhausted", async () => {
+    const gate = new RateLimiter({ windowMs: 60_000, max: 1, prefix: "testGateExhausted" });
+    await gate.record("10.1.0.3");
+    const r = res();
+    await deviceAuthMiddleware({ failureGate: gate })(
+      paramReq({ ip: "10.1.0.3", userId: "SOMEONE" }),
+      r,
+      () => undefined,
+    );
+    expect(r.statusCode).toBe(429);
+  });
+
+  it("charges the failure gate for a missing token", async () => {
+    const gate = new RateLimiter({ windowMs: 60_000, max: 5, prefix: "testGateCharged" });
+    await deviceAuthMiddleware({ failureGate: gate })(
+      paramReq({ ip: "10.1.0.4", userId: "SOMEONE" }),
+      res(),
+      () => undefined,
+    );
+    // max is 5 and one failure was charged, so four remain — assert by
+    // draining: the 5th record must be the one that closes the window.
+    for (let i = 0; i < 4; i++) await gate.record("10.1.0.4");
+    expect(await gate.allowed("10.1.0.4")).toBe(false);
+  });
+
+  it("does NOT charge the failure gate for a malformed userId", async () => {
+    // A bad path param is a client bug, not an authentication attempt — it
+    // must not fill a bucket that gates real users behind carrier NAT.
+    const gate = new RateLimiter({ windowMs: 60_000, max: 2, prefix: "testGateUncharged" });
+    await deviceAuthMiddleware({ failureGate: gate })(
+      paramReq({ ip: "10.1.0.5", authorization: "Bearer abc", userId: "no" }),
+      res(),
+      () => undefined,
+    );
+    expect(await gate.allowed("10.1.0.5")).toBe(true);
+    await gate.record("10.1.0.5");
+    await gate.record("10.1.0.5");
+    expect(await gate.allowed("10.1.0.5")).toBe(false);
   });
 });
 

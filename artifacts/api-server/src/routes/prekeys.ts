@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, prekeysTable, identityKeysTable, deviceTokensTable, reclaimChallengesTable, pool } from "@workspace/db";
 import { eq, and, lt, count as drizzleCount } from "drizzle-orm";
 import { randomBytes, timingSafeEqual } from "crypto";
-import { hashToken } from "../lib/auth";
+import { deviceAuthMiddleware, hashToken } from "../lib/auth";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -90,49 +90,7 @@ function isValidPqkemPubKey(k: unknown): k is string {
   return isValidHex(k, 2368);
 }
 
-/**
- * Middleware: verify the Bearer token in the Authorization header matches the
- * stored device token for the userId in the path parameter.
- *
- * Attach as route-level middleware on all mutating prekey operations.
- */
-async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-
-  if (!token) {
-    res.status(401).json({ error: "Authorization: Bearer <token> header required" });
-    return;
-  }
-
-  // Normalize before matching — the path param arrives from the URL raw and
-  // must be compared against the same canonical form every stored userId is
-  // saved in, or a differently-cased/decorated request silently fails to
-  // match rather than resolving to the wrong account (fails closed either
-  // way, but normalizing keeps this consistent with every other alias path).
-  const normalizedUserId = normalizeAlias((req.params["userId"] as string) ?? "");
-  if (!normalizedUserId) {
-    res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
-    return;
-  }
-  // Downstream handlers read req.params["userId"] directly — overwrite it
-  // with the normalized form so they never see the raw, un-normalized value.
-  req.params["userId"] = normalizedUserId;
-
-  const hash = hashToken(token);
-
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
-
-  if (!row) {
-    res.status(403).json({ error: "Invalid or mismatched device token for userId" });
-    return;
-  }
-
-  next();
-}
+const requireDeviceAuth = deviceAuthMiddleware();
 
 // ── POST /api/prekeys/register — register a device (get a token + store IK/SPK) ──
 //

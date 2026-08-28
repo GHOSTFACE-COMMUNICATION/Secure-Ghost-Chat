@@ -1,43 +1,12 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, identityKeysTable, deviceTokensTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
-import { hashToken } from "../lib/auth";
+import { db, identityKeysTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { deviceAuthMiddleware } from "../lib/auth";
 import { toErrorMessage } from "../utils/error";
-import { normalizeAlias } from "../utils/alias";
 
 const router: IRouter = Router();
 
-/** Same bearer-device-token-vs-path-userId check used by the prekey routes. */
-async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-
-  if (!token) {
-    res.status(401).json({ error: "Authorization: Bearer <token> header required" });
-    return;
-  }
-
-  const normalizedUserId = normalizeAlias((req.params["userId"] as string) ?? "");
-  if (!normalizedUserId) {
-    res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
-    return;
-  }
-  req.params["userId"] = normalizedUserId;
-
-  const hash = hashToken(token);
-
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
-
-  if (!row) {
-    res.status(403).json({ error: "Invalid or mismatched device token for userId" });
-    return;
-  }
-
-  next();
-}
+const requireDeviceAuth = deviceAuthMiddleware();
 
 /**
  * Register (or clear, by passing null) this device's push tokens.

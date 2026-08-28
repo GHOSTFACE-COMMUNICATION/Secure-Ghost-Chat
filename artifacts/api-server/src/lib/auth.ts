@@ -135,6 +135,65 @@ export async function getAuthedAlias(req: Request, source: AliasSource): Promise
   return verifyDeviceToken(claimed, token);
 }
 
+/**
+ * Middleware for routes that carry the caller's identity in a `:userId` path
+ * parameter (prekeys, push, vpn) rather than a query/body alias.
+ *
+ * Behaviour is the union of the three copies this replaces, which were code-
+ * identical apart from vpn's failure gate:
+ *   401  no Bearer token
+ *   400  `:userId` is not a valid alias
+ *   403  token does not match the stored device token for that userId
+ * On success `req.params.userId` is overwritten with the normalized form, so
+ * downstream handlers — which read it directly — never see the raw value.
+ *
+ * Pass `failureGate` to charge an IP bucket for failed authentication, as
+ * vpn.ts does. It is consulted *before* the token lookup so an
+ * unauthenticated flood cannot drive database load, and charged only on the
+ * 401 and 403 paths: a malformed `:userId` is a client bug, not an auth
+ * attempt, and must not fill the bucket. Only failures charge it, so
+ * legitimate users behind carrier NAT never touch it.
+ */
+export function deviceAuthMiddleware(options: { failureGate?: RateLimiter } = {}) {
+  const { failureGate } = options;
+
+  return async function deviceAuth(
+    req: Request,
+    res: Response,
+    next: () => void,
+  ): Promise<void> {
+    const auth = req.headers.authorization ?? "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+
+    const ipKey = failureGate ? getIpKey(req) : "";
+    if (failureGate && !(await failureGate.allowed(ipKey))) {
+      res.status(429).json({ error: "Too many requests" });
+      return;
+    }
+
+    if (!token) {
+      if (failureGate) await failureGate.record(ipKey);
+      res.status(401).json({ error: "Authorization: Bearer <token> header required" });
+      return;
+    }
+
+    const normalizedUserId = normalizeAlias((req.params["userId"] as string) ?? "");
+    if (!normalizedUserId) {
+      res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
+      return;
+    }
+    req.params["userId"] = normalizedUserId;
+
+    if ((await verifyDeviceToken(normalizedUserId, token)) === null) {
+      if (failureGate) await failureGate.record(ipKey);
+      res.status(403).json({ error: "Invalid or mismatched device token for userId" });
+      return;
+    }
+
+    next();
+  };
+}
+
 export type AuthOutcome =
   /** Authenticated, or unauthenticated while enforcement is off. */
   | { ok: true; alias: string | null }

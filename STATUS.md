@@ -113,11 +113,29 @@ hazard was never reachable — it was a latent property, not a live bug. The
 required source parameter is what keeps it that way. If a handler ever starts
 reading the raw field, it must read the same source named at its call site.
 
-**Still not consolidated, on purpose:** the three `requireDeviceAuth` copies.
-`prekeys.ts` and `push.ts` are identical (path-param `:userId`, 401/403);
-`vpn.ts` adds an IP failure gate with a different limiter API
-(`allowed()`/`record()` rather than `check()`). Three shapes, not one — worth
-doing, but it is its own piece of work.
+**`requireDeviceAuth` consolidation — DONE 27 Aug.** `deviceAuthMiddleware()`
+in `lib/auth.ts` is now the only copy; each route builds its own from the
+factory (`const requireDeviceAuth = deviceAuthMiddleware()`), so every
+existing usage site is untouched. `vpn.ts` passes its IP failure gate:
+`deviceAuthMiddleware({ failureGate: authFailureGate })`.
+
+Verified before merging: `prekeys.ts` and `push.ts` were **code-identical**
+(they differed only in comments), and `vpn.ts` was the same plus the gate.
+The gate's exact semantics are preserved and now tested, including the
+subtle one: it is consulted *before* the token lookup, and charged on the
+401 and 403 paths **but not the 400** — a malformed `:userId` is a client
+bug, not an auth attempt, and must not fill a bucket that gates real users
+behind carrier NAT.
+
+**Live baseline captured 27 Aug against the pre-consolidation deploy
+(`e4b6213`)**, to be re-run after the next one to prove behaviour held:
+`GET /api/vpn/ZZNOSUCHUSER/register` with no token → **401**;
+with `Authorization: Bearer x` and `:userId` = `no` → **400**;
+`GET /api/ice-config` unauthenticated → **200** (flag still off).
+
+Everything auth-related now lives in `lib/auth.ts`: `hashToken`,
+`verifyDeviceToken`, `getAuthedAlias`, `checkAuth`, `deviceAuthMiddleware`.
+No route defines its own.
 
 ⚠️ **The ordering is the whole point. Step 2 must not deploy before an app
 release carrying step 1 is out.** No shipped build sends the header, so

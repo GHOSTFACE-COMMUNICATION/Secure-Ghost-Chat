@@ -1,12 +1,11 @@
-import { hashToken } from "../lib/auth";
+import { deviceAuthMiddleware } from "../lib/auth";
 import * as https from "https";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, deviceTokensTable, vpnPeersTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, vpnPeersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { toErrorMessage } from "../utils/error";
-import { normalizeAlias } from "../utils/alias";
 import { logger } from "../lib/logger";
-import { RateLimiter, getIpKey } from "../lib/rateLimiter";
+import { RateLimiter } from "../lib/rateLimiter";
 
 const router: IRouter = Router();
 
@@ -14,47 +13,7 @@ const router: IRouter = Router();
 // NAT and our own VPN egress cannot make real users share one budget.
 const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "authFail" });
 
-/** Same bearer-device-token-vs-path-userId check used by push.ts/prekeys.ts. */
-async function requireDeviceAuth(req: Request, res: Response, next: () => void): Promise<void> {
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-
-  // Gate on prior failures from this address before the device-token lookup
-  // below, so an unauthenticated flood cannot drive DB load. Only failures
-  // charge it — see the note on authFailureGate.
-  const ipKey = getIpKey(req);
-  if (!(await authFailureGate.allowed(ipKey))) {
-    res.status(429).json({ error: "Too many requests" });
-    return;
-  }
-
-  if (!token) {
-    await authFailureGate.record(ipKey);
-    res.status(401).json({ error: "Authorization: Bearer <token> header required" });
-    return;
-  }
-
-  const normalizedUserId = normalizeAlias((req.params["userId"] as string) ?? "");
-  if (!normalizedUserId) {
-    res.status(400).json({ error: "userId must be 3-20 characters: A-Z, 0-9, underscore only" });
-    return;
-  }
-  req.params["userId"] = normalizedUserId;
-
-  const hash = hashToken(token);
-  const [row] = await db
-    .select()
-    .from(deviceTokensTable)
-    .where(and(eq(deviceTokensTable.userId, normalizedUserId), eq(deviceTokensTable.tokenHash, hash)));
-
-  if (!row) {
-    await authFailureGate.record(ipKey);
-    res.status(403).json({ error: "Invalid or mismatched device token for userId" });
-    return;
-  }
-
-  next();
-}
+const requireDeviceAuth = deviceAuthMiddleware({ failureGate: authFailureGate });
 
 // WireGuard base64 public key: 32 raw bytes -> 44 base64 chars, last char '='.
 const WG_PUBKEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
