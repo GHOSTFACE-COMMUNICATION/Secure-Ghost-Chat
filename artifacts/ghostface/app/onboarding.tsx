@@ -98,11 +98,8 @@ export default function OnboardingScreen() {
   } = useApp();
   const isLight = themePreference === "light";
   const [alias, setAliasText] = useState("");
-  // ⚠️ TEMPORARY PREVIEW, DO NOT COMMIT — jump straight to a later step so the
-  // screens can be reviewed without registering a real identity.
-  const PREVIEW_STEP = "recovery" as const;
   const [step, setStep] = useState<"alias" | "pin" | "recoveryPin" | "recovery" | "restore" | "resume">(
-    PREVIEW_STEP ?? (signupPendingAlias ? "resume" : "alias"),
+    signupPendingAlias ? "resume" : "alias",
   );
   // If an interrupted signup is detected after this screen has already mounted
   // (load finished a beat later), jump to the resume step.
