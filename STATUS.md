@@ -563,9 +563,11 @@ section is still not proof it is current. Verify before acting on one.
   all accept mail (delivery-tested 27 Aug, no bounces): benjamin@, support@,
   info@, legal@, admin@. DMARC added 27 Aug (`p=none`, monitor only,
   reports to admin@).
-  ⚠️ Still open: **Workspace DKIM is not enabled** — no `google._domainkey`
-  record — so do not tighten DMARC past `p=none` until it is, or legitimate
-  forwarded mail starts failing. And a mailbox password was pasted into a
+  DKIM record published 27 Aug (`google._domainkey`, 2048-bit, verified
+  reassembling intact at 408 chars). ⚠️ Still open: **"Start authentication"
+  must be clicked in Google Admin** — publishing the record does not enable
+  signing. Do not tighten DMARC past `p=none` until a sent message shows
+  `dkim=pass`, or legitimate forwarded mail starts failing. And a mailbox password was pasted into a
   session transcript on 27 Aug and needs rotating.
 - ⚠ **Vercel access token was pasted into chat this session** (vcp_… ,
   redacted). Assistant refused to use it. Benji to REVOKE it (Vercel →
