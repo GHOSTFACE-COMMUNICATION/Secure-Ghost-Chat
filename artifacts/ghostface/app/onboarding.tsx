@@ -21,6 +21,7 @@ import { useColors } from "@/hooks/useColors";
 import { normalizeAlias } from "@/utils/alias";
 import * as ScreenCapture from "expo-screen-capture";
 import { recoveryPhraseToKey } from "@/lib/recoveryPhrase";
+import { formatInviteCodeInput, redeemInvite } from "@/lib/invites";
 import { type } from "@/constants/typography";
 
 // Larger pool than we ever show at once — the suggestion row rotates through
@@ -74,6 +75,7 @@ export default function OnboardingScreen() {
     checkRecoveryPin,
     markSignupPendingPhrase,
     completeOnboarding,
+    addConversation,
     signupPendingAlias,
     themePreference,
   } = useApp();
@@ -116,6 +118,13 @@ export default function OnboardingScreen() {
   const [pinError, setPinError] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState("");
   const [recoverySaved, setRecoverySaved] = useState(false);
+  // Optional invite code captured at the end of sign-up. With no contact
+  // discovery by design, an invite is the only route to a first
+  // conversation — so this is the moment to ask, while the invitee still has
+  // the code they were sent in hand.
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteNote, setInviteNote] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
   // Recovery PIN — the second factor that blinds the recovery phrase. Set once
   // here, never stored; required again to restore on a new device.
   const [recoveryPin, setRecoveryPin] = useState("");
@@ -277,6 +286,35 @@ export default function OnboardingScreen() {
   const handleRecoveryContinue = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await completeOnboarding();
+
+    // An invite is a bonus, never a gate. A code that is expired, already
+    // used, or simply mistyped must not strand someone on the last screen of
+    // sign-up with a finished identity. So on failure the code is CLEARED
+    // and the reason shown: the next press of the same button walks straight
+    // into the app, with a pointer to where the invite can be retried. The
+    // one thing that must never happen is a bad code from someone else
+    // blocking an account that already exists.
+    if (inviteCode) {
+      setInviteBusy(true);
+      const result = await redeemInvite(inviteCode, addConversation);
+      setInviteBusy(false);
+      if (!result.ok) {
+        setInviteNote(
+          result.reason === "used"
+            ? "That invite has already been used. You can add a contact from MESSAGES."
+            : result.reason === "expired"
+            ? "That invite has expired. Ask for a new one, then add it from MESSAGES."
+            : result.reason === "bad_format"
+            ? "That doesn't look like an invite code. You can add one from MESSAGES."
+            : "Couldn't redeem that invite. You can try again from MESSAGES.",
+        );
+        setInviteCode("");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+
     router.replace("/(tabs)");
   };
 
@@ -513,6 +551,35 @@ export default function OnboardingScreen() {
       fontSize: 12,
       color: colors.foreground,
       flex: 1,
+    },
+    inviteBlock: {
+      marginBottom: 18,
+    },
+    inviteLabel: {
+      ...type.caption,
+      fontSize: 11,
+      letterSpacing: 1.6,
+      color: colors.mutedForeground,
+      marginBottom: 6,
+    },
+    inviteHint: {
+      ...type.caption,
+      fontSize: 11,
+      color: colors.mutedForeground,
+      marginBottom: 10,
+      lineHeight: 16,
+    },
+    inviteInput: {
+      ...type.mono,
+      fontSize: 15,
+      textTransform: "none" as const,
+    },
+    inviteNote: {
+      ...type.caption,
+      fontSize: 11,
+      color: "#E5A23D",
+      marginTop: 8,
+      lineHeight: 16,
     },
     phraseInput: {
       ...type.mono,
@@ -973,6 +1040,30 @@ export default function OnboardingScreen() {
               />
               <Text style={styles.recoveryCheckText}>I've written down my recovery phrase</Text>
             </Pressable>
+
+            <View style={styles.inviteBlock}>
+              <Text style={styles.inviteLabel}>HAVE AN INVITE CODE?</Text>
+              <Text style={styles.inviteHint}>
+                Optional. Paste the code you were sent and we'll add them as your
+                first contact.
+              </Text>
+              <TextInput
+                style={[styles.input, styles.inviteInput]}
+                value={inviteCode}
+                onChangeText={(t) => {
+                  setInviteNote("");
+                  setInviteCode(formatInviteCodeInput(t));
+                }}
+                placeholder="GF-XXXX-XXXX"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={12}
+                editable={!inviteBusy}
+                testID="onboarding-invite-code"
+              />
+              {inviteNote ? <Text style={styles.inviteNote}>{inviteNote}</Text> : null}
+            </View>
 
             <Pressable
               style={[styles.confirmBtn, !recoverySaved && styles.confirmBtnDisabled]}
