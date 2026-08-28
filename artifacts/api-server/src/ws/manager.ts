@@ -21,7 +21,7 @@ import {
   clearExpoPushTokenForDeliveryId,
 } from "../utils/delivery";
 import { sendExpoPush, sendVoipPushIOS } from "../lib/pushNotifications";
-import { markMessagesDelivered, markDeparturesDelivered } from "../utils/markDelivered";
+import { deleteAckedMessages, markDeparturesDelivered } from "../utils/markDelivered";
 import * as shared from "./sharedState";
 import * as router from "./router";
 
@@ -41,6 +41,7 @@ export interface WireMessage {
     | "auth"
     | "msg"
     | "ack"
+    | "msgAck"
     | "ping"
     | "pong"
     | "pending"
@@ -262,9 +263,14 @@ async function deliverPending(deliveryId: string, ws: WebSocket): Promise<void> 
       ws.send(JSON.stringify(wire));
     }
 
+    // Sent, not delivered — the row is only removed once the client's own
+    // `msgAck` says it actually decrypted and persisted this. A socket that
+    // looked open when `ws.send` was called can still have gone dead without
+    // the write ever reaching the client (see the readyState comment below),
+    // so flagging on send here was exactly the "delivered means attempted,
+    // not received" bug this replaces.
     if (pending.length > 0) {
-      await markMessagesDelivered(pending.map((m) => m.id));
-      logger.info({ count: pending.length }, "Delivered pending messages");
+      logger.info({ count: pending.length }, "Sent pending messages, awaiting ack");
     }
   } catch (err) {
     logger.error({ err }, "Failed to deliver pending messages");
@@ -849,11 +855,12 @@ export function createWsServer(wss: WebSocketServer): void {
           // exactly as if the socket had never been open at all.
           const sent = await router.sendToAlias(recipientAlias, wire);
           if (sent) {
-            await db
-              .update(messagesTable)
-              .set({ delivered: true })
-              .where(eq(messagesTable.id, stored.id));
-            logger.debug({ msgId: stored.id }, "Message delivered live");
+            // Not marked delivered here — a successful write proves the TCP
+            // buffer accepted it, not that the recipient's app received,
+            // decrypted or persisted it. The row is removed once their
+            // client sends `msgAck`; if that never comes, the next
+            // `deliverPending` on reconnect resends it.
+            logger.debug({ msgId: stored.id }, "Message sent live, awaiting ack");
           } else {
             logger.debug({ msgId: stored.id }, "Live send failed on a stale socket — falling back to push");
             await pushFallback();
@@ -914,12 +921,14 @@ export function createWsServer(wss: WebSocketServer): void {
         return;
       }
 
-      if (msg.type === "ack") {
+      // Client confirms it decrypted and persisted msgId locally — this is
+      // the ack `deliverPending`/the live-send path above are waiting on.
+      // Distinct type name from the server->client "ack" (auth confirmation,
+      // and the send-stored ack above): same word meant two different things
+      // in opposite directions on this wire — see TRACKER.
+      if (msg.type === "msgAck") {
         if (msg.msgId) {
-          await db
-            .update(messagesTable)
-            .set({ delivered: true })
-            .where(eq(messagesTable.id, msg.msgId));
+          await deleteAckedMessages([msg.msgId]);
         }
         return;
       }

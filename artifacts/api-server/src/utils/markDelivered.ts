@@ -14,21 +14,17 @@ function* chunked<T>(items: readonly T[], size: number): Generator<T[]> {
 }
 
 /**
- * Flip a batch of queued messages to delivered.
- *
- * Previously each call site issued one UPDATE round-trip per message inside a
- * `Promise.all`, so a user returning to a large backlog fired that many
- * concurrent statements — all competing for the same connection pool as live
- * traffic. One statement per chunk instead.
- *
- * NOTE: "delivered" here still means the server *attempted* delivery, not that
- * the client confirmed receipt — the client never sends the ack the server
- * handles. Batching does not change that; see TRACKER.
+ * Delete a batch of messages the client has confirmed it decrypted and
+ * persisted locally (the `msgAck` ws message). Deleting rather than flagging
+ * is deliberate: a `delivered` boolean that gets set on send (not receipt)
+ * is exactly the bug this replaces — see TRACKER's "delivered does not mean
+ * delivered". A row's mere existence is now the "not yet confirmed" signal,
+ * so there is nothing left to flag once the client has it.
  */
-export async function markMessagesDelivered(ids: readonly number[]): Promise<void> {
+export async function deleteAckedMessages(ids: readonly number[]): Promise<void> {
   if (ids.length === 0) return;
   for (const batch of chunked(ids, MAX_IDS_PER_STATEMENT)) {
-    await db.update(messagesTable).set({ delivered: true }).where(inArray(messagesTable.id, batch));
+    await db.delete(messagesTable).where(inArray(messagesTable.id, batch));
   }
 }
 

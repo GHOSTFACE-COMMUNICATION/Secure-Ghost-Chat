@@ -5,7 +5,6 @@ import { getAuthedAlias } from "../lib/auth";
 import { RateLimiter, GlobalLimiter, getIpKey } from "../lib/rateLimiter";
 import { normalizeAlias } from "../utils/alias";
 import { toErrorMessage } from "../utils/error";
-import { markMessagesDelivered } from "../utils/markDelivered";
 import { ensureDeliveryId } from "../utils/delivery";
 
 const router: IRouter = Router();
@@ -94,8 +93,13 @@ router.get("/messages/pending", async (req: Request, res: Response) => {
       .from(messagesTable)
       .where(and(eq(messagesTable.toDeliveryId, deliveryId), eq(messagesTable.delivered, false)));
 
-    await markMessagesDelivered(pending.map((m) => m.id));
-
+    // Not marked delivered here — this HTTP path has no ack of its own, and
+    // flagging on a response the caller might never receive was exactly the
+    // bug this removes (see TRACKER). A caller that reaches the client's
+    // real decrypt path acks over the WS `msgAck` message instead, which
+    // deletes the row; this endpoint only peeks. A pre-ack legacy client
+    // (there is no ack path for it to speak) keeps re-fetching the same
+    // backlog until it ages out via the purge job.
     return res.json({ messages: pending });
   } catch (err) {
     return res.status(500).json({ error: toErrorMessage(err) });

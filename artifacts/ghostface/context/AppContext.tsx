@@ -2022,6 +2022,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const pendingCallSignalsRef = React.useRef<Array<{ msg: object; queuedAt: number }>>([]);
   const callSignalListenerRef = React.useRef<((s: CallSignal) => void) | null>(null);
   const ghostpadListenerRef = React.useRef<((s: GhostpadSignal) => void) | null>(null);
+  // Wire-level msgIds already decrypted+persisted this session, so a message
+  // redelivered because its msgAck was lost (dropped socket right after
+  // sending it) is re-acked without a second decrypt attempt — Double
+  // Ratchet consumes a message key per decrypt, so decrypting the same
+  // ciphertext twice is not safe to just retry. In-memory only: on app
+  // restart the set is empty, but so is the server's redelivery risk window
+  // (it only redelivers what it never got an ack for).
+  const ackedMsgIdsRef = React.useRef<Set<number>>(new Set());
   const latestStateRef = React.useRef(state);
   const prevMainPinRef = React.useRef<string | null>(null);
   const outboxRef = React.useRef<OutboxItem[]>([]);
@@ -4266,6 +4274,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (wsMsg.type !== "msg" || !wsMsg.payload) return;
 
+    // Server redelivers anything it never got a msgAck for (see markDelivered
+    // removal in ws/manager.ts) — so a lost ack, not just a lost message, is
+    // a normal occurrence. Re-ack without re-decrypting: the ratchet already
+    // consumed this message's key on the first pass.
+    const incomingMsgId = wsMsg.msgId;
+    const sendMsgAck = () => {
+      if (incomingMsgId == null) return;
+      ackedMsgIdsRef.current.add(incomingMsgId);
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== 1) return;
+      try {
+        ws.send(JSON.stringify({ type: "msgAck", msgId: incomingMsgId }));
+      } catch (err) {
+        console.warn("[WS] Failed to send msgAck", err);
+      }
+    };
+    if (incomingMsgId != null && ackedMsgIdsRef.current.has(incomingMsgId)) {
+      sendMsgAck();
+      return;
+    }
+
     let ratchetMsg: RatchetMessage;
     try {
       ratchetMsg = JSON.parse(wsMsg.payload) as RatchetMessage;
@@ -4320,6 +4349,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
+        sendMsgAck();
         return;
       }
 
@@ -4336,6 +4366,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
+        sendMsgAck();
         return;
       }
 
@@ -4352,6 +4383,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
+        sendMsgAck();
         return;
       }
 
@@ -4386,6 +4418,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistConversations(updated);
         return { ...prev, conversations: updated };
       });
+      sendMsgAck();
       return;
     }
 
@@ -4519,6 +4552,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
+        sendMsgAck();
         return;
       }
 
@@ -4537,6 +4571,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
+        sendMsgAck();
         return;
       }
 
@@ -4620,6 +4655,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistConversations(updated);
         return { ...prev, conversations: updated };
       });
+      sendMsgAck();
 
     } catch (e) {
       console.error("[X3DH] Failed to init Bob session or decrypt first message", e);
@@ -4671,6 +4707,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistConversations(updated);
         return { ...prev, conversations: updated };
       });
+      // Decryption permanently failed (wrong/rejected keys) — it will fail
+      // the same way every redelivery. Ack anyway: a local placeholder was
+      // already persisted, and without an id-based dedup on this path (each
+      // placeholder gets a fresh random id), leaving it unacked would spam a
+      // fresh "could not be decrypted" bubble on every reconnect instead of
+      // showing it once.
+      sendMsgAck();
     }
   }, [persistConversations, drainOutbox, flushPendingCallSignals]);
 

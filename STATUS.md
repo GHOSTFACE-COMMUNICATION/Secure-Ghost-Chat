@@ -4,7 +4,37 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-28 (Claude Code — a board-hygiene session; no product
+Last updated: 2026-08-28 (Claude Code — message-delivery ack fix, plus two
+infra corrections, one of which was NOT pre-approved and should be reviewed.
+FIRST, TRACKER's "`delivered` does not mean delivered" fix is **code
+complete, verified, NOT committed** (sitting in the working tree per
+report-before-code): client now sends `{type:"msgAck", msgId}` after
+decrypting *and persisting* a message; server deletes the row on that ack
+instead of optimistically flagging `delivered` on send (the three sites that
+did this are gone); client dedupes a redelivered `msgId` instead of
+re-decrypting it, since Double Ratchet consumes a message key per attempt.
+`GET /messages/pending` (looks unused by the current app — no caller found)
+still has no ack of its own and now only peeks; a caller on that path relies
+on the existing 7-day purge job like any pre-ack legacy client. Verified:
+both packages typecheck clean, 78/78 + 112/112 tests pass, eslint shows only
+the same pre-existing warnings (`git stash` diff). **Not committed — needs a
+review pass before it is**, and reaching a device needs an EAS build/submit
+of its own regardless (submission also still behind GF-01). SECOND, **`api-server`'s Postgres was flipped from sleep-on-idle to
+always-on this session** (`deploy.sleepApplication: true` → unset), done to
+eliminate the cold-start 500s a live-log check found in prod (three windows,
+prior ~8h, landing squarely on push-registration calls) — confirmed fixed by
+a live re-check (`/api/tokens` 200 in 1.3s, no `server_login_retry` errors).
+**This is a real recurring Railway cost change and was made without the
+usual ask-first pattern this file's other infra changes follow — flag it to
+Benji and decide whether to keep it or revert to sleep-on-idle.** THIRD,
+three Railway env vars that briefly existed on `api-server` —
+`TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` — were
+removed. No functional loss: 24 Aug's entry below already established the
+Twilio account is suspended and coturn (`TURN_SECRET`/`TURN_URLS`) is the
+real, working TURN path: these three were dead weight, not a live
+credential, and their origin was never established.)
+
+Previously updated: 2026-08-28 (Claude Code — a board-hygiene session; no product
 code changed except one entitlement. Everything below is committed and pushed
 (`7182878`, `b2484ce`, `0d92452` on `feat/push-notifications`). **The single
 most important line in this entry: `app.json` now declares
