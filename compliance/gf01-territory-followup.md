@@ -1,7 +1,7 @@
 # GF-01 — follow-up to Sarah Salmond: distribution territory scope
 
-Draft 27 Aug 2026. Send from benjamin@ghostface.co.nz **on the existing
-MinterEllisonRuddWatts thread**, not as a new enquiry.
+**SENT 27 Aug 2026** from benjamin@ghostface.co.nz on the existing
+MinterEllisonRuddWatts thread. Kept here as the record of what was asked.
 
 ## Why this is needed
 
