@@ -2056,19 +2056,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: "invalid_phrase" };
     }
 
-    // Same defensive clear as setAlias — any local SecureStore identity
-    // material at this point belongs to whatever was previously on this
-    // device, not the identity about to be recovered.
-    await Promise.all([
-      secureDelete(DEVICE_TOKEN_KEY),
-      secureDelete(MY_IK_PRIV_KEY),
-      secureDelete(MY_IK_PUB_KEY),
-      secureDelete(MY_SPK_PRIV_KEY),
-      secureDelete(MY_SPK_PUB_KEY),
-      secureDelete(MY_PQKEM_PRIV_KEY),
-      secureDelete(MY_PQKEM_PUB_KEY),
-    ]);
-
+    // Deliberately NOT cleared before the server call.
+    //
+    // This used to do the same defensive clear as setAlias — delete the
+    // device token and every IK/SPK/PQKEM key up front — and it made a
+    // failed recovery destructive: enter the wrong alias, or a phrase for
+    // an identity that no longer exists, and the device lost the working
+    // identity it still had, with nothing recovered in exchange. The user's
+    // situation goes from "I want to move my identity here" to "I have no
+    // identity at all", from a typo.
+    //
+    // The clear was also pointless on the success path: every one of those
+    // seven keys is unconditionally overwritten by the secureSet calls
+    // below, so nothing stale can survive a successful recovery. It only
+    // ever had an effect when the recovery failed — which is exactly when
+    // it must not.
+    //
+    // So: prove possession with the server FIRST, and only overwrite local
+    // state once there is something to overwrite it with. A failed attempt
+    // now leaves the device exactly as it was.
     const result = await reclaimWithServer(alias, recoveredIkPriv);
     if (!result.ok) {
       return { ok: false, error: result.error };
