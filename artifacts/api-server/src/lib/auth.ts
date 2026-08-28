@@ -242,8 +242,14 @@ export async function checkAuth(
 /**
  * Record an unauthenticated call while enforcement is off. This is the
  * signal for deciding when it is safe to flip the flag: once these stop
- * appearing, every live client is sending the header. Logged at `warn` so
- * it survives a production LOG_LEVEL of `info` and is greppable by `label`.
+ * appearing, every live client is sending the header.
+ *
+ * Emitted at pino `warn` so it survives a production LOG_LEVEL of `info`.
+ * Note that Railway renders it as `info` regardless — verified against the
+ * live deploy 27 Aug, and the pre-existing logger.warn in iceConfig.ts does
+ * the same, so it is platform behaviour, not ours. **Filter by the message
+ * text or the `endpoint` attribute, never by severity**: a severity filter
+ * finds nothing and would read as "all clients have updated".
  */
 function logUnauthed(req: Request, label: string): void {
   logger.warn(

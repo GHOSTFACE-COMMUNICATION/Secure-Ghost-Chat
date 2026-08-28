@@ -107,10 +107,16 @@ to `1`/`true`**. It defaults to OFF and ships that way deliberately: no app
 build before 27 Aug 2026 sends the header, so enforcing early breaks every
 existing install. `/ice-config` is the one to watch — the client fails open
 to STUN-only, so a 401 there silently degrades calls instead of erroring.
-While the flag is off, every unauthenticated call is logged at `warn`
+While the flag is off, every unauthenticated call is logged
 ("ENFORCE_ENDPOINT_AUTH is off") — when those stop appearing, it is safe to
-flip. Flipping is a Railway variable change, not a deploy, so it is
-instantly reversible. `integrity` remains unauthenticated by design.
+flip. **Filter those logs by the message text, not by severity.** They are
+emitted at pino `warn`, but Railway renders `warn` as `info` (verified live;
+the pre-existing `logger.warn` in `iceConfig.ts` shows the same way), so a
+severity filter returns nothing — which would read as "all clients have
+updated" when they have not. Each line carries `endpoint` and `ip`.
+
+Flipping is a Railway variable change, not a deploy, so it is instantly
+reversible. `integrity` remains unauthenticated by design.
 
 ## Before reporting work done
 
