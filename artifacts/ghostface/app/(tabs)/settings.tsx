@@ -1,15 +1,18 @@
+import { SectionLock } from "@/components/SectionLock";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as LocalAuthentication from "expo-local-authentication";
+import * as ScreenCapture from "expo-screen-capture";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 
 import {
   ActionSheetIOS,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -21,7 +24,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { GhostLogo } from "@/components/GhostLogo";
 import { GOLD_OUTLINE_COLOR, GoldGradient } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
@@ -155,7 +157,7 @@ const pillStyles = StyleSheet.create({
   },
 });
 
-export default function SettingsScreen() {
+function SettingsScreenInner() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
@@ -164,6 +166,8 @@ export default function SettingsScreen() {
     hasDuressPin,
     hasDecoyPin,
     hasWalletPin,
+    lockedSections,
+    setSectionLocked,
     autoLockTimeout,
     duressGracePeriod,
     language,
@@ -191,6 +195,7 @@ export default function SettingsScreen() {
     setWalletPin,
     clearWalletPin,
     getRecoveryPhrase,
+    checkRecoveryPin,
     setLocked,
     panicWipe,
     setAutoLockTimeout,
@@ -430,6 +435,19 @@ export default function SettingsScreen() {
   const [recoveryPinError, setRecoveryPinError] = useState("");
   const [recoveryPhraseValue, setRecoveryPhraseValue] = useState("");
 
+  // The whole app blocks screen capture (usePreventScreenCapture in _layout).
+  // That is self-defeating on the ONE screen the user must save — the recovery
+  // phrase — so lift the block only while the 24 words are on screen, and
+  // restore it the moment the modal closes or leaves the phrase stage.
+  useEffect(() => {
+    if (showRecoveryPhrase && recoveryPhraseStage === "phrase") {
+      ScreenCapture.allowScreenCaptureAsync();
+      return () => {
+        ScreenCapture.preventScreenCaptureAsync();
+      };
+    }
+  }, [showRecoveryPhrase, recoveryPhraseStage]);
+
   // ── Satellite SMS fallback (Task #113) ───────────────────────────────────
   const [showSmsFallback, setShowSmsFallback] = useState(false);
   const [newFallbackNumber, setNewFallbackNumber] = useState("");
@@ -666,7 +684,7 @@ export default function SettingsScreen() {
     // the main PIN adds no real protection, so still guard against it.
     const matchesMain = await checkPin(walletPin);
     if (matchesMain) {
-      setWalletPinError("WALLET PIN CANNOT MATCH YOUR MAIN PIN");
+      setWalletPinError("LOCK PIN CANNOT MATCH YOUR MAIN PIN");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
@@ -692,14 +710,21 @@ export default function SettingsScreen() {
   };
 
   const handleRecoveryPinSubmit = async () => {
-    const correct = await checkPin(recoveryPinInput);
+    if (!alias) {
+      setRecoveryPinError("NO IDENTITY ON THIS DEVICE");
+      return;
+    }
+    // Gate on the RECOVERY PIN — it's what actually regenerates the (blinded)
+    // phrase, and validating it here stops a mistyped PIN from showing a
+    // plausible-but-wrong phrase the user might save.
+    const correct = await checkRecoveryPin(recoveryPinInput, alias);
     if (!correct) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRecoveryPinError("INCORRECT PIN");
+      setRecoveryPinError("INCORRECT RECOVERY PIN");
       setRecoveryPinInput("");
       return;
     }
-    const phrase = await getRecoveryPhrase();
+    const phrase = await getRecoveryPhrase(recoveryPinInput, alias);
     if (!phrase) {
       setRecoveryPinError("NO IDENTITY KEY FOUND ON THIS DEVICE");
       return;
@@ -1270,7 +1295,7 @@ export default function SettingsScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.rowLabel}>ADVANCED SETTINGS</Text>
-              <Text style={styles.rowSub}>DECOY &amp; DURESS, WALLET PIN, LINK, LANGUAGE</Text>
+              <Text style={styles.rowSub}>DECOY &amp; DURESS, LOCK PIN, LINK, LANGUAGE</Text>
             </View>
             <Ionicons
               name={showAdvanced ? "chevron-up" : "chevron-down"}
@@ -1380,8 +1405,8 @@ export default function SettingsScreen() {
                   <Ionicons name="wallet-outline" size={17} color={colors.primary} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.rowLabel}>WALLET PIN</Text>
-                  <Text style={styles.rowSub}>EXTRA PIN REQUIRED TO OPEN THE WALLET</Text>
+                  <Text style={styles.rowLabel}>LOCK PIN</Text>
+                  <Text style={styles.rowSub}>SHARED PIN FOR LOCKED CATEGORIES</Text>
                 </View>
                 {hasWalletPin ? (
                   <StatusPill tone="secure" label="ACTIVE" colors={colors} />
@@ -1390,6 +1415,44 @@ export default function SettingsScreen() {
                 )}
               </Pressable>
               <View style={styles.rowDivider} />
+
+              {/* Category locks — gate individual tools behind the shared lock PIN */}
+              <Text style={[styles.sectionHeader, { marginTop: 4 }]}>CATEGORY LOCKS</Text>
+              {!hasWalletPin && (
+                <Text style={[styles.rowSub, { marginHorizontal: 20, marginBottom: 6 }]}>
+                  SET A LOCK PIN ABOVE TO ACTIVATE
+                </Text>
+              )}
+              {[
+                { key: "messages", label: "MESSAGES", icon: "chatbubble-ellipses-outline" },
+                { key: "calls", label: "CALLS", icon: "call-outline" },
+                { key: "vpn", label: "VPN", icon: "shield-outline" },
+                { key: "wallet", label: "WALLET", icon: "wallet-outline" },
+                { key: "number", label: "GHOST NUMBER", icon: "phone-portrait-outline" },
+                { key: "settings", label: "SETTINGS", icon: "settings-outline" },
+              ].map((cat) => (
+                <View key={cat.key}>
+                  <View style={styles.row}>
+                    <View style={styles.rowIcon}>
+                      <Ionicons name={cat.icon as keyof typeof Ionicons.glyphMap} size={17} color={colors.primary} />
+                    </View>
+                    <Text style={styles.rowLabel}>{cat.label}</Text>
+                    <Switch
+                      value={lockedSections.includes(cat.key)}
+                      onValueChange={(val) => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setSectionLocked(cat.key, val);
+                        if (val && !hasWalletPin) setShowWalletPin(true);
+                      }}
+                      trackColor={{ false: colors.border, true: colors.primary }}
+                      thumbColor={colors.foreground}
+                      ios_backgroundColor={colors.border}
+                      testID={`lock-switch-${cat.key}`}
+                    />
+                  </View>
+                  <View style={styles.rowDivider} />
+                </View>
+              ))}
 
               <Pressable
                 style={styles.row}
@@ -1868,12 +1931,12 @@ export default function SettingsScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletPin(false)} />
             <View style={styles.modalContent}>
               {walletPinSaved ? (
-                <Text style={styles.successText}>WALLET PIN SAVED</Text>
+                <Text style={styles.successText}>LOCK PIN SAVED</Text>
               ) : (
                 <>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
                     <Ionicons name="wallet-outline" size={20} color={colors.primary} />
-                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>WALLET PIN</Text>
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>LOCK PIN</Text>
                   </View>
                   <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
                     REQUIRES THIS PIN TO OPEN THE WALLET, ON TOP OF YOUR MAIN APP LOCK
@@ -1882,7 +1945,7 @@ export default function SettingsScreen() {
                     style={styles.input}
                     value={walletPin}
                     onChangeText={(t) => { setWalletPinInput(t); setWalletPinError(""); }}
-                    placeholder="WALLET PIN (4–8 DIGITS)"
+                    placeholder="LOCK PIN (4–8 DIGITS)"
                     placeholderTextColor={colors.mutedForeground}
                     keyboardType="numeric"
                     secureTextEntry
@@ -1898,7 +1961,7 @@ export default function SettingsScreen() {
                     style={styles.input}
                     value={walletPinConfirm}
                     onChangeText={(t) => { setWalletPinConfirm(t); setWalletPinError(""); }}
-                    placeholder="CONFIRM WALLET PIN"
+                    placeholder="CONFIRM LOCK PIN"
                     placeholderTextColor={colors.mutedForeground}
                     keyboardType="numeric"
                     secureTextEntry
@@ -1918,7 +1981,7 @@ export default function SettingsScreen() {
                     testID="wallet-pin-save-btn"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
-                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>SET WALLET PIN</Text>
+                      <Text style={[styles.modalBtnText, isLight && { color: colors.primaryForeground }]}>SET LOCK PIN</Text>
                     </GoldGradient>
                   </Pressable>
                   {hasWalletPin && (
@@ -1927,7 +1990,7 @@ export default function SettingsScreen() {
                       onPress={handleClearWalletPin}
                       testID="wallet-pin-clear-btn"
                     >
-                      <Text style={[styles.modalBtnText, { color: colors.destructive }]}>REMOVE WALLET PIN</Text>
+                      <Text style={[styles.modalBtnText, { color: colors.destructive }]}>REMOVE LOCK PIN</Text>
                     </Pressable>
                   )}
                   <Pressable
@@ -1956,28 +2019,28 @@ export default function SettingsScreen() {
                 <>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
                     <Ionicons name="key-outline" size={20} color={colors.primary} />
-                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>CONFIRM YOUR PIN</Text>
+                    <Text style={[styles.modalTitle, { marginBottom: 0 }]}>ENTER YOUR RECOVERY PIN</Text>
                   </View>
                   <Text style={{ color: colors.mutedForeground, fontSize: 9, letterSpacing: 2, marginBottom: 20, lineHeight: 16 }}>
-                    ANYONE WHO SEES YOUR RECOVERY PHRASE CAN TAKE OVER YOUR IDENTITY — CONFIRM IT'S YOU
+                    YOUR RECOVERY PHRASE ONLY WORKS WITH THIS 6-DIGIT PIN — ENTER IT TO REVEAL THE MATCHING PHRASE
                   </Text>
                   <TextInput
                     style={styles.input}
                     value={recoveryPinInput}
-                    onChangeText={(t) => { setRecoveryPinInput(t); setRecoveryPinError(""); }}
-                    placeholder="MAIN PIN"
+                    onChangeText={(t) => { setRecoveryPinInput(t.replace(/\D/g, "")); setRecoveryPinError(""); }}
+                    placeholder="6-DIGIT RECOVERY PIN"
                     placeholderTextColor={colors.mutedForeground}
                     keyboardType="numeric"
                     secureTextEntry
-                    maxLength={8}
+                    maxLength={6}
                     testID="recovery-pin-input"
                     autoFocus
                   />
                   {recoveryPinError ? <Text style={styles.errorText}>{recoveryPinError}</Text> : null}
                   <Pressable
-                    style={[styles.modalBtnGold, recoveryPinInput.length < 4 && { opacity: 0.4 }]}
+                    style={[styles.modalBtnGold, recoveryPinInput.length < 6 && { opacity: 0.4 }]}
                     onPress={handleRecoveryPinSubmit}
-                    disabled={recoveryPinInput.length < 4}
+                    disabled={recoveryPinInput.length < 6}
                     testID="recovery-pin-submit"
                   >
                     <GoldGradient style={styles.modalBtnGoldInner}>
@@ -2189,5 +2252,13 @@ export default function SettingsScreen() {
 
     </View>
     </TabScreenWrapper>
+  );
+}
+
+export default function SettingsScreen() {
+  return (
+    <SectionLock sectionKey="settings" label="SETTINGS">
+      <SettingsScreenInner />
+    </SectionLock>
   );
 }

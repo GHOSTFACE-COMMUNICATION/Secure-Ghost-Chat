@@ -92,26 +92,26 @@ function requireTokenAdmin(req: Request, res: Response, next: NextFunction): voi
   next();
 }
 
-// ── Seed CASPER + FaceZero on first run ───────────────────────────────────────
+// ── Seed GFC + FANTASMA on first run ───────────────────────────────────────
 async function ensureSeedTokens() {
   const existing = await db.select().from(tokensTable);
   if (existing.length > 0) return;
   await db.insert(tokensTable).values([
     {
-      name: "CASPER",
-      symbol: "CASPER",
+      name: "GHOSTFACE COIN",
+      symbol: "GFC",
       description:
-        "The anonymous governance & utility token of the GHOSTFACE ecosystem. Used for encrypted voting, premium feature access, and ghost-node staking.",
+        "GHOSTFACE COIN (GFC) is the anonymous governance & utility token of the GHOSTFACE ecosystem. Used for encrypted voting, premium feature access, and ghost-node staking.",
       decimals: 9,
       totalSupply: 1_000_000_000,
-      logoColor: "#00C8FF",
+      logoColor: "#E7C765",
       notes: "Core ecosystem token — governance, staking, and utility.",
     },
     {
-      name: "FaceZero",
-      symbol: "FZ",
+      name: "FANTASMA",
+      symbol: "FTSM",
       description:
-        "FaceZero (FZ) is the privacy-first payment rail for GHOSTFACE. Peer-to-peer transfers, paywall access, and cross-chain bridging.",
+        "FANTASMA (FTSM) is the privacy-first payment rail for GHOSTFACE. Peer-to-peer transfers, paywall access, and cross-chain bridging.",
       decimals: 6,
       totalSupply: 500_000_000,
       logoColor: "#9945FF",
@@ -544,7 +544,7 @@ router.get("/admin", requireTokenAdmin, (_req: Request, res: Response) => {
     <div class="form-grid">
       <div class="form-group">
         <label>TOKEN NAME</label>
-        <input id="fName" placeholder="e.g. CASPER" autocomplete="off"/>
+        <input id="fName" placeholder="e.g. GFC" autocomplete="off"/>
       </div>
       <div class="form-group">
         <label>SYMBOL</label>

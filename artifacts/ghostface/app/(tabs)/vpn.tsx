@@ -1,3 +1,4 @@
+import { SectionLock } from "@/components/SectionLock";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
@@ -33,7 +34,7 @@ async function performHandshake(): Promise<void> {
   }
 }
 
-export default function VPNScreen() {
+function VPNScreenInner() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { vpnConnected, vpnServer, connectVPN, disconnectVPN, vpnAutoReconnecting } =
@@ -452,5 +453,13 @@ export default function VPNScreen() {
       />
     </View>
     </TabScreenWrapper>
+  );
+}
+
+export default function VPNScreen() {
+  return (
+    <SectionLock sectionKey="vpn" label="VPN">
+      <VPNScreenInner />
+    </SectionLock>
   );
 }

@@ -515,41 +515,52 @@ function ScratchOverlay({ onEnter, biometricEnabled, onBiometric }: { onEnter: (
       onPressOut={fingerprintReady ? undefined : cancelScan}
       style={StyleSheet.absoluteFill}
     >
+      {/* frosted gold-glass base — the GHOSTFACE gate shows faintly through it */}
+      {USE_NATIVE_GLASS ? (
+        <GlassView
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+          glassEffectStyle="regular"
+          tintColor="rgba(16,16,20,0.32)"
+        />
+      ) : (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(16,16,20,0.42)" }]} />
+      )}
       {tiles.map((t, i) => {
         const r = Math.floor(i / COLS), c = i % COLS;
         return (
           <Animated.View key={i} style={{
-            position: "absolute", left: c * tw - 0.5, top: r * th - 0.5,
-            width: tw + 1, height: th + 1,
-            backgroundColor: "#CDA23E",
+            position: "absolute", left: c * tw, top: r * th,
+            width: tw + 0.5, height: th + 0.5,
+            backgroundColor: "rgba(34,34,40,0.24)",
             opacity: t,
           }} />
         );
       })}
       <LinearGradient
         pointerEvents="none"
-        colors={["#E7C765", "#CDA23E", "#B98C2E"]}
+        colors={["#6E6E78", "#33333B", "#15151A"]}
         locations={[0, 0.5, 1]}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
-        style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
+        style={[StyleSheet.absoluteFill, { opacity: 0.3 }]}
       />
 
       {/* tiny embossed corner sign — top right */}
       <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 8, right: 16, flexDirection: "row", alignItems: "center", gap: 4, opacity: 0.55 }}>
-        <Ionicons name="lock-closed" size={8} color="#3A2E10" />
-        <Text style={[type.monoSmall, { fontSize: 7, color: "#3A2E10", letterSpacing: 0.6 }]}>NO FACE. NO TRACE.</Text>
+        <Ionicons name="lock-closed" size={8} color="#C9A64C" />
+        <Text style={[type.monoSmall, { fontSize: 7, color: "#C9A64C", letterSpacing: 0.6 }]}>NO FACE. NO TRACE.</Text>
       </View>
 
       {/* fingerprint scanner — base print + accent fill that rises as you hold */}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", opacity: hint }]}>
         <View style={{ width: PRINT, height: PRINT, alignItems: "center", justifyContent: "center" }}>
-          <Ionicons name="finger-print" size={PRINT} color="#1A1509" style={{ opacity: 0.45 }} />
+          <Ionicons name="finger-print" size={PRINT} color="#C9A64C" style={{ opacity: 0.5 }} />
           <Animated.View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: scan.interpolate({ inputRange: [0, 1], outputRange: [0, PRINT] }), overflow: "hidden", alignItems: "center", justifyContent: "flex-end" }}>
-            <Ionicons name="finger-print" size={PRINT} color="#0B0B0C" />
+            <Ionicons name="finger-print" size={PRINT} color="#E7C765" />
           </Animated.View>
         </View>
-        <Text style={{ ...type.labelStrong, fontSize: 14, letterSpacing: 3, color: "#1A1509", marginTop: 14 }}>{fingerprintReady ? "SCAN TO ENTER" : "HOLD TO ENTER"}</Text>
+        <Text style={{ ...type.labelStrong, fontSize: 14, letterSpacing: 3, color: "#D9C89A", marginTop: 14 }}>{fingerprintReady ? "SCAN TO ENTER" : "HOLD TO ENTER"}</Text>
       </Animated.View>
     </Pressable>
   );

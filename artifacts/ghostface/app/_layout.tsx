@@ -9,6 +9,7 @@ import {
 import {
   ShareTechMono_400Regular,
 } from "@expo-google-fonts/share-tech-mono";
+import { Cinzel_700Bold } from "@expo-google-fonts/cinzel";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router, Stack, usePathname } from "expo-router";
@@ -422,6 +423,7 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
     ShareTechMono_400Regular,
+    Cinzel_700Bold,
     ...Ionicons.font,
     ...Feather.font,
   });

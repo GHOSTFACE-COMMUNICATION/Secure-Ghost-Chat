@@ -74,3 +74,66 @@ export async function consumeInviteCode(
     return { ok: false, alreadyUsed: false };
   }
 }
+
+export type RedeemInviteResult =
+  | { ok: true; ownerAlias: string; consumed: boolean }
+  | { ok: false; reason: RedeemFailReason };
+
+/**
+ * The full invite redemption sequence: validate → look up → handshake →
+ * consume. Pure logic — no UI, no haptics, no timers — so every caller can
+ * present the outcome in its own idiom.
+ *
+ * Order matters and is the reason this is worth sharing rather than
+ * repeating. The code is consumed only AFTER `addConversation` succeeds: a
+ * one-shot code burned before the handshake completes would leave the
+ * invitee with neither a conversation nor a usable code, and there is no way
+ * to un-consume one.
+ *
+ * A failed consume after a successful handshake is deliberately NOT an
+ * error. The conversation exists, which is what the user asked for; the code
+ * simply stays redeemable until it expires. `consumed` reports which
+ * happened for callers that care.
+ *
+ * @param addConversation from `useApp()` — passed in rather than imported so
+ *   this stays free of React context and testable on its own.
+ */
+export async function redeemInvite(
+  code: string,
+  addConversation: (alias: string) => Promise<{ ok: boolean; error?: string }>,
+): Promise<RedeemInviteResult> {
+  const normalized = code.trim().toUpperCase();
+  if (!CODE_REGEX.test(normalized)) {
+    return { ok: false, reason: "bad_format" };
+  }
+
+  const lookup = await lookupInviteCode(normalized);
+  if (!lookup.ok) {
+    return { ok: false, reason: lookup.reason };
+  }
+
+  const added = await addConversation(lookup.ownerAlias);
+  if (!added.ok) {
+    return { ok: false, reason: "connection_failed" };
+  }
+
+  const consume = await consumeInviteCode(normalized);
+  if (!consume.ok && !consume.alreadyUsed) {
+    console.warn("[invite] consume failed after a successful handshake");
+  }
+
+  return { ok: true, ownerAlias: lookup.ownerAlias, consumed: consume.ok };
+}
+
+/**
+ * Progressive formatter for an invite-code text field: filters to the code
+ * alphabet and inserts the GF- prefix and dashes as the user types or
+ * pastes. Shared so every entry point formats identically — a code that
+ * looks different in two places reads as two different codes.
+ */
+export function formatInviteCodeInput(text: string): string {
+  const raw = text.toUpperCase().replace(/[^A-Z2-9-]/g, "").replace(/-/g, "");
+  if (raw.length <= 2) return raw;
+  if (raw.length <= 6) return `GF-${raw.slice(2)}`;
+  return `GF-${raw.slice(2, 6)}-${raw.slice(6, 10)}`;
+}

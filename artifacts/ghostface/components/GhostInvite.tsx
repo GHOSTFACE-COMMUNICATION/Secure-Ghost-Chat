@@ -16,7 +16,12 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { QRScanner, encodeContactQR, encodeInviteQR } from "@/components/QRScanner";
 import { GoldGradient } from "@/components/GoldGradient";
-import { CODE_REGEX, type RedeemFailReason, lookupInviteCode, consumeInviteCode } from "@/lib/invites";
+import {
+  CODE_REGEX,
+  type RedeemFailReason,
+  formatInviteCodeInput,
+  redeemInvite,
+} from "@/lib/invites";
 import { getDeviceAuth } from "@/lib/deviceAuth";
 import { getApiBase } from "@/lib/apiBase";
 import { type } from "@/constants/typography";
@@ -109,50 +114,19 @@ export default function GhostInvite() {
 
   const handleRedeemChange = (text: string) => {
     setRedeemState("idle");
-    const upper = text.toUpperCase().replace(/[^A-Z2-9-]/g, "");
-    let formatted: string;
-    const raw = upper.replace(/-/g, "");
-    if (raw.length <= 2) {
-      formatted = raw;
-    } else if (raw.length <= 6) {
-      formatted = `GF-${raw.slice(2)}`;
-    } else {
-      formatted = `GF-${raw.slice(2, 6)}-${raw.slice(6, 10)}`;
-    }
-    setRedeemInput(formatted);
+    setRedeemInput(formatInviteCodeInput(text));
   };
 
   const handleRedeem = async () => {
-    if (!CODE_REGEX.test(redeemInput)) {
+    const result = await redeemInvite(redeemInput, addConversation);
+    if (!result.ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRedeemState("bad_format");
+      setRedeemState(result.reason);
       setTimeout(() => setRedeemState("idle"), 4000);
       return;
     }
 
-    const lookup = await lookupInviteCode(redeemInput);
-    if (!lookup.ok) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRedeemState(lookup.reason);
-      setTimeout(() => setRedeemState("idle"), 4000);
-      return;
-    }
-
-    const added = await addConversation(lookup.ownerAlias);
-    if (!added.ok) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setRedeemState("connection_failed");
-      setTimeout(() => setRedeemState("idle"), 4000);
-      return;
-    }
-
-    // Handshake confirmed — now atomically consume the code
-    const consume = await consumeInviteCode(redeemInput);
-    if (!consume.ok && !consume.alreadyUsed) {
-      console.warn("[invite] consume failed after successful redeem");
-    }
-
-    setRedeemAlias(lookup.ownerAlias);
+    setRedeemAlias(result.ownerAlias);
     setRedeemInput("");
     setRedeemState("success");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -230,26 +204,15 @@ export default function GhostInvite() {
    */
   const handleQRScan = async (decoded: string) => {
     if (CODE_REGEX.test(decoded)) {
-      // Scanned an invite code QR — lookup → add → consume
-      const lookup = await lookupInviteCode(decoded);
-      if (!lookup.ok) {
+      // Scanned an invite code QR — same sequence as manual entry.
+      const result = await redeemInvite(decoded, addConversation);
+      if (!result.ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setRedeemState(lookup.reason);
+        setRedeemState(result.reason);
         setTimeout(() => setRedeemState("idle"), 4000);
         return;
       }
-      const added = await addConversation(lookup.ownerAlias);
-      if (!added.ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setRedeemState("connection_failed");
-        setTimeout(() => setRedeemState("idle"), 4000);
-        return;
-      }
-      const consume = await consumeInviteCode(decoded);
-      if (!consume.ok && !consume.alreadyUsed) {
-        console.warn("[invite] QR consume failed after successful add");
-      }
-      setRedeemAlias(lookup.ownerAlias);
+      setRedeemAlias(result.ownerAlias);
       setRedeemState("success");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => setRedeemState("idle"), 4000);

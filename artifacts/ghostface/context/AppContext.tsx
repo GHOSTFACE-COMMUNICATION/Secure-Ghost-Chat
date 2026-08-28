@@ -41,6 +41,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Notifications from "expo-notifications";
 import { Alert, AppState as RNAppState } from "react-native";
+import * as ImageManipulator from "expo-image-manipulator";
 import React, {
   createContext,
   useCallback,
@@ -71,6 +72,7 @@ import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { randomBytes } from "@/lib/csprng";
 import { keyToRecoveryPhrase, recoveryPhraseToKey } from "@/lib/recoveryPhrase";
+import { blindKeyForPhrase, recoveryPinVerifier, unblindKeyFromPhrase } from "@/lib/recoveryPin";
 // Stricter than the regex this file used to carry: verifies the address
 // actually base58-decodes to 32 bytes, so a well-formed-looking string of the
 // right length but wrong decoded size can't be linked as a wallet.
@@ -260,6 +262,10 @@ interface SealedEnvelope {
   x?: number;
   /** Reaction: target message id, emoji, and explicit add(true)/remove(false) intent. */
   r?: { m: string; e: string; o: boolean };
+  /** Profile photo control message: a small `data:image/jpeg;base64,...` avatar
+   *  (or "" to clear). When present this is a silent control message — never
+   *  rendered as a Message; the recipient stores it as this contact's avatar. */
+  p?: string;
 }
 
 function wrapPayload(
@@ -269,13 +275,17 @@ function wrapPayload(
   attachment?: Attachment,
   ttlMs?: number,
   reaction?: { m: string; e: string; o: boolean },
+  profilePhoto?: string,
 ): string {
+  // A reaction OR a profile-photo update is a control message: no text body,
+  // no attachment, no disappear timer.
+  const isControl = !!reaction || profilePhoto !== undefined;
   // image-ref carries a local-only `uri` for the sender's own preview that
   // must NOT be sent over the wire — strip it so the recipient only ever
   // sees the blob reference + key. Not applicable to a reaction, which
   // carries no attachment.
   let wireAttachment: Attachment | undefined;
-  if (!reaction && attachment) {
+  if (!isControl && attachment) {
     if (attachment.kind === "image-ref") {
       const { kind, blobId, key, mimeType, width, height } = attachment;
       wireAttachment = { kind, blobId, key, mimeType, width, height };
@@ -283,10 +293,11 @@ function wrapPayload(
       wireAttachment = attachment;
     }
   }
-  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, i: id, t: reaction ? "" : text };
+  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, i: id, t: isControl ? "" : text };
   if (wireAttachment) env.a = wireAttachment;
-  if (!reaction && ttlMs) env.x = ttlMs;
+  if (!isControl && ttlMs) env.x = ttlMs;
   if (reaction) env.r = reaction;
+  if (profilePhoto !== undefined) env.p = profilePhoto;
   return JSON.stringify(env);
 }
 
@@ -305,6 +316,10 @@ const MAX_ATTACHMENT_NAME_LEN = 200;
 // validation time (both on send and on receive) so a malicious peer cannot
 // force the client to decode an arbitrarily large blob.
 export const MAX_ATTACHMENT_B64_CHARS = 7 * 1024 * 1024 + 512 * 1024;
+
+// Profile-photo avatars are resized to ~128px JPEG (a few KB); cap the E2E
+// data URI generously at 400 KB of base64 so a peer cannot ship a huge image.
+export const MAX_PROFILE_PHOTO_CHARS = 400 * 1024;
 
 // Validates a blob reference for the image-ref attachment kind.
 const BLOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -369,6 +384,9 @@ function unwrapPayload(plaintext: string): {
    *  recover an id from in that case. */
   id?: string;
   reaction?: { m: string; e: string; o: boolean };
+  /** Present for a profile-photo control message: a data:image/jpeg URI, or ""
+   *  to clear. Distinct from `undefined` (no profile-photo field at all). */
+  profilePhoto?: string;
 } {
   // v4 sealed-sender envelope — recovers the sender alias (`f`), stable
   // message id (`i`), body, optional attachment, optional disappearing TTL
@@ -377,11 +395,16 @@ function unwrapPayload(plaintext: string): {
     try {
       const parsed = JSON.parse(plaintext) as {
         _gf?: unknown; f?: unknown; i?: unknown; t?: unknown; a?: unknown; x?: unknown;
-        r?: { m?: unknown; e?: unknown; o?: unknown };
+        r?: { m?: unknown; e?: unknown; o?: unknown }; p?: unknown;
       };
       const reactionOk =
         parsed.r === undefined ||
         (typeof parsed.r.m === "string" && typeof parsed.r.e === "string" && typeof parsed.r.o === "boolean");
+      const photoOk =
+        parsed.p === undefined ||
+        (typeof parsed.p === "string" &&
+          (parsed.p === "" ||
+            (parsed.p.length <= MAX_PROFILE_PHOTO_CHARS && DATA_IMAGE_URI_RE.test(parsed.p))));
       if (
         parsed._gf === SEALED_ENVELOPE_VERSION &&
         typeof parsed.f === "string" &&
@@ -389,7 +412,8 @@ function unwrapPayload(plaintext: string): {
         typeof parsed.t === "string" &&
         (parsed.a === undefined || isValidAttachment(parsed.a)) &&
         (parsed.x === undefined || (typeof parsed.x === "number" && parsed.x > 0)) &&
-        reactionOk
+        reactionOk &&
+        photoOk
       ) {
         return {
           text: parsed.t,
@@ -398,6 +422,7 @@ function unwrapPayload(plaintext: string): {
           ...(parsed.a !== undefined ? { attachment: parsed.a as Attachment } : {}),
           ...(parsed.x !== undefined ? { ttlMs: parsed.x as number } : {}),
           ...(parsed.r !== undefined ? { reaction: parsed.r as { m: string; e: string; o: boolean } } : {}),
+          ...(parsed.p !== undefined ? { profilePhoto: parsed.p as string } : {}),
         };
       }
     } catch {
@@ -423,6 +448,24 @@ function unwrapPayload(plaintext: string): {
     }
   }
   return { text: plaintext };
+}
+
+/** Resize a picked profile photo down to a ~128px JPEG data URI for E2E
+ *  transport. Returns null on failure or if the result exceeds the cap. */
+async function compressAvatar(uri: string): Promise<string | null> {
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 128, height: 128 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+    );
+    if (!result.base64) return null;
+    const dataUri = `data:image/jpeg;base64,${result.base64}`;
+    return dataUri.length <= MAX_PROFILE_PHOTO_CHARS ? dataUri : null;
+  } catch (e) {
+    console.warn("[ProfilePhoto] compress failed:", e);
+    return null;
+  }
 }
 
 /**
@@ -494,6 +537,10 @@ export interface Conversation {
   pendingX3DHHeader?: string;
   isRealContact?: boolean;
   verified?: boolean;
+  /** The contact's profile photo (data:image/jpeg;base64), received E2E via a
+   *  profile-photo control message. Rendered as the avatar with a letter
+   *  fallback. Small; lives inside the encrypted conversation blob. */
+  contactPhoto?: string;
   /**
    * Opaque per-recipient routing token (task #128). Messages are addressed to
    * this instead of the human alias so the server never sees who is talking to
@@ -518,7 +565,7 @@ export { evaluateExpiredHandshake };
 export interface Transaction {
   id: string;
   type: "send" | "receive";
-  token: "FD" | "CASPER";
+  token: "FANTASMA" | "GFC";
   amount: number;
   address: string;
   timestamp: number;
@@ -609,12 +656,15 @@ interface AppState {
   biometricEnabled: boolean;
   isLocked: boolean;
   isOnboarded: boolean;
+  /** Alias of an interrupted signup that registered but never confirmed its
+   *  recovery phrase — onboarding resumes at the phrase step. Null otherwise. */
+  signupPendingAlias: string | null;
   vpnConnected: boolean;
   vpnServer: VPNServer | null;
   conversations: Conversation[];
   callHistory: CallLogEntry[];
-  fdBalance: number;
-  casperBalance: number;
+  fantasmaBalance: number;
+  gfcBalance: number;
   appTokens: AppToken[];
   /**
    * The device's own non-custodial Solana address, or null when no wallet has
@@ -670,12 +720,28 @@ interface AppContextType extends AppState {
   hasDecoyPin: boolean;
   hasWalletPin: boolean;
   walletUnlocked: boolean;
+  lockedSections: string[];
+  isSectionLocked: (key: string) => boolean;
+  setSectionLocked: (key: string, locked: boolean) => Promise<void>;
   decoyMode: boolean;
   loadError: string | null;
-  setAlias: (alias: string) => Promise<void>;
-  recoverIdentity: (alias: string, phrase: string) => Promise<{ ok: boolean; error?: string }>;
-  /** Re-derives the recovery phrase for the currently-stored identity key. Null if none. */
-  getRecoveryPhrase: () => Promise<string | null>;
+  setAlias: (alias: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Marks registration done but recovery phrase not yet confirmed (resume support). */
+  markSignupPendingPhrase: (alias: string) => Promise<void>;
+  /** Completes onboarding — call only after the recovery phrase is acknowledged saved. */
+  completeOnboarding: () => Promise<void>;
+  recoverIdentity: (alias: string, phrase: string, recoveryPin: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * The 24-word recovery phrase for the currently-stored identity, blinded
+   * with the recovery PIN (see lib/recoveryPin.ts) so the phrase alone can't
+   * reconstruct the key. Requires the alias (for the salt) and the PIN. Null
+   * if there is no stored identity key.
+   */
+  getRecoveryPhrase: (recoveryPin: string, alias: string) => Promise<string | null>;
+  /** Stores a local check value so Settings can reject a mistyped recovery PIN. */
+  storeRecoveryPinVerifier: (recoveryPin: string, alias: string) => Promise<void>;
+  /** True if `recoveryPin` matches the one set for this identity on this device. */
+  checkRecoveryPin: (recoveryPin: string, alias: string) => Promise<boolean>;
   setPin: (pin: string) => Promise<void>;
   checkPin: (input: string) => Promise<boolean>;
   checkDuressPin: (input: string) => Promise<boolean>;
@@ -835,6 +901,13 @@ const SECURE_PIN_KEY = "ghostface_pin";
 const SECURE_DURESS_PIN_KEY = "ghostface_duress_pin";
 const SECURE_DECOY_PIN_KEY = "ghostface_decoy_pin";
 const SECURE_WALLET_PIN_KEY = "ghostface_wallet_pin";
+// Non-reversible check value for the recovery PIN (see lib/recoveryPin.ts) so
+// "view recovery phrase" can reject a mistyped PIN. Not the PIN, and not
+// recovery material — safe to store locally (device compromise already exposes
+// the raw identity key).
+const SECURE_RECOVERY_PIN_CHECK_KEY = "ghostface_recovery_pin_check";
+const SECURE_LOCKED_SECTIONS_KEY = "ghostface_locked_sections";
+export const LOCKABLE_SECTIONS = ["messages", "calls", "vpn", "wallet", "number", "settings"] as const;
 const CONVERSATIONS_KEY = "ghostface_conversations";
 const CALL_HISTORY_KEY = "ghostface_call_history";
 const OUTBOX_KEY = "ghostface_outbox";
@@ -844,6 +917,12 @@ const OPK_BATCH_SIZE = 10;
 const AUTO_LOCK_TIMEOUT_KEY = "ghostface_auto_lock_timeout";
 const DURESS_GRACE_KEY = "ghostface_duress_grace_period";
 const LANGUAGE_KEY = "ghostface_language";
+// Set (to the alias) between successful registration and the user confirming
+// they've saved their recovery phrase. Present + a stored device token ⇒ an
+// interrupted signup to resume at the phrase step. Lives only in AsyncStorage
+// so a reinstall (which leaves Keychain identity keys behind) clears it and
+// does NOT masquerade as an interrupted signup.
+const SIGNUP_PENDING_PHRASE_KEY = "ghostface_signup_pending_phrase";
 const THEME_KEY = "ghostface_theme_preference";
 const PROFILE_IMAGE_KEY = "ghostface_profile_image_uri";
 const LAST_VPN_SERVER_KEY = "ghostface_last_vpn_server_id";
@@ -868,6 +947,7 @@ const LOCAL_WALLET_PRIV_KEY = "ghostface_local_wallet_priv";
 const APP_STORAGE_KEYS = [
   ALIAS_KEY,
   "isOnboarded",
+  SIGNUP_PENDING_PHRASE_KEY,
   "biometricEnabled",
   CONVERSATIONS_KEY,
   CALL_HISTORY_KEY,
@@ -1436,6 +1516,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Session-scoped: cleared whenever the app (re)locks, same as the decoy/
   // duress model — a wallet PIN unlock doesn't outlive the app lock.
   const [walletUnlocked, setWalletUnlocked] = useState(false);
+  const [lockedSections, setLockedSections] = useState<string[]>([]);
   // In-memory only, never persisted — a decoy session must leave no trace
   // that distinguishes it from a normal one once the app is force-closed.
   const [decoyMode, setDecoyMode] = useState(false);
@@ -1449,12 +1530,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     biometricEnabled: false,
     isLocked: true,
     isOnboarded: false,
+    signupPendingAlias: null,
     vpnConnected: false,
     vpnServer: null,
     conversations: createDefaultConversations(),
     callHistory: [],
-    fdBalance: 0,
-    casperBalance: 0,
+    fantasmaBalance: 0,
+    gfcBalance: 0,
     appTokens: [],
     walletAddress: null,
     incomingCall: null,
@@ -1481,12 +1563,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function load() {
       try {
-        const [alias, pinValue, duressValue, decoyValue, walletPinValue, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw, themeRaw, profileImageRaw] = await Promise.all([
+        const [alias, pinValue, duressValue, decoyValue, walletPinValue, lockedSectionsRaw, biometric, onboarded, convData, callHistoryData, connectedWallet, autoLockRaw, storedToken, lastVpnServerId, duressGraceRaw, languageRaw, outboxRaw, lowBwRaw, smsNumbersRaw, smsMessageRaw, localWalletPrivRaw, themeRaw, profileImageRaw, signupPendingRaw] = await Promise.all([
           AsyncStorage.getItem(ALIAS_KEY),
           secureGet(SECURE_PIN_KEY),
           secureGet(SECURE_DURESS_PIN_KEY),
           secureGet(SECURE_DECOY_PIN_KEY),
           secureGet(SECURE_WALLET_PIN_KEY),
+          secureGet(SECURE_LOCKED_SECTIONS_KEY),
           AsyncStorage.getItem("biometricEnabled"),
           AsyncStorage.getItem("isOnboarded"),
           readEncryptedString(CONVERSATIONS_KEY),
@@ -1504,6 +1587,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           readEncryptedString(LOCAL_WALLET_PRIV_KEY),
           AsyncStorage.getItem(THEME_KEY),
           AsyncStorage.getItem(PROFILE_IMAGE_KEY),
+          AsyncStorage.getItem(SIGNUP_PENDING_PHRASE_KEY),
         ]);
 
         // Re-derive the wallet address from the stored private key. If the key
@@ -1520,8 +1604,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setHasDuressPin(!!duressValue);
         setHasDecoyPin(!!decoyValue);
         setHasWalletPin(!!walletPinValue);
+        // Which categories require the shared lock PIN. Migration: existing
+        // wallet-PIN users keep the wallet locked by default.
+        let parsedLocked: string[] = [];
+        try { if (lockedSectionsRaw) parsedLocked = JSON.parse(lockedSectionsRaw); } catch {}
+        if (!lockedSectionsRaw && !!walletPinValue) parsedLocked = ["wallet"];
+        setLockedSections(Array.isArray(parsedLocked) ? parsedLocked : []);
         const biometricOn = biometric === "true";
         const isOnboarded = onboarded === "true";
+        // Interrupted signup: a device token means registration completed, but
+        // isOnboarded is unset because the user never confirmed their recovery
+        // phrase — resume at the phrase step. A pending flag with no token means
+        // registration never finished locally; drop it and start onboarding fresh.
+        const signupPendingAlias = signupPendingRaw && !isOnboarded && storedToken ? signupPendingRaw : null;
+        if (signupPendingRaw && !signupPendingAlias) {
+          AsyncStorage.removeItem(SIGNUP_PENDING_PHRASE_KEY).catch(() => {});
+        }
 
         let conversations: Conversation[] = createDefaultConversations();
         if (convData) {
@@ -1662,6 +1760,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           deviceToken: storedToken ?? null,
           biometricEnabled: biometricOn,
           isOnboarded,
+          signupPendingAlias,
           isLocked: true,
           conversations,
           callHistory,
@@ -1707,8 +1806,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setState((prev) => ({
             ...prev,
             appTokens: tokens,
-            casperBalance: balances[0] ?? prev.casperBalance,
-            fdBalance: balances[1] ?? prev.fdBalance,
+            gfcBalance: balances[0] ?? prev.gfcBalance,
+            fantasmaBalance: balances[1] ?? prev.fantasmaBalance,
           }));
         });
 
@@ -1900,6 +1999,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const wsRef = React.useRef<WebSocket | null>(null);
+  // Broadcast the profile photo to contacts once per session on first connect
+  // (not on every reconnect — that would spam avatars + advance ratchets).
+  const profileBroadcastedRef = React.useRef(false);
   // Gates the WS reconnect-on-close logic below so a backgrounded app stays
   // disconnected (see the AppState effect further down) instead of the
   // generic 5s reconnect timer reopening the socket seconds later while
@@ -1962,14 +2064,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  const setAlias = useCallback(async (alias: string) => {
+  const setAlias = useCallback(async (alias: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       await AsyncStorage.setItem(ALIAS_KEY, alias);
-      await AsyncStorage.setItem("isOnboarded", "true");
-      setState((prev) => ({ ...prev, alias, isOnboarded: true, isLocked: false }));
+      // isOnboarded is deliberately NOT set here. Onboarding stays mounted
+      // through the recovery-PIN + recovery-phrase steps; completeOnboarding()
+      // marks it done only after the user has seen and saved their phrase. An
+      // interrupted signup is detected on load via the signup-pending flag and
+      // resumed at the phrase step (see markSignupPendingPhrase / load path).
+      setState((prev) => ({ ...prev, alias, isLocked: false }));
     } catch (err) {
       console.error("[AppContext] Failed to save alias:", err);
-      throw err;
+      return { ok: false, error: "storage" };
     }
     // Awaited (not fire-and-forget) so callers — onboarding — don't navigate
     // away until this has genuinely finished. Previously this ran in an
@@ -2005,6 +2111,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         secureDelete(MY_SPK_PUB_KEY),
         secureDelete(MY_PQKEM_PRIV_KEY),
         secureDelete(MY_PQKEM_PUB_KEY),
+        // NOTE: the recovery-PIN verifier is intentionally NOT cleared here —
+        // onboarding stores it just before calling setAlias so an interrupted
+        // signup can validate the PIN on resume. A fresh signup overwrites it.
       ]);
       const reg = await registerWithServer(alias);
       if (reg?.ok) {
@@ -2017,25 +2126,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await secureSet(MY_PQKEM_PUB_KEY, reg.pqkemPub);
         setState((prev) => ({ ...prev, deviceToken: reg.token }));
         await generateAndUploadOPKs(alias, reg.token);
+        return { ok: true };
       } else if (reg && reg.conflict) {
-        // Alias was taken between onboarding's availability check and
-        // this registration call (race, or a stale check). No token
-        // was issued, so this device's identity keys were never
-        // actually registered — the user is left "onboarded" but
-        // silently unable to message/call/receive push until they
-        // notice and pick a different alias.
+        // Alias was taken between onboarding's availability check and this
+        // registration call. No token issued → nothing registered for this
+        // device. Onboarding surfaces this from the returned result and sends
+        // the user back to pick another alias (never marks onboarding done).
         console.warn(
           "[AppContext] Alias became unavailable during registration (race) — no identity registered",
           alias,
         );
-        Alert.alert(
-          "Alias already taken",
-          "Someone just registered this alias. Please go back and choose a different one — " +
-            "messaging, calls, and notifications won't work until you do.",
-        );
+        return { ok: false, error: "conflict" };
       }
+      return { ok: false, error: "network" };
     } catch (e) {
-      console.warn("[AppContext] Background registration failed:", e);
+      console.warn("[AppContext] Registration failed:", e);
+      return { ok: false, error: "network" };
     }
   }, []);
 
@@ -2050,27 +2156,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const recoverIdentity = useCallback(async (
     alias: string,
     phrase: string,
+    recoveryPin: string,
   ): Promise<{ ok: boolean; error?: string }> => {
-    const recoveredIkPriv = recoveryPhraseToKey(phrase);
-    if (!recoveredIkPriv) {
+    // The phrase encodes the BLINDED key value, not the raw key — unblind it
+    // with the recovery PIN before reclaiming. A wrong PIN yields a wrong key
+    // that then fails the server challenge, surfaced as invalid_phrase below.
+    const blindedValue = recoveryPhraseToKey(phrase);
+    if (!blindedValue) {
+      return { ok: false, error: "invalid_phrase" };
+    }
+    let recoveredIkPriv: string;
+    try {
+      recoveredIkPriv = await unblindKeyFromPhrase(blindedValue, recoveryPin, alias);
+    } catch {
       return { ok: false, error: "invalid_phrase" };
     }
 
     // Deliberately NOT cleared before the server call.
     //
     // This used to do the same defensive clear as setAlias — delete the
-    // device token and every IK/SPK/PQKEM key up front — and it made a
-    // failed recovery destructive: enter the wrong alias, or a phrase for
-    // an identity that no longer exists, and the device lost the working
-    // identity it still had, with nothing recovered in exchange. The user's
-    // situation goes from "I want to move my identity here" to "I have no
-    // identity at all", from a typo.
+    // device token, every IK/SPK/PQKEM key and the recovery-PIN check value
+    // up front — and it made a failed recovery destructive: enter the wrong
+    // alias, or a phrase for an identity that no longer exists, and the
+    // device lost the working identity it still had, with nothing recovered
+    // in exchange. The user's situation goes from "I want to move my
+    // identity here" to "I have no identity at all", from a typo.
     //
     // The clear was also pointless on the success path: every one of those
-    // seven keys is unconditionally overwritten by the secureSet calls
-    // below, so nothing stale can survive a successful recovery. It only
-    // ever had an effect when the recovery failed — which is exactly when
-    // it must not.
+    // eight keys is unconditionally overwritten below — the seven identity
+    // keys directly, and SECURE_RECOVERY_PIN_CHECK_KEY from the PIN just
+    // used to unblind — so nothing stale can survive a successful recovery.
+    // It only ever had an effect when the recovery failed, which is exactly
+    // when it must not.
     //
     // So: prove possession with the server FIRST, and only overwrite local
     // state once there is something to overwrite it with. A failed attempt
@@ -2087,6 +2204,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await secureSet(MY_SPK_PUB_KEY, result.spkPub);
     await secureSet(MY_PQKEM_PRIV_KEY, result.pqkemPriv);
     await secureSet(MY_PQKEM_PUB_KEY, result.pqkemPub);
+    // The PIN just used to unblind is, by definition, this identity's recovery
+    // PIN — persist its check value so it can be re-viewed in Settings here.
+    try {
+      await secureSet(SECURE_RECOVERY_PIN_CHECK_KEY, await recoveryPinVerifier(recoveryPin, alias));
+    } catch {
+      // Non-fatal — restore succeeded; only the Settings re-view guard is affected.
+    }
 
     await AsyncStorage.setItem(ALIAS_KEY, alias);
     await AsyncStorage.setItem("isOnboarded", "true");
@@ -2096,10 +2220,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, []);
 
-  const getRecoveryPhrase = useCallback(async (): Promise<string | null> => {
+  const getRecoveryPhrase = useCallback(async (
+    recoveryPin: string,
+    alias: string,
+  ): Promise<string | null> => {
     const ikPriv = await secureGet(MY_IK_PRIV_KEY);
     if (!ikPriv) return null;
-    return keyToRecoveryPhrase(ikPriv);
+    // Show the phrase for the BLINDED key value, so the words on screen (and
+    // any screenshot of them) are useless without the recovery PIN.
+    const blindedValue = await blindKeyForPhrase(ikPriv, recoveryPin, alias);
+    return keyToRecoveryPhrase(blindedValue);
+  }, []);
+
+  // Persist a check value for the recovery PIN so Settings can reject a
+  // mistyped PIN when re-showing the phrase. Call at set-time (onboarding) and
+  // after a successful restore.
+  const storeRecoveryPinVerifier = useCallback(async (recoveryPin: string, alias: string) => {
+    try {
+      await secureSet(SECURE_RECOVERY_PIN_CHECK_KEY, await recoveryPinVerifier(recoveryPin, alias));
+    } catch {
+      // Non-fatal: the phrase + restore still work; only the Settings re-view
+      // guard is affected.
+    }
+  }, []);
+
+  const checkRecoveryPin = useCallback(async (recoveryPin: string, alias: string): Promise<boolean> => {
+    const stored = await secureGet(SECURE_RECOVERY_PIN_CHECK_KEY);
+    if (!stored) return false;
+    try {
+      return (await recoveryPinVerifier(recoveryPin, alias)) === stored;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Mark that registration succeeded but the recovery phrase hasn't been
+  // confirmed saved yet. If signup is interrupted here, the load path resumes
+  // onboarding at the phrase step for this alias.
+  const markSignupPendingPhrase = useCallback(async (alias: string) => {
+    try {
+      await AsyncStorage.setItem(SIGNUP_PENDING_PHRASE_KEY, alias);
+    } catch {}
+    setState((prev) => ({ ...prev, signupPendingAlias: alias }));
+  }, []);
+
+  // Finish onboarding — only after the user has seen and acknowledged saving
+  // their recovery phrase. This is the single place isOnboarded becomes true
+  // for a fresh signup, which also releases the push-token / websocket effects
+  // in _layout that gate on it.
+  const completeOnboarding = useCallback(async () => {
+    try {
+      await AsyncStorage.setItem("isOnboarded", "true");
+      await AsyncStorage.removeItem(SIGNUP_PENDING_PHRASE_KEY);
+    } catch {}
+    setState((prev) => ({ ...prev, isOnboarded: true, signupPendingAlias: null }));
   }, []);
 
   const setPin = useCallback(async (pin: string) => {
@@ -2191,6 +2365,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw err;
     }
   }, []);
+
+  const setSectionLocked = useCallback(async (key: string, locked: boolean) => {
+    setLockedSections((prev) => {
+      const next = locked
+        ? Array.from(new Set([...prev, key]))
+        : prev.filter((k) => k !== key);
+      secureSet(SECURE_LOCKED_SECTIONS_KEY, JSON.stringify(next)).catch((e) =>
+        console.error("[AppContext] Failed to persist locked sections:", e),
+      );
+      return next;
+    });
+  }, []);
+
+  const isSectionLocked = useCallback(
+    (key: string) => hasWalletPin && lockedSections.includes(key),
+    [hasWalletPin, lockedSections],
+  );
 
   const setWalletPin = useCallback(async (pin: string) => {
     try {
@@ -3131,10 +3322,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       appTokens: tokens,
       // Ordered by id ascending server-side (routes/tokens.ts) — id 1 is
-      // CASPER, id 2 is the second app token (Fantasma). Falls back to the
+      // GFC, id 2 is the second app token (Fantasma). Falls back to the
       // previous value rather than 0 if the list ever comes back shorter.
-      casperBalance: balances[0] ?? prev.casperBalance,
-      fdBalance: balances[1] ?? prev.fdBalance,
+      gfcBalance: balances[0] ?? prev.gfcBalance,
+      fantasmaBalance: balances[1] ?? prev.fantasmaBalance,
     }));
   }, []);
 
@@ -3145,7 +3336,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       await AsyncStorage.setItem(CONNECTED_WALLET_KEY, trimmed);
-      setState((prev) => ({ ...prev, connectedWalletAddress: trimmed, solBalance: 0, fdBalance: 0, casperBalance: 0 }));
+      setState((prev) => ({ ...prev, connectedWalletAddress: trimmed, solBalance: 0, fantasmaBalance: 0, gfcBalance: 0 }));
       fetchSolBalance(trimmed).then((bal) =>
         setState((prev) => ({ ...prev, solBalance: bal }))
       );
@@ -3154,8 +3345,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setState((prev) => ({
           ...prev,
           appTokens: tokens,
-          casperBalance: balances[0] ?? 0,
-          fdBalance: balances[1] ?? 0,
+          gfcBalance: balances[0] ?? 0,
+          fantasmaBalance: balances[1] ?? 0,
         }));
       });
       return {};
@@ -3170,7 +3361,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Token balances belonged to the wallet that just disconnected — zero
     // them out too, but keep appTokens (name/symbol/mint) so the tabs don't
     // flash back to placeholder labels.
-    setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0, fdBalance: 0, casperBalance: 0 }));
+    setState((prev) => ({ ...prev, connectedWalletAddress: null, solBalance: 0, fantasmaBalance: 0, gfcBalance: 0 }));
   }, []);
 
   /**
@@ -3243,6 +3434,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // pickProfileImage in settings.tsx) — this only persists the reference
   // and deletes the previous file, mirroring setConversationBgImage/
   // removeBgImageFile's split of responsibilities.
+  // Broadcast my current profile photo to every real contact as an E2E
+  // control message (silent — never a bubble). Best-effort over a live WS;
+  // offline contacts pick it up on the next connect broadcast. Each send
+  // advances that contact's ratchet, exactly like a reaction.
+  const broadcastProfilePhoto = useCallback(async (overrideUri?: string | null) => {
+    const uri = overrideUri !== undefined ? overrideUri : latestStateRef.current.profileImageUri;
+    const dataUri = uri ? await compressAvatar(uri) : "";
+    if (dataUri === null) return; // compression failed — don't send garbage
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1) return; // best-effort; re-broadcast on connect
+    const myAlias = (latestStateRef.current.alias ?? "GHOST_USER").toUpperCase();
+    for (const conv of latestStateRef.current.conversations) {
+      if (!conv.isRealContact || !conv.drSession || !conv.recipientDeliveryId) continue;
+      try {
+        const photoId = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+        const wireText = wrapPayload(myAlias, photoId, "", undefined, undefined, undefined, dataUri);
+        const { state: newAlice, message: msg } = ratchetEncrypt(conv.drSession.alice, wireText);
+        ws.send(JSON.stringify({
+          type: "msg",
+          to: conv.recipientDeliveryId,
+          payload: JSON.stringify(msg),
+          x3dhHeader: conv.pendingX3DHHeader,
+        }));
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === conv.id && c.drSession
+              ? { ...c, drSession: { ...c.drSession, alice: newAlice }, pendingX3DHHeader: undefined }
+              : c
+          );
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+      } catch (e) {
+        console.warn("[ProfilePhoto] send failed for", conv.alias, e);
+      }
+    }
+  }, [persistConversations]);
+
   const setProfileImage = useCallback(async (uri: string | null) => {
     const previous = latestStateRef.current.profileImageUri;
     if (previous && previous !== uri) {
@@ -3254,7 +3483,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.removeItem(PROFILE_IMAGE_KEY);
     }
     setState((prev) => ({ ...prev, profileImageUri: uri }));
-  }, []);
+    // Push the new (or cleared) avatar to contacts, E2E.
+    void broadcastProfilePhoto(uri);
+  }, [broadcastProfilePhoto]);
 
   // SILENCE CONTRACT: panicWipe must never produce any haptic or audio
   // feedback. A bystander must not be able to detect that a wipe occurred
@@ -3382,6 +3613,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         secureDelete(SECURE_DURESS_PIN_KEY),
         secureDelete(SECURE_DECOY_PIN_KEY),
         secureDelete(SECURE_WALLET_PIN_KEY),
+        secureDelete(SECURE_RECOVERY_PIN_CHECK_KEY),
+        secureDelete(SECURE_LOCKED_SECTIONS_KEY),
         secureDelete(DEVICE_TOKEN_KEY),
         secureDelete(MY_IK_PRIV_KEY),
         secureDelete(MY_IK_PUB_KEY),
@@ -3421,12 +3654,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       biometricEnabled: false,
       isLocked: false,
       isOnboarded: false,
+      signupPendingAlias: null,
       vpnConnected: false,
       vpnServer: null,
       conversations: [],
       callHistory: [],
-      fdBalance: 0,
-      casperBalance: 0,
+      fantasmaBalance: 0,
+      gfcBalance: 0,
       appTokens: [],
       walletAddress: null,
       transactions: DEFAULT_TRANSACTIONS,
@@ -4084,6 +4318,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // ── Profile photo: silent control message that sets this contact's
+      // avatar; never rendered as a Message. Ratchet advance still commits.
+      if (unwrapped.profilePhoto !== undefined) {
+        const photo = unwrapped.profilePhoto;
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === conv.id
+              ? { ...c, contactPhoto: photo === "" ? undefined : photo, drSession: updatedSession }
+              : c
+          );
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
       // ── ID-collision guard: received ids are peer-controlled (sender-
       // generated, v4). A collision with an existing message id — stale
       // replay, retried outbox duplicate, or malicious — must never clobber
@@ -4261,6 +4511,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               : c.messages; // unknown/purged target — drop silently, no placeholder
             return { ...c, messages, drSession: { ...bobSession, alice: newAlice }, safetyNumber };
           });
+          persistConversations(updated);
+          return { ...prev, conversations: updated };
+        });
+        return;
+      }
+
+      // Profile photo arriving on a session-establishing message: store it on
+      // the existing conversation shell (if any) and commit the ratchet.
+      if (unwrappedFirst.profilePhoto !== undefined) {
+        const existingConv = latestStateRef.current.conversations.find((c) => c.alias === senderAlias);
+        if (!existingConv) return;
+        const photo = unwrappedFirst.profilePhoto;
+        setState((prev) => {
+          const updated = prev.conversations.map((c) =>
+            c.id === existingConv.id
+              ? { ...c, contactPhoto: photo === "" ? undefined : photo, drSession: { ...bobSession, alice: newAlice }, safetyNumber }
+              : c
+          );
           persistConversations(updated);
           return { ...prev, conversations: updated };
         });
@@ -4453,6 +4721,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ws.onopen = () => {
           ws.send(JSON.stringify({ type: "auth", alias, token: deviceToken }));
           schedulePing();
+          // One-time avatar re-broadcast so contacts who were offline when we
+          // last changed it still receive it. Delay lets auth settle.
+          if (!profileBroadcastedRef.current && latestStateRef.current.profileImageUri) {
+            profileBroadcastedRef.current = true;
+            setTimeout(() => { void broadcastProfilePhoto(); }, 2500);
+          }
         };
 
         // Auth-error flag: set by onmessage when server sends { type:"error", message:"auth failed" }.
@@ -4650,11 +4924,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         hasDecoyPin,
         hasWalletPin,
         walletUnlocked,
+        lockedSections,
+        isSectionLocked,
+        setSectionLocked,
         decoyMode,
         loadError,
         setAlias,
         recoverIdentity,
         getRecoveryPhrase,
+        storeRecoveryPinVerifier,
+        checkRecoveryPin,
+        markSignupPendingPhrase,
+        completeOnboarding,
         setPin,
         checkPin,
         checkDuressPin,

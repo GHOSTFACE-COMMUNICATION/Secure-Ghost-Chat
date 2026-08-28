@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -18,7 +19,9 @@ import { GoldGradient } from "@/components/GoldGradient";
 import { getApiBase, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { normalizeAlias } from "@/utils/alias";
+import * as ScreenCapture from "expo-screen-capture";
 import { recoveryPhraseToKey } from "@/lib/recoveryPhrase";
+import { formatInviteCodeInput, redeemInvite } from "@/lib/invites";
 import { type } from "@/constants/typography";
 
 // Larger pool than we ever show at once — the suggestion row rotates through
@@ -32,6 +35,7 @@ const ALIAS_POOL = [
 ];
 const SUGGESTIONS_SHOWN = 6;
 const ROTATE_INTERVAL_MS = 4500;
+
 
 function sampleAliases(count: number): string[] {
   const pool = [...ALIAS_POOL];
@@ -62,19 +66,80 @@ async function checkAliasTaken(alias: string): Promise<boolean | null> {
 export default function OnboardingScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { setAlias, setPin, recoverIdentity, getRecoveryPhrase, themePreference } = useApp();
+  const {
+    setAlias,
+    setPin,
+    recoverIdentity,
+    getRecoveryPhrase,
+    storeRecoveryPinVerifier,
+    checkRecoveryPin,
+    markSignupPendingPhrase,
+    completeOnboarding,
+    addConversation,
+    signupPendingAlias,
+    themePreference,
+  } = useApp();
   const isLight = themePreference === "light";
   const [alias, setAliasText] = useState("");
-  const [step, setStep] = useState<"alias" | "pin" | "recovery" | "restore">("alias");
+  const [step, setStep] = useState<"alias" | "pin" | "recoveryPin" | "recovery" | "restore" | "resume">(
+    signupPendingAlias ? "resume" : "alias",
+  );
+  // If an interrupted signup is detected after this screen has already mounted
+  // (load finished a beat later), jump to the resume step.
+  useEffect(() => {
+    if (signupPendingAlias && step === "alias") setStep("resume");
+  }, [signupPendingAlias, step]);
+
+  // Hidden refer-a-friend perk: a cryptic Pig-Latin nudge next to the coin.
+  // Tapping it reveals a chance to earn a free month by inviting a friend.
+  // Presentation only — the actual referral tracking + grant is server-side.
+  const [referralOpen, setReferralOpen] = useState(false);
+  const referralAnim = useRef(new Animated.Value(0)).current;
+  const revealReferral = () => {
+    if (referralOpen) return;
+    setReferralOpen(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Animated.spring(referralAnim, { toValue: 1, useNativeDriver: true, speed: 12, bounciness: 10 }).start();
+  };
+
+  // Recovery phrase is the one thing the user MUST save — lift the app-wide
+  // screen-capture block while it's shown so they can screenshot it, then
+  // restore the block when they leave the step.
+  useEffect(() => {
+    if (step === "recovery") {
+      ScreenCapture.allowScreenCaptureAsync();
+      return () => {
+        ScreenCapture.preventScreenCaptureAsync();
+      };
+    }
+  }, [step]);
   const [pin, setPinText] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
   const [pinError, setPinError] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState("");
   const [recoverySaved, setRecoverySaved] = useState(false);
+  // Optional invite code captured at the end of sign-up. With no contact
+  // discovery by design, an invite is the only route to a first
+  // conversation — so this is the moment to ask, while the invitee still has
+  // the code they were sent in hand.
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteNote, setInviteNote] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  // Recovery PIN — the second factor that blinds the recovery phrase. Set once
+  // here, never stored; required again to restore on a new device.
+  const [recoveryPin, setRecoveryPin] = useState("");
+  const [recoveryPinConfirm, setRecoveryPinConfirm] = useState("");
+  const [recoveryPinError, setRecoveryPinError] = useState("");
+  const [generatingPhrase, setGeneratingPhrase] = useState(false);
   const [restoreAlias, setRestoreAlias] = useState("");
   const [restorePhrase, setRestorePhrase] = useState("");
+  const [restoreRecoveryPin, setRestoreRecoveryPin] = useState("");
   const [restoreError, setRestoreError] = useState("");
   const [restoring, setRestoring] = useState(false);
+  // Resume-interrupted-signup step state.
+  const [resumePin, setResumePin] = useState("");
+  const [resumeError, setResumeError] = useState("");
+  const [resuming, setResuming] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(() => sampleAliases(SUGGESTIONS_SHOWN));
   const [aliasStatus, setAliasStatus] = useState<
     "idle" | "checking" | "available" | "taken" | "unknown"
@@ -117,26 +182,16 @@ export default function OnboardingScreen() {
     setStep("pin");
   };
 
-  // Both paths land on the recovery-phrase step before finishing onboarding
-  // — the identity key was just generated inside setAlias, and this is the
-  // one and only time it's ever shown.
-  const goToRecoveryStep = async () => {
-    const phrase = await getRecoveryPhrase();
-    setRecoveryPhrase(phrase ?? "");
-    setStep("recovery");
-  };
-
-  const handleSkipPin = async () => {
-    // Defensive — handleAliasConfirm already gates entry to this step on a
-    // valid normalized alias, so this should never actually be null here.
-    const normalized = normalizeAlias(alias);
-    if (!normalized) { setStep("alias"); return; }
+  // Login PIN skipped. The identity is NOT registered until the recovery PIN
+  // is set (handleRecoveryPinConfirm), so there's nothing to persist here.
+  const handleSkipPin = () => {
+    if (!normalizeAlias(alias)) { setStep("alias"); return; }
+    setPinText("");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await setAlias(normalized);
-    await goToRecoveryStep();
+    setStep("recoveryPin");
   };
 
-  const handlePinConfirm = async () => {
+  const handlePinConfirm = () => {
     if (pin.length < 4) {
       setPinError("PIN must be at least 4 digits");
       return;
@@ -146,16 +201,120 @@ export default function OnboardingScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
-    const normalized = normalizeAlias(alias);
-    if (!normalized) { setStep("alias"); return; }
+    if (!normalizeAlias(alias)) { setStep("alias"); return; }
+    // Keep the login PIN in state; it's applied once the identity is actually
+    // registered in handleRecoveryPinConfirm.
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await setAlias(normalized);
-    await setPin(pin);
-    await goToRecoveryStep();
+    setStep("recoveryPin");
   };
 
-  const handleRecoveryContinue = () => {
+  // The recovery phrase encodes the identity key BLINDED with the recovery PIN
+  // (lib/recoveryPin.ts). We set the PIN, THEN register the identity (so the
+  // key exists to derive the phrase), THEN show the phrase. Onboarding is only
+  // marked complete at "ENTER GHOSTFACE" (handleRecoveryContinue), so the user
+  // can never skip past seeing their phrase.
+  const handleRecoveryPinConfirm = async () => {
+    if (!/^\d{6}$/.test(recoveryPin)) {
+      setRecoveryPinError("Recovery PIN must be 6 digits");
+      return;
+    }
+    if (recoveryPin !== recoveryPinConfirm) {
+      setRecoveryPinError("Recovery PINs do not match");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    const normalized = normalizeAlias(alias);
+    if (!normalized) { setStep("alias"); return; }
+    setRecoveryPinError("");
+    setGeneratingPhrase(true);
+    try {
+      // Store the PIN check value BEFORE registering, so an interrupted signup
+      // can validate the PIN on resume (setAlias deliberately no longer clears it).
+      await storeRecoveryPinVerifier(recoveryPin, normalized);
+      // Register now (deferred from the alias/PIN steps).
+      const result = await setAlias(normalized);
+      if (!result.ok) {
+        setGeneratingPhrase(false);
+        if (result.error === "conflict") {
+          setAliasStatus("taken");
+          setStep("alias");
+        } else {
+          setRecoveryPinError("Couldn't register — check your connection and try again");
+        }
+        return;
+      }
+      // Registered: anchor the resume point, apply the login PIN if one was set.
+      await markSignupPendingPhrase(normalized);
+      if (pin.length >= 4) await setPin(pin);
+      const phrase = await getRecoveryPhrase(recoveryPin, normalized);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setRecoveryPhrase(phrase ?? "");
+      setStep("recovery");
+    } catch {
+      setRecoveryPinError("Couldn't generate your recovery phrase — try again");
+    } finally {
+      setGeneratingPhrase(false);
+    }
+  };
+
+  // Resume an interrupted signup: identity already registered, but the phrase
+  // was never confirmed saved. Validate the recovery PIN and re-show the phrase.
+  const handleResumeSubmit = async () => {
+    const a = signupPendingAlias;
+    if (!a) { setStep("alias"); return; }
+    if (!/^\d{6}$/.test(resumePin)) { setResumeError("Enter your 6-digit recovery PIN"); return; }
+    setResumeError("");
+    setResuming(true);
+    try {
+      const ok = await checkRecoveryPin(resumePin, a);
+      if (!ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        setResumeError("Incorrect recovery PIN");
+        setResuming(false);
+        return;
+      }
+      const phrase = await getRecoveryPhrase(resumePin, a);
+      setRecoveryPhrase(phrase ?? "");
+      setStep("recovery");
+    } catch {
+      setResumeError("Something went wrong — try again");
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  const handleRecoveryContinue = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await completeOnboarding();
+
+    // An invite is a bonus, never a gate. A code that is expired, already
+    // used, or simply mistyped must not strand someone on the last screen of
+    // sign-up with a finished identity. So on failure the code is CLEARED
+    // and the reason shown: the next press of the same button walks straight
+    // into the app, with a pointer to where the invite can be retried. The
+    // one thing that must never happen is a bad code from someone else
+    // blocking an account that already exists.
+    if (inviteCode) {
+      setInviteBusy(true);
+      const result = await redeemInvite(inviteCode, addConversation);
+      setInviteBusy(false);
+      if (!result.ok) {
+        setInviteNote(
+          result.reason === "used"
+            ? "That invite has already been used. You can add a contact from MESSAGES."
+            : result.reason === "expired"
+            ? "That invite has expired. Ask for a new one, then add it from MESSAGES."
+            : result.reason === "bad_format"
+            ? "That doesn't look like an invite code. You can add one from MESSAGES."
+            : "Couldn't redeem that invite. You can try again from MESSAGES.",
+        );
+        setInviteCode("");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+
     router.replace("/(tabs)");
   };
 
@@ -169,9 +328,13 @@ export default function OnboardingScreen() {
       setRestoreError("That doesn't look like a valid 24-word recovery phrase");
       return;
     }
+    if (!/^\d{6}$/.test(restoreRecoveryPin)) {
+      setRestoreError("Enter your 6-digit recovery PIN");
+      return;
+    }
     setRestoreError("");
     setRestoring(true);
-    const result = await recoverIdentity(normalizedRestoreAlias, restorePhrase);
+    const result = await recoverIdentity(normalizedRestoreAlias, restorePhrase, restoreRecoveryPin);
     setRestoring(false);
     if (!result.ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -179,7 +342,7 @@ export default function OnboardingScreen() {
         result.error === "not_found"
           ? "No identity found for that alias"
           : result.error === "proof_failed"
-          ? "That phrase doesn't match this alias"
+          ? "That phrase and recovery PIN don't match this alias"
           : result.error === "invalid_phrase"
           ? "That doesn't look like a valid 24-word recovery phrase"
           : "Couldn't reach the server — check your connection and try again",
@@ -205,10 +368,22 @@ export default function OnboardingScreen() {
     },
     header: {
       alignItems: "center",
-      // Shifted up 10mm (~38px @ 96dpi) — CONFIRM ALIAS was sitting low
-      // enough to need an awkward reach/tilt to tap.
-      marginTop: 32 - 38,
-      marginBottom: 32,
+      marginTop: 8,
+      marginBottom: 30,
+    },
+    pigLatinNudge: {
+      position: "absolute",
+      right: 8,
+      top: 64,
+      paddingVertical: 4,
+      paddingHorizontal: 6,
+    },
+    pigLatinText: {
+      fontFamily: "ShareTechMono_400Regular",
+      fontSize: 11,
+      lineHeight: 15,
+      letterSpacing: 1,
+      color: "rgba(201,154,60,0.8)",
     },
     tagline: {
       ...type.labelStrong,
@@ -219,9 +394,10 @@ export default function OnboardingScreen() {
     },
     appName: {
       ...type.display,
-      fontSize: 28,
-      letterSpacing: 1,
-      color: colors.foreground,
+      fontFamily: "Cinzel_700Bold",
+      fontSize: 27,
+      letterSpacing: 1.5,
+      color: colors.primary,
       marginTop: 8,
     },
     sectionTitle: {
@@ -234,10 +410,10 @@ export default function OnboardingScreen() {
       ...type.title,
       fontSize: 18,
       letterSpacing: 1.5,
-      backgroundColor: colors.card,
+      backgroundColor: "rgba(255,255,255,0.06)",
       color: colors.foreground,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: "rgba(255,255,255,0.85)",
       borderRadius: colors.radius,
       paddingHorizontal: 16,
       paddingVertical: 14,
@@ -255,7 +431,7 @@ export default function OnboardingScreen() {
       gap: 8,
       marginBottom: 20,
     },
-    suggestionChip: { borderRadius: colors.radius, overflow: "hidden" },
+    suggestionChip: { borderRadius: colors.radius, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)" },
     suggestionChipInner: {
       borderRadius: colors.radius,
       paddingHorizontal: 12,
@@ -272,7 +448,7 @@ export default function OnboardingScreen() {
       borderRadius: colors.radius,
       marginBottom: 12,
       borderWidth: 1,
-      borderColor: "#ffffff",
+      borderColor: "rgba(255,255,255,0.85)",
       overflow: "hidden",
     },
     confirmBtnInner: {
@@ -376,6 +552,35 @@ export default function OnboardingScreen() {
       color: colors.foreground,
       flex: 1,
     },
+    inviteBlock: {
+      marginBottom: 18,
+    },
+    inviteLabel: {
+      ...type.caption,
+      fontSize: 11,
+      letterSpacing: 1.6,
+      color: colors.mutedForeground,
+      marginBottom: 6,
+    },
+    inviteHint: {
+      ...type.caption,
+      fontSize: 11,
+      color: colors.mutedForeground,
+      marginBottom: 10,
+      lineHeight: 16,
+    },
+    inviteInput: {
+      ...type.mono,
+      fontSize: 15,
+      textTransform: "none" as const,
+    },
+    inviteNote: {
+      ...type.caption,
+      fontSize: 11,
+      color: "#E5A23D",
+      marginTop: 8,
+      lineHeight: 16,
+    },
     phraseInput: {
       ...type.mono,
       fontSize: 14,
@@ -401,11 +606,36 @@ export default function OnboardingScreen() {
       textAlign: "center",
       marginBottom: 16,
     },
+    recoveryWarning: {
+      flexDirection: "row",
+      gap: 10,
+      alignItems: "flex-start",
+      borderWidth: 1,
+      borderColor: "rgba(229,72,77,0.55)",
+      backgroundColor: "rgba(229,72,77,0.10)",
+      borderRadius: colors.radius,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      marginBottom: 16,
+    },
+    recoveryWarningTitle: {
+      ...type.labelStrong,
+      fontSize: 11,
+      letterSpacing: 0.8,
+      color: "#F0787C",
+      marginBottom: 4,
+    },
+    recoveryWarningText: {
+      ...type.caption,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.foreground,
+    },
     promoBanner: {
       borderWidth: 1,
-      borderColor: "#ef4444",
+      borderColor: "rgba(201,154,60,0.45)",
       borderRadius: colors.radius,
-      backgroundColor: "rgba(239,68,68,0.07)",
+      backgroundColor: "rgba(201,154,60,0.08)",
       paddingHorizontal: 16,
       paddingVertical: 14,
       marginBottom: 20,
@@ -417,7 +647,7 @@ export default function OnboardingScreen() {
       width: 36,
       height: 36,
       borderRadius: 18,
-      backgroundColor: "rgba(239,68,68,0.15)",
+      backgroundColor: "rgba(201,154,60,0.16)",
       alignItems: "center",
       justifyContent: "center",
     },
@@ -427,7 +657,7 @@ export default function OnboardingScreen() {
     promoLabel: {
       ...type.labelStrong,
       fontSize: 10,
-      color: "#ef4444",
+      color: "#C99A3C",
       marginBottom: 2,
     },
     promoHeadline: {
@@ -442,7 +672,7 @@ export default function OnboardingScreen() {
       marginTop: 2,
     },
     promoBadge: {
-      backgroundColor: "#ef4444",
+      backgroundColor: "#C99A3C",
       borderRadius: 4,
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -467,10 +697,57 @@ export default function OnboardingScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <GhostLogo size={120} color={colors.foreground} />
+          <View style={{ width: "100%", alignItems: "center", justifyContent: "center" }}>
+            <GhostLogo size={180} coin />
+            {/* Cryptic Pig-Latin nudge tucked beside the coin — tap to reveal
+                a refer-a-friend perk. */}
+            {!referralOpen && (
+              <Pressable onPress={revealReferral} hitSlop={12} style={styles.pigLatinNudge}>
+                <Text style={styles.pigLatinText}>sst…{"\n"}apTay{"\n"}erehay</Text>
+              </Pressable>
+            )}
+          </View>
           <Text style={styles.tagline}>NO FACE. NO TRACE.</Text>
           <Text style={styles.appName}>GHOSTFACE®</Text>
         </View>
+
+        {referralOpen && (
+          <Animated.View
+            style={{
+              alignItems: "center",
+              marginBottom: 20,
+              opacity: referralAnim,
+              transform: [{ scale: referralAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.85)",
+                backgroundColor: "rgba(255,255,255,0.06)",
+                borderRadius: colors.radius,
+                paddingHorizontal: 16,
+                paddingVertical: 10,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>🎁</Text>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={{ ...type.labelStrong, fontSize: 9, color: "#C99A3C", letterSpacing: 1.5 }}>
+                  REFER A FRIEND
+                </Text>
+                <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground }}>
+                  You both get 1 MONTH OF GHOSTFACE+ FREE
+                </Text>
+              </View>
+            </View>
+            <Text style={{ ...type.caption, fontSize: 10, color: colors.mutedForeground, marginTop: 6, textAlign: "center" }}>
+              Share your invite once you're set up — the free month lands when they join.
+            </Text>
+          </Animated.View>
+        )}
 
         {step === "alias" ? (
           <>
@@ -542,23 +819,6 @@ export default function OnboardingScreen() {
                 />
                 </GoldGradient>
               </Pressable>
-            </View>
-
-            {/* First Login Special — Free Ghost Number */}
-            <View style={styles.promoBanner}>
-              <View style={styles.promoIconWrap}>
-                <Ionicons name="call" size={18} color="#ef4444" />
-              </View>
-              <View style={styles.promoTextWrap}>
-                <Text style={styles.promoLabel}>FIRST LOGIN SPECIAL</Text>
-                <Text style={styles.promoHeadline}>FREE Ghost Number</Text>
-                <Text style={styles.promoSub}>
-                  Claim a real virtual phone number — receive calls & SMS anonymously.
-                </Text>
-                <View style={styles.promoBadge}>
-                  <Text style={styles.promoBadgeText}>CLAIM AFTER SETUP →</Text>
-                </View>
-              </View>
             </View>
 
             <Pressable
@@ -682,12 +942,80 @@ export default function OnboardingScreen() {
               </Text>
             </View>
           </>
+        ) : step === "recoveryPin" ? (
+          <>
+            <Pressable style={styles.backBtn} onPress={() => setStep("pin")}>
+              <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} />
+              <Text style={styles.backText}>BACK</Text>
+            </Pressable>
+
+            <Text style={styles.sectionTitle}>SET YOUR RECOVERY PIN</Text>
+            <Text style={styles.pinOptionalLabel}>
+              A 6-DIGIT SECOND FACTOR. TO RESTORE ON A NEW DEVICE YOU'LL NEED THIS PIN AND YOUR RECOVERY PHRASE — THE PHRASE ALONE ISN'T ENOUGH. WE NEVER STORE IT, SO DON'T FORGET IT.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={recoveryPin}
+              onChangeText={(t) => { setRecoveryPin(t.replace(/\D/g, "")); setRecoveryPinError(""); }}
+              placeholder="••••••"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="numeric"
+              secureTextEntry
+              maxLength={6}
+              testID="recovery-pin-input"
+            />
+            <TextInput
+              style={[styles.input, { marginBottom: recoveryPinError ? 8 : 16 }]}
+              value={recoveryPinConfirm}
+              onChangeText={(t) => { setRecoveryPinConfirm(t.replace(/\D/g, "")); setRecoveryPinError(""); }}
+              placeholder="CONFIRM RECOVERY PIN"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="numeric"
+              secureTextEntry
+              maxLength={6}
+              testID="recovery-pin-confirm-input"
+            />
+            {recoveryPinError ? (
+              <Text style={styles.errorText}>{recoveryPinError}</Text>
+            ) : null}
+
+            <Pressable
+              style={[
+                styles.confirmBtn,
+                (recoveryPin.length < 6 || generatingPhrase) && styles.confirmBtnDisabled,
+              ]}
+              onPress={handleRecoveryPinConfirm}
+              disabled={recoveryPin.length < 6 || generatingPhrase}
+              testID="recovery-pin-confirm-btn"
+            >
+              <GoldGradient style={styles.confirmBtnInner}>
+                <Text style={styles.confirmBtnText}>
+                  {generatingPhrase ? "GENERATING…" : "SET RECOVERY PIN"}
+                </Text>
+              </GoldGradient>
+            </Pressable>
+
+            <View style={styles.disclaimerRow}>
+              <Ionicons name="lock-closed" size={12} color={colors.mutedForeground} />
+              <Text style={styles.disclaimerText}>
+                Required — your only second factor for recovery
+              </Text>
+            </View>
+          </>
         ) : step === "recovery" ? (
           <>
             <Text style={styles.sectionTitle}>YOUR RECOVERY PHRASE</Text>
-            <Text style={styles.pinOptionalLabel}>
-              WRITE THIS DOWN — IT'S THE ONLY WAY TO RECOVER YOUR IDENTITY IF YOU LOSE THIS DEVICE. WE NEVER STORE IT, SO IF THE PHRASE AND THIS DEVICE ARE BOTH GONE, SO IS YOUR ALIAS. YOU CAN VIEW IT AGAIN IN SETTINGS WHILE YOU STILL HAVE THIS DEVICE.
-            </Text>
+            <View style={styles.recoveryWarning}>
+              <Ionicons name="warning" size={18} color="#E5484D" style={{ marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.recoveryWarningTitle}>
+                  THIS IS THE ONLY WAY TO RECOVER YOUR ACCOUNT
+                </Text>
+                <Text style={styles.recoveryWarningText}>
+                  Write down these 24 words and keep them safe. To restore on a new device you'll need them together with your 6-digit recovery PIN — neither one works without the other. We never store either, so if you lose the phrase and this device, your alias is gone for good. No reset, no support recovery.
+                </Text>
+              </View>
+            </View>
 
             <View style={styles.phraseBox}>
               <View style={styles.phraseGrid}>
@@ -713,6 +1041,30 @@ export default function OnboardingScreen() {
               <Text style={styles.recoveryCheckText}>I've written down my recovery phrase</Text>
             </Pressable>
 
+            <View style={styles.inviteBlock}>
+              <Text style={styles.inviteLabel}>HAVE AN INVITE CODE?</Text>
+              <Text style={styles.inviteHint}>
+                Optional. Paste the code you were sent and we'll add them as your
+                first contact.
+              </Text>
+              <TextInput
+                style={[styles.input, styles.inviteInput]}
+                value={inviteCode}
+                onChangeText={(t) => {
+                  setInviteNote("");
+                  setInviteCode(formatInviteCodeInput(t));
+                }}
+                placeholder="GF-XXXX-XXXX"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={12}
+                editable={!inviteBusy}
+                testID="onboarding-invite-code"
+              />
+              {inviteNote ? <Text style={styles.inviteNote}>{inviteNote}</Text> : null}
+            </View>
+
             <Pressable
               style={[styles.confirmBtn, !recoverySaved && styles.confirmBtnDisabled]}
               onPress={handleRecoveryContinue}
@@ -721,6 +1073,44 @@ export default function OnboardingScreen() {
             >
               <GoldGradient style={styles.confirmBtnInner}>
                 <Text style={styles.confirmBtnText}>ENTER GHOSTFACE</Text>
+              </GoldGradient>
+            </Pressable>
+          </>
+        ) : step === "resume" ? (
+          <>
+            <Text style={styles.sectionTitle}>FINISH SETTING UP</Text>
+            <View style={styles.recoveryWarning}>
+              <Ionicons name="warning" size={18} color="#E5484D" style={{ marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.recoveryWarningTitle}>
+                  YOU HAVEN'T SAVED YOUR RECOVERY PHRASE YET
+                </Text>
+                <Text style={styles.recoveryWarningText}>
+                  Your sign-up was interrupted before you saved your recovery phrase. Enter your 6-digit recovery PIN to see it and finish — without it you can't recover this account.
+                </Text>
+              </View>
+            </View>
+            <TextInput
+              style={styles.input}
+              value={resumePin}
+              onChangeText={(t) => { setResumePin(t.replace(/\D/g, "")); setResumeError(""); }}
+              placeholder="6-DIGIT RECOVERY PIN"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="numeric"
+              secureTextEntry
+              maxLength={6}
+              testID="resume-recovery-pin-input"
+              autoFocus
+            />
+            {resumeError ? <Text style={styles.errorText}>{resumeError}</Text> : null}
+            <Pressable
+              style={[styles.confirmBtn, (resuming || resumePin.length < 6) && styles.confirmBtnDisabled]}
+              onPress={handleResumeSubmit}
+              disabled={resuming || resumePin.length < 6}
+              testID="resume-submit"
+            >
+              <GoldGradient style={styles.confirmBtnInner}>
+                <Text style={styles.confirmBtnText}>{resuming ? "CHECKING…" : "SHOW MY RECOVERY PHRASE"}</Text>
               </GoldGradient>
             </Pressable>
           </>
@@ -733,7 +1123,7 @@ export default function OnboardingScreen() {
 
             <Text style={styles.sectionTitle}>RESTORE YOUR IDENTITY</Text>
             <Text style={styles.pinOptionalLabel}>
-              ENTER THE ALIAS YOU ORIGINALLY REGISTERED AND YOUR 24-WORD RECOVERY PHRASE
+              ENTER YOUR ORIGINAL ALIAS, YOUR 24-WORD RECOVERY PHRASE, AND YOUR 6-DIGIT RECOVERY PIN
             </Text>
 
             <TextInput
@@ -760,15 +1150,27 @@ export default function OnboardingScreen() {
               testID="restore-phrase-input"
             />
 
+            <TextInput
+              style={styles.input}
+              value={restoreRecoveryPin}
+              onChangeText={(t) => { setRestoreRecoveryPin(t.replace(/\D/g, "")); setRestoreError(""); }}
+              placeholder="6-DIGIT RECOVERY PIN"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="numeric"
+              secureTextEntry
+              maxLength={6}
+              testID="restore-recovery-pin-input"
+            />
+
             {restoreError ? <Text style={styles.errorText}>{restoreError}</Text> : null}
 
             <Pressable
               style={[
                 styles.confirmBtn,
-                (restoring || restoreAlias.trim().length < 3 || !restorePhrase.trim()) && styles.confirmBtnDisabled,
+                (restoring || restoreAlias.trim().length < 3 || !restorePhrase.trim() || restoreRecoveryPin.length < 6) && styles.confirmBtnDisabled,
               ]}
               onPress={handleRestoreSubmit}
-              disabled={restoring || restoreAlias.trim().length < 3 || !restorePhrase.trim()}
+              disabled={restoring || restoreAlias.trim().length < 3 || !restorePhrase.trim() || restoreRecoveryPin.length < 6}
               testID="restore-submit"
             >
               <GoldGradient style={styles.confirmBtnInner}>

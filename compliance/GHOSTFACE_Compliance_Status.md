@@ -1,71 +1,169 @@
-# GHOSTFACE — Compliance Status Dashboard
+# GHOSTFACE — Compliance Status (Health Check)
 
-Compiled from `compliance/`, `STATUS.md`, and `TRACKER.md` (GF-01/GF-02 rows) as of the latest tracker entries (26 Aug 2026: counsel receipt confirmed). This is a tracking document, not a legal opinion — GHOSTFACE has no formal SOC 2/ISO/HIPAA/PCI program; the live compliance surface is export control plus platform/privacy obligations tied to launch.
+> The live GF-01 position. For frameworks in scope, the control inventory and
+> gap analysis, see `GHOSTFACE_Compliance_Dashboard.md`.
 
-## 1. Frameworks in scope
+**As at:** 26 August 2026
+**Scope:** Export-control classification of the GHOSTFACE encrypted messenger
+(US EAR + NZ strategic goods) and the Apple App Store encryption declaration.
+**Owner:** Benjamin Henderson · GHOSTFACE LIMITED
 
-| Framework | Applies because | Status |
-|---|---|---|
-| US EAR (encryption export control) | Distributed via Apple's US infrastructure and built on Expo's US build servers, regardless of NZ domicile | 🔄 Opinion in progress |
-| NZ strategic-goods control (Wassenaar Cryptography Note / MFAT) | Ghostface Limited is the NZ exporter of record | 🔄 Opinion in progress |
-| Apple App Store platform rules | Export-compliance questionnaire + `ITSAppUsesNonExemptEncryption` declaration required for every submission; privacy policy URL required for review | ⏸ Blocked pending #1/#2 |
-| NZ Privacy Act 2020 (IPPs) | App collects/stores personal comms data from NZ users | ⬜ Policy drafted, gaps open |
-| GDPR (UK/EU) | Contingent — only applies if EU/UK users are served | ⬜ Not yet assessed |
-
-## 2. Control inventory / evidence on file
-
-| Document | Purpose | Location |
-|---|---|---|
-| `GHOSTFACE_Cryptographic_Inventory.md/.pdf` | Factual inventory of every algorithm, library, and protocol composition (ChaCha20-Poly1305, X25519, Ed25519, ML-KEM-768, HKDF, PBKDF2 — all standard, via `@noble/*`) | `compliance/` |
-| `GHOSTFACE_Classification_Memo.md/.pdf` | Frames the mass-market self-classification question for counsel, flags `kdfRkPQ` (HKDF composition of X25519 + ML-KEM-768 secrets) as the one element to scrutinise | `compliance/` |
-| `GHOSTFACE_ASC_Declaration_Exhibits.pdf` | 6-exhibit screenshot bundle: 2 failed June ASC doc uploads, Jul 3 build-27 rejection (error 90592), Jul 16 build-27 Invalid Binary, Aug 21 build-63 Validated | `compliance/` |
-| `gf01-materials-covering-email.md` | Final covering email to counsel (Sarah Salmond, MinterEllisonRuddWatts), states the five-step declaration history accurately | `compliance/` |
-| Privacy + support pages | Live on the landing site; drafted from actual app behavior (alias-only registration, opaque `delivery_id` routing, public-keys-only storage, hashed push tokens, non-custodial wallet) | `~/Projects/ghostface-landing` (separate repo) |
-
-**Not yet captured as evidence:** the July ASC questionnaire record itself (the underlying `appEncryptionDeclarations` API data, distinct from the screenshots) — noted as retrievable but optional once the exhibit bundle covers the same ground.
-
-## 3. Audit / opinion calendar
-
-| Date | Event |
-|---|---|
-| 21 Aug | Build 63 uploaded to ASC, Validated, `ITSAppUsesNonExemptEncryption: false`. Internal-testing-only, 2 tester accounts (both Benji's own Apple IDs) — no third party ever received it |
-| 23 Aug | MinterEllisonRuddWatts (Sarah Salmond) proposes a combined US EAR + NZ opinion, NZ$4,000–7,000 + GST, ~5 working days from receipt of materials |
-| 24–25 Aug | Engagement accepted; +$500 add-on accepted to also map the opinion onto Apple's `ITSAppUsesNonExemptEncryption` declaration |
-| 25 Aug (evening) | Full materials pack sent: crypto inventory, classification memo, ASC exhibit bundle |
-| 26 Aug | **Receipt confirmed** by counsel — the 5-working-day clock is running from this date |
-| **~1 Sep** | **Opinion due** |
-| **3 Sep** | **Chase-up trigger** — if no written opinion by then, send a status-check reply on the existing thread (draft first, don't send blind) |
-
-## 4. Gap analysis
-
-**Export declaration inconsistency (highest priority, blocks App Store submission):**
-`app.json` currently sets `ITSAppUsesNonExemptEncryption: false` (baked into every build through 66), asserting the encryption is exempt. But the classification memo explicitly does *not* support that value — it states it is "not a self-classification decision," and mass-market treatment (5D992.c) is a classification, not an exemption. The June/July ASC questionnaire record (documenting non-exempt use, with `codeValue`) predates the `false` flag entirely. **This flag must be re-decided against counsel's written opinion before any `eas submit`** — a decision already made and tracked (GF-01), not new, but the highest-value close-out once the opinion lands.
-
-**Post-opinion plist mechanics (mapped, not yet actioned):** if the opinion requires documentation review, `ITSEncryptionExportComplianceCode` must accompany `ITSAppUsesNonExemptEncryption: true` — that code is issued by Apple after approving uploaded documentation. If the mass-market path applies, no code is needed — just truthful questionnaire answers plus the annual BIS self-classification report filed separately. Which path applies is exactly what the opinion will settle.
-
-**Privacy policy content gaps** (flagged deliberately as HTML comments in the live page rather than guessed): log/IP retention policy, NZ Privacy Act 2020 IPP 6/7 wording (access/correction rights), GDPR Articles 15–22 wording (contingent on EU/UK users), named data processors, minimum age, subscription-cancellation path, abuse-reporting enforcement process. All flagged for review alongside the GF-01 counsel engagement rather than published as boilerplate.
-
-**Adjacent security-posture items with privacy/compliance bearing** (from the engineering tracker, relevant if this data ever needs describing to counsel or in the privacy policy): three unauthenticated write endpoints (`POST /blobs`, `POST /invites`, `GET /ice-config` credential vending) currently rely on global rate caps rather than device auth — a decide-before-launch item, not a compliance blocker today, but worth flagging if the privacy policy or opinion ends up describing access controls.
-
-## 5. Pre-ship gates tied to compliance
-
-| Gate | Status | Note |
-|---|---|---|
-| Export-compliance opinion received | ⏳ due ~1 Sep | Blocks any `eas submit` |
-| `ITSAppUsesNonExemptEncryption` re-decided against opinion | ⬜ waiting on above | + `ITSEncryptionExportComplianceCode` if required |
-| Annual BIS self-classification report (if mass-market path confirmed) | ⬜ waiting on above | Separate filing, company-side |
-| Privacy policy gaps filled | ⬜ waiting on counsel review | Currently live but incomplete on IPP/GDPR wording |
-| CSPRNG on-device smoke test | ⬜ not done | Independent gate, physical iOS + Android |
-| TestFlight coordination note | 🔄 drafted, not published | AD wire-format cutover means old↔new builds can't exchange messages |
-
-## 6. Next actions, in order
-
-1. Stand by for counsel's questions or the written opinion (no action needed before ~1 Sep).
-2. If silent by 3 Sep, send the prepared status-check reply (review before sending).
-3. On receipt of the opinion: re-decide the `ITSAppUsesNonExemptEncryption` flag (+ compliance code if required), make whichever BIS filing it prescribes, cut a new build if the flag changes, then submit.
-4. Send courtesy stand-down notes to Torres Trade Law / Wiley Rein if they've since replied (now redundant given the MinterEllison engagement).
-5. Once the opinion also settles the "what does the app actually do with data" framing, close the privacy-policy HTML-comment gaps against it (IPP 6/7, GDPR contingency, retention, processors, age, cancellation, abuse reporting).
-6. Independently of GF-01: run the CSPRNG on-device smoke test and publish the TestFlight coordination note — neither depends on counsel.
+> Snapshot document. Source of truth remains `TRACKER.md` (GF-01/GF-02) and
+> `STATUS.md`; this consolidates them into one page. Update on the next
+> material change (counsel's opinion, a filing, or a submission).
 
 ---
-*This dashboard tracks status only; it does not restate legal analysis already captured in the classification memo and covering email. Update it alongside TRACKER.md's GF-01/GF-02 rows as events happen.*
+
+## Overall health: 🟡 ON TRACK — BLOCKED PENDING LEGAL OPINION
+
+The single gate between GHOSTFACE and App Store submission is a written
+export-control opinion, now with counsel and expected **~Mon 1 Sep 2026**.
+Nothing is overdue, nothing has been misrepresented to a regulator or to
+Apple, and the app is build-ready. The one hard rule until the opinion lands:
+**no `eas submit`, no Apple questionnaire answers, no ASC documentation
+attempts.**
+
+| Area | State |
+|---|---|
+| Legal counsel engaged | ✅ MinterEllisonRuddWatts — confirmed |
+| Materials delivered to counsel | ✅ Sent 25 Aug · receipt confirmed 26 Aug |
+| Written opinion received | ⏳ Due ~1 Sep 2026 (5 working days) |
+| US EAR classification resolved | ❌ Awaiting opinion |
+| NZ strategic-goods position resolved | ❌ Awaiting opinion |
+| Apple `ITSAppUsesNonExemptEncryption` decided | ❌ Currently `false` — to be re-decided against opinion |
+| App Store submission | ⛔ HELD until opinion |
+
+---
+
+## The two open regulatory questions
+
+1. **US EAR** — Does the crypto stack qualify for **mass-market
+   self-classification** under §740.17(b)(1) / ECCN 5D992.c, or does it need a
+   **CCATS** classification request to BIS? The crux is **`kdfRkPQ`** (the
+   ML-KEM / post-quantum key-derivation component).
+2. **NZ strategic goods** — Does export engage the NZ strategic-goods regime
+   (MFAT permit) or fall under the **Wassenaar mass-market** cryptography
+   exemption?
+
+The classification memo (`GHOSTFACE_Classification_Memo.pdf`) explicitly
+**declines to self-classify** — it states it is "not a self-classification
+decision." That is exactly why counsel was engaged rather than answering
+Apple's questionnaire ourselves.
+
+---
+
+## Legal engagement
+
+- **Firm:** MinterEllisonRuddWatts — International Trade & Regulatory.
+- **Partner:** Sarah Salmond.
+- **Scope:** One written opinion covering **both** questions above (US EAR
+  mass-market vs CCATS **and** NZ strategic goods / MFAT). Opinion only — **no
+  filings** made by them; **no US co-counsel** anticipated (US question
+  answered in-house).
+- **Fee:** NZ$4,000–7,000 + GST, **plus +$500 + GST** for the Apple-flag
+  section (mapping the conclusion onto `ITSAppUsesNonExemptEncryption` and the
+  questionnaire implications). Accepted in the materials email.
+- **Engagement basis:** No separate engagement letter required — the
+  acceptance email suffices under standard terms (confirmed by Sarah, 25 Aug).
+
+### Timeline
+| Date | Event |
+|---|---|
+| 19 Aug | Initial enquiry sent (memo + crypto inventory). |
+| 23 Aug | MinterEllison replied with proposal (had landed in a stranded M365 mailbox; MX since fixed to Google). |
+| 25 Aug | Acceptance sent; engagement confirmed; +$500 Apple-flag section accepted. |
+| 25 Aug (eve) | **Materials pack emailed to Sarah.** 5-working-day clock starts. |
+| 26 Aug | **Receipt confirmed** — "we'll review… provide our advice early next week." |
+| ~1 Sep | **Written opinion expected.** |
+| Wed 3 Sep | **Chase pinned** — if no opinion, send a reviewed status-check reply on the existing thread. |
+
+### Parallel US outreach (now redundant)
+Bounded one-page-opinion requests were sent 22 Aug to **Olga Torres** (Torres
+Trade Law) and **Lori Scheetz** (Wiley Rein). MinterEllison now covers the US
+question in-house, so these are **stood down** — send a courtesy note if/when
+either replies.
+
+---
+
+## Materials delivered to counsel (`compliance/`)
+
+- `gf01-materials-covering-email.md` — covering email (final; five-step
+  evidenced sequence incl. the three-upload history).
+- `GHOSTFACE_Cryptographic_Inventory.pdf` (+ `.md`) — full crypto inventory.
+- `GHOSTFACE_Classification_Memo.pdf` (+ `.md`) — classification analysis.
+- `GHOSTFACE_ASC_Declaration_Exhibits.pdf` — 7-page captioned bundle of
+  ASC/EAS screenshots evidencing the Apple upload history.
+
+---
+
+## Apple / App Store technical posture
+
+- **Current flag:** `expo.ios.infoPlist.ITSAppUsesNonExemptEncryption: false`
+  in `artifacts/ghostface/app.json` — baked into every build to date. This
+  asserts the encryption is *exempt* and suppresses Apple's "Missing
+  Compliance" prompt. **The memo does not support this value** — it must be
+  **re-decided against counsel's written answer.**
+- **Post-opinion plist mechanics (mapped 25 Aug):** the change is not simply
+  `false`→`true`. `ITSEncryptionExportComplianceCode` accompanies
+  `true` **only when Apple required documentation review** (its value is the
+  code Apple issues after approving uploaded docs — ERN/CCATS-class cases). The
+  mass-market / standard-algorithms path typically needs **no code** — just
+  truthful questionnaire/plist answers plus the annual **BIS self-classification
+  report** filed on our side. Both keys, if needed, go under
+  `expo.ios.infoPlist`.
+
+### Apple upload history (GF-02 evidence — recovered 25 Aug)
+Three upload attempts exist, not two:
+1. **Jul 3** — v1.0.0 (build 27), from a *different* EAS project ("MAYBACH
+   MONEY", account since renamed "B Henderson"). Rejected mid-upload, Apple
+   error **90592**: plist export-compliance key `[]` didn't match the
+   export-compliance **documentation with a code value** the manual
+   questionnaire had created in ASC. **So the honest non-exempt documentation
+   predates the `false` flag entirely.**
+2. **Jul 16** — v1.0.1 (build 27), reached ASC, Invalid Binary.
+3. **21 Aug** — build 63, `false` in plist, **Validated**, internal-testing-
+   to-self only.
+
+**Open question for counsel/API:** how did build 63 validate with `false`
+while non-exempt documentation was on file — superseded, expired, or
+invalidated? `appEncryptionDeclarationState` will say.
+
+---
+
+## Hard gates & decisions in force
+
+- ⛔ **No `eas submit` until the opinion lands.** Submitting build 66 "to see
+  if Apple pushes it through" was considered and **rejected**: the `false` flag
+  suppresses Apple's check so approval would prove nothing, while the
+  submission itself is the *first formal exemption representation to Apple* —
+  made days before counsel answers that exact question.
+- ✅ **Build 66 sits ready either way** — confirmed flag → submit 66 as-is;
+  corrected flag → one-line change + build 67.
+- 🚫 While waiting: no uploads, no submissions, no questionnaire answers, no
+  ASC documentation attempts.
+
+---
+
+## Next actions
+
+| # | Action | Trigger / date | Owner |
+|---|---|---|---|
+| 1 | Stand by for any clarifying questions from Sarah | Now–1 Sep | Benji |
+| 2 | Chase (reviewed reply on existing thread) if no opinion | Wed 3 Sep | Benji / Claude |
+| 3 | On opinion: re-decide `ITSAppUsesNonExemptEncryption` (± `ITSEncryptionExportComplianceCode`) | On receipt | Benji + Claude |
+| 4 | Make whichever BIS filing the opinion prescribes | On receipt | Benji |
+| 5 | Build 67 if the flag changes, then `eas submit` | After (3)/(4) | Claude |
+| 6 | Courtesy stand-down notes to Torres / Wiley if they reply | If they reply | Benji |
+
+---
+
+## Watch items / risks
+
+- **`jjules@` delivery** — the 22 Aug US-outreach copies used `xtra.com` /
+  `xtra.co`; NZ Xtra addresses are `@xtra.co.nz`. Both domains used are real
+  and separately owned. **Confirm intended recipient actually received it.**
+- **Opinion could reclassify** — if counsel says CCATS/non-exempt rather than
+  mass-market, expect a plist change (build 67), a BIS filing, and possibly ASC
+  documentation before submission.
+- **Annual BIS self-classification report** may be a standing obligation even
+  on the mass-market path — confirm in the opinion.

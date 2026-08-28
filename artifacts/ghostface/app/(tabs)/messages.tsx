@@ -1,3 +1,4 @@
+import { SectionLock } from "@/components/SectionLock";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
@@ -13,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import EncryptionTools from "@/components/EncryptionTools";
@@ -90,7 +92,7 @@ function inviteErrorMessage(reason: string): string {
 
 type PageTab = "messages" | "tools" | "invite";
 
-export default function MessagesScreen() {
+function MessagesScreenInner() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { conversations, addConversation, deleteConversation, wsConnected, alias, themePreference } = useApp();
@@ -354,10 +356,14 @@ export default function MessagesScreen() {
       fontSize: 12,
       color: colors.mutedForeground,
     },
+    previewUnread: {
+      color: colors.foreground,
+    },
     itemDivider: {
-      height: 1,
+      height: StyleSheet.hairlineWidth,
       backgroundColor: colors.border,
       marginLeft: 80,
+      marginRight: 20,
     },
     empty: {
       alignItems: "center",
@@ -583,11 +589,15 @@ export default function MessagesScreen() {
                 testID={`conversation-${item.id}`}
               >
                 <View style={styles.avatarWrap}>
-                  <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
-                    <Text style={[styles.avatarTxt, { color: getContrastText(getProfileColor(item.alias)) }]}>
-                      {item.alias.slice(0, 2)}
-                    </Text>
-                  </View>
+                  {item.contactPhoto ? (
+                    <Image source={{ uri: item.contactPhoto }} style={styles.avatar} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.avatar, { backgroundColor: getProfileColor(item.alias) }]}>
+                      <Text style={[styles.avatarTxt, { color: getContrastText(getProfileColor(item.alias)) }]}>
+                        {item.alias.slice(0, 2)}
+                      </Text>
+                    </View>
+                  )}
                   {item.unread > 0 && (
                     <GoldGradient style={styles.badge}>
                       <Text style={styles.badgeTxt}>{item.unread}</Text>
@@ -610,7 +620,13 @@ export default function MessagesScreen() {
                     </View>
                     <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
                   </View>
-                  <Text style={styles.preview} numberOfLines={1}>{item.lastMessage}</Text>
+                  <Text style={[styles.preview, item.unread > 0 && styles.previewUnread]} numberOfLines={1}>
+                    {item.destroyedAt
+                      ? "Conversation ended"
+                      : item.unread > 0
+                        ? `${item.unread} new message${item.unread === 1 ? "" : "s"}`
+                        : "Encrypted"}
+                  </Text>
                 </View>
                 <StatusDot active={!item.destroyedAt} size={5} pulse={false} />
               </Pressable>
@@ -681,5 +697,13 @@ export default function MessagesScreen() {
       </Modal>
     </View>
     </TabScreenWrapper>
+  );
+}
+
+export default function MessagesScreen() {
+  return (
+    <SectionLock sectionKey="messages" label="MESSAGES">
+      <MessagesScreenInner />
+    </SectionLock>
   );
 }

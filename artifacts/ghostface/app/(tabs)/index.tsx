@@ -95,7 +95,7 @@ type NavNode = {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { alias, vpnConnected, panicWipe, hasWalletPin } = useApp();
+  const { alias, vpnConnected, panicWipe, hasWalletPin, isSectionLocked } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Decorative ring spin
@@ -272,33 +272,38 @@ export default function HomeScreen() {
       icon: "chatbubble-ellipses-outline",
       label: "MSG",
       onPress: go(() => router.push("/(tabs)/messages")),
+      locked: isSectionLocked("messages"),
     },
     {
       icon: "call-outline",
       label: "CALL",
       onPress: go(() => router.push("/(tabs)/calls")),
+      locked: isSectionLocked("calls"),
     },
     {
       icon: "shield-outline",
       label: vpnConnected ? "VPN ON" : "VPN",
       activeKey: "vpn",
       onPress: go(() => router.push("/(tabs)/vpn")),
+      locked: isSectionLocked("vpn"),
     },
     {
       icon: "wallet-outline",
       label: "WALLET",
       onPress: go(() => router.push("/(tabs)/wallet")),
-      locked: hasWalletPin,
+      locked: isSectionLocked("wallet"),
     },
     {
       icon: "phone-portrait-outline",
       label: "NUMBER",
       onPress: go(() => router.push("/(tabs)/ghostnumber")),
+      locked: isSectionLocked("number"),
     },
     {
       icon: "settings-outline",
       label: "SETTINGS",
       onPress: go(() => router.push("/(tabs)/settings")),
+      locked: isSectionLocked("settings"),
     },
   ];
 
@@ -545,7 +550,7 @@ export default function HomeScreen() {
                       )}
                       {node.locked && (
                         <View style={styles.nodeLockBadge} pointerEvents="none">
-                          <Ionicons name="lock-closed" size={9} color="#000000" />
+                          <Ionicons name="lock-closed" size={9} color="#E7C765" />
                         </View>
                       )}
                     </View>
@@ -777,9 +782,9 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: "#F5D26B",
+    backgroundColor: "#141418",
     borderWidth: 1.5,
-    borderColor: "#000000",
+    borderColor: "#C9A64C",
     alignItems: "center",
     justifyContent: "center",
   },
