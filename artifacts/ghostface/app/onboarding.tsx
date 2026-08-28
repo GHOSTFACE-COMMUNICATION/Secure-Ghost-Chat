@@ -98,8 +98,11 @@ export default function OnboardingScreen() {
   } = useApp();
   const isLight = themePreference === "light";
   const [alias, setAliasText] = useState("");
+  // ⚠️ TEMPORARY PREVIEW, DO NOT COMMIT — jump straight to a later step so the
+  // screens can be reviewed without registering a real identity.
+  const PREVIEW_STEP = "recovery" as const;
   const [step, setStep] = useState<"alias" | "pin" | "recoveryPin" | "recovery" | "restore" | "resume">(
-    signupPendingAlias ? "resume" : "alias",
+    PREVIEW_STEP ?? (signupPendingAlias ? "resume" : "alias"),
   );
   // If an interrupted signup is detected after this screen has already mounted
   // (load finished a beat later), jump to the resume step.
@@ -390,7 +393,15 @@ export default function OnboardingScreen() {
 
   const styles = StyleSheet.create({
     container: {
-      flex: 1,
+      // flexGrow, NOT flex. On a ScrollView's contentContainerStyle, flex: 1
+      // pins the content to exactly the viewport height — contentSize equals
+      // the visible area, the scroll range collapses to zero, and anything
+      // taller than the screen is rendered but unreachable. That is what hid
+      // the ENTER GHOSTFACE button on the recovery step, which is the tallest
+      // screen in the flow: severe warning + 24 phrase chips + checkbox +
+      // invite field. flexGrow: 1 still fills a short screen but lets a tall
+      // one scroll.
+      flexGrow: 1,
       backgroundColor: colors.background,
       paddingTop: insets.top + (Platform.OS === "web" ? 67 : 0),
       paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 0),
