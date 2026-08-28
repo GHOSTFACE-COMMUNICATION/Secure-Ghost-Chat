@@ -4,7 +4,84 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-28 (Claude Code — correspondence day, plus one build
+Last updated: 2026-08-28 (Claude Code — a board-hygiene session; no product
+code changed except one entitlement. Everything below is committed and pushed
+(`7182878`, `b2484ce`, `0d92452` on `feat/push-notifications`). **The single
+most important line in this entry: `app.json` now declares
+`com.apple.developer.networking.networkextension: ["packet-tunnel-provider"]`
+on the MAIN target, and profile `89A3CY9F86` does not carry that capability —
+so EVERY iOS build, dev-client profiles included, fails signing until
+interactive `eas credentials` is re-run.** That is the same failure that
+burned build 65. Do not start a build first.
+FIRST, **the ⚠️ NEW HAZARD in the entry below was false and is retracted
+in place.** STATUS.md and TRACKER.md were tracked at `3c58b67` the whole time
+(`git ls-tree -r 3c58b67` lists both), `artifacts/` was in that tree, and the
+Expo app was never at the repo root; `git status` showed both as ` M`, not
+`??`. The commit that "rescued" them was 187 insertions / 4 deletions with a
+single `create mode` — a modification, not an add. No cross-session memory was
+ever at risk. Cause of the bad claim not established; most likely inspected
+from a different branch or worktree. **Lesson: `git ls-tree` before writing a
+hazard note about the git tree.**
+SECOND, **two TRACKER rows were stale and both are retired.** (a) "WS state is
+in-process — hard ceiling at 1 replica" was still ⬜ open while the three
+backplane commits that closed it shipped 24 Aug. Verified live: `api-server`
+runs `multiRegionConfig: {us-west2: {numReplicas: 2}}` — two replicas, not
+one, and not `sfo` as the row claimed. Four of the six named maps now live in
+`ws/sharedState.ts`; `connectedClients` and `deliveryIdToAlias` stay
+module-scope by design. **No architecture decision is outstanding.** (b) The
+WireGuard native-client row read "⏸ needs Benji's call" over the `fmt` /
+`consteval` blocker. **That blocker is local-only and EAS routes around it —
+proven, not reasoned.** `scripts/link-wireguard-kit.mjs` adds
+`native/vpn-tunnel/` to the MAIN `GHOSTFACE` target (lines 273–297) — exactly
+the condition that fails 2/2 on this Mac — the file is byte-identical at
+`b63b233` and HEAD, it ran as `eas-build-post-install`, and EAS build
+`d176c63d` from that commit FINISHED clean in 5.9 min. So patch `fmt` only if
+you want *local* device builds; it blocks nothing else. ⚠️ That build was
+`development:device`, NOT production.
+THIRD, **the Apple Network Extension entitlement request is now the critical
+path for the VPN.** Still unsubmitted per TRACKER. `packet-tunnel-provider`
+needs Apple's grant for App Store distribution — weeks of latency, and it is
+independent of GF-01, of the `fmt` question and of the build path, so it
+should be submitted now rather than sequenced behind anything. `lib/wireguard.ts`
+confirmed absent; `AppContext.tsx`'s `connectVPN()`/`disconnectVPN()` are still
+mocks.
+FOURTH, **`support@ghostface.co.nz` exists — the "needs support@ created"
+blocker is closed, but not fully proven.** No `ghostface.app` URL remains in
+`app.json`'s metadata block; `/`, `/privacy` and `/support` all return 200; MX
+is `1 smtp.google.com` with a matching SPF record; the delivery test is dated
+**28 Aug 04:19 UTC** (the TRACKER row says 27 Aug — NZT/UTC skew) with no DSN
+in the following 14 days. ⚠️ **But that thread holds exactly one message,
+labelled `SENT` only** — no `INBOX` copy came back, so benjamin@ is not a
+member of whatever `support@` is and nobody has opened the inbox. Eyeball it
+once before submitting. ⚠️ Separately, `supportUrl` is a `mailto:`, not a URL;
+App Store Connect's Support URL field expects http/https and
+`https://ghostface.co.nz/support` already returns 200 — decide which value
+goes in the ASC listing.
+FIFTH, **the 27 Aug mailbox password paste is now its own TRACKER row and is
+STILL UNROTATED.** It had been a trailing sentence on the mailboxes row, easy
+to miss. One of `benjamin@` / `support@` / `info@` / `legal@` / `admin@` — and
+`legal@` carries the MinterEllison correspondence GF-01 turns on. Same class as
+the WireGuard private key on 24 Aug, which was rotated the same day. Identify
+which, rotate in the Google Workspace admin console, review sign-in activity.
+SIXTH, **two TRACKER rows were silently losing content at render.** The App
+Store metadata row had four cells in a three-column table, so everything from
+"⚠️ 27 Aug, Benji: ghostface.app is NOT ours — it is on backorder" onward had
+never displayed on the board. The Android-crash row had unescaped pipes inside
+`adb logcat \| grep -iE '...'`, splitting it into six cells and mangling the one
+command needed to debug that crash. Both repaired, no text lost; a sweep
+respecting each table's own column count now reports zero malformed rows.
+**When adding a row, escape pipes inside code spans and count the cells.**
+Also: `artifacts/api-server/_check-tmp.mjs` deleted at Benji's instruction (it
+was the read-only script behind the 28 Aug welcome-gift/entitlements
+verification, and self-documented as delete-after-use).
+Readiness read, asked for and worth keeping: **~55% overall** — engineering is
+the healthy part (~75%), but the gating items are not engineering. Pre-ship
+gates 1 of 3; GF-01 unresolved; Vonage unanswered. Engineering can keep
+climbing without moving the ship date, and the Vonage answer does not adjust
+the percentage so much as decide whether GhostNumber survives in its current
+form.)
+
+Previously updated: 2026-08-28 (Claude Code — correspondence day, plus one build
 result. THREE things. FIRST, **GF-01: Sarah replied, but this is NOT the
 opinion.** Her reply answers only the territory follow-up, and all three of
 those questions are OUT OF SCOPE. She declines "which destinations must be
