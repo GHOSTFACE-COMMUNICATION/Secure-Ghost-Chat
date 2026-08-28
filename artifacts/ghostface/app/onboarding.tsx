@@ -1082,19 +1082,6 @@ export default function OnboardingScreen() {
               </View>
             </View>
 
-            <Pressable
-              style={styles.recoveryCheckRow}
-              onPress={() => setRecoverySaved((s) => !s)}
-              testID="recovery-saved-checkbox"
-            >
-              <Ionicons
-                name={recoverySaved ? "checkbox" : "square-outline"}
-                size={20}
-                color={recoverySaved ? colors.primary : colors.mutedForeground}
-              />
-              <Text style={styles.recoveryCheckText}>I've written down my recovery phrase</Text>
-            </Pressable>
-
             <View style={styles.inviteBlock}>
               <Text style={styles.inviteLabel}>HAVE AN INVITE CODE?</Text>
               <Text style={styles.inviteHint}>
@@ -1119,6 +1106,18 @@ export default function OnboardingScreen() {
               {inviteNote ? <Text style={styles.inviteNote}>{inviteNote}</Text> : null}
             </View>
 
+            <Pressable
+              style={styles.recoveryCheckRow}
+              onPress={() => setRecoverySaved((s) => !s)}
+              testID="recovery-saved-checkbox"
+            >
+              <Ionicons
+                name={recoverySaved ? "checkbox" : "square-outline"}
+                size={20}
+                color={recoverySaved ? colors.primary : colors.mutedForeground}
+              />
+              <Text style={styles.recoveryCheckText}>I've written down my recovery phrase</Text>
+            </Pressable>
             <Pressable
               style={[styles.confirmBtn, !recoverySaved && styles.confirmBtnDisabled]}
               onPress={handleRecoveryContinue}
