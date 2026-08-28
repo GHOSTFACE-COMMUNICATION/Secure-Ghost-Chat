@@ -4,13 +4,15 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-27 (Claude Code session — two pieces of work. FIRST,
-the auth-posture pass on the three unauthenticated endpoints: step 1 of 2
-landed and step 2 written but shipping DISABLED behind a flag; see the
-OPEN LOOP directly below — **read it before deploying the api-server or
-flipping that flag**. SECOND, a STATUS/TRACKER reconciliation: TRACKER.md's
-Incidents table still carried the VPN peer agent as
-"🔴 OPEN, P0, nothing fixed" while this file recorded it RESOLVED on 24 Aug.
+Last updated: 2026-08-27 (Claude Code session — three pieces of work.
+FIRST, the auth-posture pass on the three unauthenticated endpoints: both
+halves written, server half DEPLOYED with enforcement DISABLED behind
+`ENFORCE_ENDPOINT_AUTH`; see the OPEN LOOP directly below — **read it before
+flipping that flag**. SECOND, all auth helper duplication removed: one
+`lib/auth.ts`, verified live against prod. THIRD, a STATUS/TRACKER
+reconciliation: TRACKER.md's Incidents table still carried the VPN peer
+agent as "🔴 OPEN, P0, nothing fixed" while this file recorded it RESOLVED
+on 24 Aug.
 Verified the fix against the repo before deciding which side was stale —
 `infra/vpn-agent/agent.py` (`9a68f07`) really does have `/healthz`, the config
 lock, atomic `os.replace` writes and handshake/request timeouts, and
@@ -46,9 +48,12 @@ enforcement is **off** and must stay off until an app release carrying the
 client half is in users' hands — Railway deploys in seconds, App Store review
 takes days, so the fix is necessarily two-phase.
 
-**Deploying the server half is safe. Flipping the flag is the irreversible-
-feeling step, and it is the one to think about.** (It is in fact reversible —
-it is a variable, not a deploy.)
+**The server half is already deployed and was safe** — verified live with the
+flag off, production behaviour unchanged. **Flipping the flag is the step that
+actually changes anything, and it is the one to think about.** (It is
+reversible — a Railway variable, not a deploy.) Before flipping, see the
+device-testing row in TRACKER: the three client call sites and the
+`POST /invites` route wiring are still typecheck-only.
 
 **Step 1 — DONE, committed `19db682` (client only).** The app now sends
 `Authorization: Bearer <device-token>` on all three, plus the alias (query
@@ -127,11 +132,24 @@ subtle one: it is consulted *before* the token lookup, and charged on the
 bug, not an auth attempt, and must not fill a bucket that gates real users
 behind carrier NAT.
 
-**Live baseline captured 27 Aug against the pre-consolidation deploy
-(`e4b6213`)**, to be re-run after the next one to prove behaviour held:
-`GET /api/vpn/ZZNOSUCHUSER/register` with no token → **401**;
-with `Authorization: Bearer x` and `:userId` = `no` → **400**;
-`GET /api/ice-config` unauthenticated → **200** (flag still off).
+**Verified live against production, not just asserted.** A baseline was taken
+against the pre-consolidation deploy (`e4b6213`) and re-run against the
+consolidated one (`1268467`, deploy `73fb290c` SUCCESS). Identical, status
+codes and error bodies both:
+
+| check | before | after |
+|---|---|---|
+| `GET /api/healthz` | 200 | 200 |
+| `GET /api/ice-config` unauthenticated | 200 | 200 |
+| `GET /api/vpn/ZZNOSUCHUSER/register`, no token | 401 | 401 |
+| same, `Bearer x` + `:userId` = `no` | 400 | 400 |
+| same, `Bearer wrongtoken` | (not taken) | 403 |
+
+Bodies: `Authorization: Bearer <token> header required`,
+`userId must be 3-20 characters: A-Z, 0-9, underscore only`,
+`Invalid or mismatched device token for userId` — unchanged. The 403 also
+exercises the device-token lookup end to end through the shared middleware,
+which the baseline had not covered.
 
 Everything auth-related now lives in `lib/auth.ts`: `hashToken`,
 `verifyDeviceToken`, `getAuthedAlias`, `checkAuth`, `deviceAuthMiddleware`.
