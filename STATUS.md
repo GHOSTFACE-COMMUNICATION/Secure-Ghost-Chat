@@ -561,9 +561,11 @@ section is still not proof it is current. Verify before acting on one.
   Live DNS: MX `1 smtp.google.com`, SPF `v=spf1 include:_spf.google.com ~all`.
   Workspace took the domain over around 23 Aug. Five addresses now exist and
   all accept mail (delivery-tested 27 Aug, no bounces): benjamin@, support@,
-  info@, legal@, admin@. ⚠️ Still open: **no DMARC record** on the domain, and
-  a mailbox password was pasted into a session transcript on 27 Aug and needs
-  rotating.
+  info@, legal@, admin@. DMARC added 27 Aug (`p=none`, monitor only, reports to admin@).
+  ⚠️ Still open: **Workspace DKIM is not enabled** — no `google._domainkey`
+  record — so do not tighten DMARC past `p=none` until it is, or legitimate
+  forwarded mail starts failing. And a mailbox password was pasted into a
+  session transcript on 27 Aug and needs rotating.
 - ⚠ **Vercel access token was pasted into chat this session** (vcp_… ,
   redacted). Assistant refused to use it. Benji to REVOKE it (Vercel →
   Account Settings → Tokens) if not already done. Never paste secrets in
