@@ -94,13 +94,38 @@ const GO_BRIDGE_BUILD_TOOL_PATH = "/Applications/Xcode.app/Contents/Developer/us
 // DerivedData folders exist for this project (e.g. from prior `expo
 // prebuild --clean` regenerations, which change Xcode's DerivedData hash).
 const GO_BRIDGE_SHELL_SCRIPT = `set -e
+# Locate the SPM checkout. The standard per-project DerivedData path covers
+# local builds; EAS sets a custom derived-data location, so fall back to
+# searching under DERIVED_DATA_DIR/BUILD_DIR when the usual path misses.
 BRIDGE_DIR=$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/"$PROJECT_NAME"-*/SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo 2>/dev/null | head -1)
 if [ -z "$BRIDGE_DIR" ]; then
-  echo "error: [link-wireguard-kit] could not locate the wireguard-apple SPM checkout under DerivedData for project $PROJECT_NAME -- has the package been resolved yet (xcodebuild -resolvePackageDependencies)?" >&2
+  for ROOT in "\${DERIVED_DATA_DIR:-}" "\${BUILD_DIR:-}" "\${SRCROOT:-}/.."; do
+    [ -n "$ROOT" ] || continue
+    BRIDGE_DIR=$(find "$ROOT" -type d -path "*/checkouts/wireguard-apple/Sources/WireGuardKitGo" 2>/dev/null | head -1)
+    [ -n "$BRIDGE_DIR" ] && break
+  done
+fi
+if [ -z "$BRIDGE_DIR" ]; then
+  echo "error: [link-wireguard-kit] could not locate the wireguard-apple SPM checkout for project $PROJECT_NAME -- has the package been resolved yet (xcodebuild -resolvePackageDependencies)?" >&2
   exit 1
 fi
+
+# Go is needed to build wireguard-go-bridge. Xcode Run Script phases get a
+# minimal PATH that excludes Homebrew, so add the usual prefixes explicitly
+# (Apple Silicon and Intel) before looking.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+if ! command -v go >/dev/null 2>&1; then
+  echo "error: [link-wireguard-kit] Go is not on PATH. WireGuardKit's wireguard-go-bridge cannot be built without it. Locally: brew install go. On EAS: the eas-build-pre-install hook (scripts/eas-install-go.sh) is responsible for this." >&2
+  exit 1
+fi
+
+# Prefer make from PATH; fall back to Xcode's bundled copy. The hardcoded
+# /Applications/Xcode.app path does not hold on EAS, whose images use
+# versioned Xcode_*.app directories.
+MAKE_BIN=$(command -v make || echo "${GO_BRIDGE_BUILD_TOOL_PATH}")
+
 cd "$BRIDGE_DIR"
-"${GO_BRIDGE_BUILD_TOOL_PATH}"
+"$MAKE_BIN"
 `;
 
 async function findPbxprojPath() {
