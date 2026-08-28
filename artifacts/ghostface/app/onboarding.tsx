@@ -409,20 +409,6 @@ export default function OnboardingScreen() {
       marginTop: 8,
       marginBottom: 30,
     },
-    pigLatinNudge: {
-      position: "absolute",
-      right: 8,
-      top: 64,
-      paddingVertical: 4,
-      paddingHorizontal: 6,
-    },
-    pigLatinText: {
-      fontFamily: "ShareTechMono_400Regular",
-      fontSize: 11,
-      lineHeight: 15,
-      letterSpacing: 1,
-      color: "rgba(201,154,60,0.8)",
-    },
     tagline: {
       ...type.labelStrong,
       fontSize: 12,
@@ -750,14 +736,6 @@ export default function OnboardingScreen() {
         <View style={styles.header}>
           <View style={{ width: "100%", alignItems: "center", justifyContent: "center" }}>
             <GhostLogo size={180} coin live onTap={handleCoinTap} />
-            {/* Cryptic Pig-Latin nudge tucked beside the coin — "psst, tap
-                here". It points at the coin, so it runs the same handler:
-                whichever the eye lands on first should work. */}
-            {gift === "idle" && (
-              <Pressable onPress={handleCoinTap} hitSlop={12} style={styles.pigLatinNudge}>
-                <Text style={styles.pigLatinText}>sst…{"\n"}apTay{"\n"}erehay</Text>
-              </Pressable>
-            )}
           </View>
           <Text style={styles.tagline}>NO FACE. NO TRACE.</Text>
           <Text style={styles.appName}>GHOSTFACE®</Text>
