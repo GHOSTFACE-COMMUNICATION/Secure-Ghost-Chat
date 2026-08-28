@@ -208,21 +208,33 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
             that spun with the coin would squash to a sliver every half turn,
             which reads as flicker rather than light. Kept subtle — it should
             lift the coin off the black, not announce itself. */}
-        <View
+        <Animated.View
           pointerEvents="none"
           style={{
             position: "absolute",
             width: size * 0.92,
             height: size * 0.92,
             borderRadius: size,
-            backgroundColor: "rgba(255,255,255,0.09)",
+            backgroundColor: "rgba(255,255,255,0.07)",
+            // Fade the halo as the coin turns edge-on. A constant full-circle
+            // glow around a coin that collapses to a sliver twice per
+            // revolution reads as a strobe, not as light — the silhouette
+            // shrinks while the halo does not, so the mismatch pulses at
+            // roughly 2Hz at the idle spin rate. Tying opacity to the same
+            // edge factor that drives the edge band keeps the light attached
+            // to the object making it.
+            opacity: edgeOpacity.interpolate({
+              inputRange: [0, 1],
+              outputRange: [1, 0.28],
+              extrapolate: "clamp",
+            }),
             boxShadow: [
               // Three stacked layers: a wide soft bloom, a mid falloff, and a
               // tight bright core. Stacking beats a single huge blur, which
               // just goes evenly grey — the layers give the falloff a shape.
-              boxShadow("#FFFFFF", 0.34, size * 0.62),
-              boxShadow("#FFFFFF", 0.40, size * 0.30),
-              boxShadow("#FFFFFF", 0.34, size * 0.12),
+              boxShadow("#FFFFFF", 0.26, size * 0.55),
+              boxShadow("#FFFFFF", 0.32, size * 0.26),
+              boxShadow("#FFFFFF", 0.28, size * 0.11),
             ].join(", "),
           }}
         />
