@@ -27,8 +27,11 @@ message text and not by severity (see the OPEN LOOP below).
 THIRD, ⚠️ **build 74 is already stale for VoIP.** `0278b41` — attach VoIP listeners
 before requesting PushKit credentials, the commit that made calls work end to end
 in both directions on hardware — landed AFTER `4c641c6` and is not in the binary.
-Shipping 74 would ship known-broken calling. A new build is needed before any
-submission; do not treat the one in processing as the release candidate.
+⚠️ Stated precisely: what is established is the ancestry, not a test — nobody has
+run build 74 and observed calling fail. But the binary predates the fix that made
+calls work on hardware, so **it has never been shown to call reliably** and should
+not be treated as the release candidate. A new build is needed before any
+submission.
 FOURTH, the overnight session's call work, for the record. VoIP verified end to end
 on hardware, both directions (`5161949`). The `Stale call-ring dropped` warning is
 **diagnosed and benign** (`8449e4f`): the drop is a correct `callid-mismatch`
@@ -54,9 +57,12 @@ pool warm`. #10 and #11 aim squarely at the cold-start latency this session's ow
 diagnosis named as the real defect, and #10 describes a path where a cold-start ring
 makes a client discard a good device token and stop reconnecting for good. **Their
 PR-environment deploys crash with `getaddrinfo ENOTFOUND
-pgbouncer.railway.internal`** — PgBouncer exists only in the `production`
-environment, so `DATABASE_URL` is unresolvable in a PR environment and the process
-dies in `rotationScheduler` tick / `ensureSeedTokens` / the pool. **CRASHED there
+pgbouncer.railway.internal`**, and the cause is confirmed rather than inferred: in
+`Secure-Ghost-Chat-pr-11`, **PgBouncer and Postgres are defined but have
+`latestDeployment: null` — they have never been deployed in that environment**;
+only Redis and `api-server` actually run there. So the internal DNS name has
+nothing behind it, `DATABASE_URL` cannot resolve, and the process dies in
+`rotationScheduler` tick / `ensureSeedTokens` / the pool. **CRASHED there
 says nothing about the code: those fixes have never been exercised.** Decide whether
 PR environments get a database or stop being deployed, but do not judge the fixes on
 these deploys.
