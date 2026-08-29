@@ -4777,19 +4777,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         };
 
-        // Auth-error flag: set by onmessage when server sends { type:"error", message:"auth failed" }.
-        // Checked by onclose so we re-register instead of looping blindly.
-        // Also catches code 4001 for environments where the proxy passes it through.
+        // Auth-error flag: set by onmessage when the server sends
+        // { type:"error", message:"auth failed" }. Checked by onclose so we
+        // re-register instead of looping blindly. Also catches code 4001 for
+        // environments where the proxy passes it through.
         let authRejected = false;
+        // "auth unavailable" is NOT that: it means the server could not check
+        // the credential (a database fault), so this token may well be
+        // perfectly good. Acting on it as a rejection is what took a receiver
+        // out of the app during a cold-start ring — re-registering an alias
+        // that is still bound to this very token 409s, which raises the
+        // "Device not linked to this alias" alert and stops reconnecting for
+        // good. Plain backoff instead; nothing local is touched.
+        let authUnavailable = false;
 
         ws.onmessage = (event) => {
           const raw = event.data as string;
           try {
             const parsed = JSON.parse(raw) as { type?: string; message?: string };
-            if (parsed.type === "error" && typeof parsed.message === "string" && parsed.message.toLowerCase().includes("auth")) {
-              authRejected = true;
-              console.warn("[WS] Auth error received from server — will re-register on close");
-              return;
+            if (parsed.type === "error" && typeof parsed.message === "string") {
+              const message = parsed.message.toLowerCase();
+              // Substring matching, but ordered: "auth unavailable" also
+              // contains "auth", and reading it as a rejection is the exact
+              // failure this distinction exists to prevent.
+              if (message.includes("auth unavailable")) {
+                authUnavailable = true;
+                console.warn("[WS] Server could not verify auth — will retry with the same credential");
+                return;
+              }
+              if (message.includes("auth")) {
+                authRejected = true;
+                console.warn("[WS] Auth error received from server — will re-register on close");
+                return;
+              }
             }
           } catch { /* not JSON or not an error — pass through */ }
           handleIncomingWsMessage(raw).catch(console.error);
@@ -4819,6 +4839,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
           recomputeLinkQuality();
           if (!mounted) return;
+
+          // Checked before the rejection branch: an "auth unavailable" close
+          // must never reach the credential-clearing path below, whatever
+          // else got flagged on the way here.
+          if (event.code === 4003 || authUnavailable) {
+            authUnavailable = false;
+            authRejected = false;
+            console.warn("[WS] Auth verification unavailable — retrying, credential left alone");
+            reconnectTimer = setTimeout(connect, wsReconnectDelayMs(lbwActiveRef.current));
+            return;
+          }
 
           if (event.code === 4001 || authRejected) {
             authRejected = false;

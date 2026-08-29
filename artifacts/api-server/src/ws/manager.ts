@@ -280,13 +280,30 @@ async function endGhostpadSession(alias: string): Promise<void> {
   await router.sendToAlias(partnerAlias, { type: "ghostpad-ended" });
 }
 
-async function validateToken(alias: string, token: string): Promise<boolean> {
-  // Swallows faults on purpose: a database error during the WebSocket
-  // handshake must fail the auth, never reject out of the handler.
+/**
+ * Three outcomes, not two.
+ *
+ * "the credential is wrong" and "I could not check the credential" used to
+ * collapse into one `false` here, and the client acts on that answer
+ * destructively: a 4001 close makes it discard its device token, re-register,
+ * and — when the alias is still bound server-side to the token that was
+ * perfectly valid all along — surface "Device not linked to this alias" and
+ * stop connecting. A cold-start ring is exactly when the wrong answer gets
+ * given: several sockets authenticate at once against a cold connection pool,
+ * and one timed-out lookup was enough to knock the receiver out of the app.
+ *
+ * A fault is now `unavailable`: transient, retry, touch nothing.
+ */
+type AuthOutcome = "ok" | "rejected" | "unavailable";
+
+async function validateToken(alias: string, token: string): Promise<AuthOutcome> {
+  // Still never rejects out of the handler — but a fault is reported as what
+  // it is instead of being laundered into a rejection.
   try {
-    return (await verifyDeviceToken(alias, token)) !== null;
-  } catch {
-    return false;
+    return (await verifyDeviceToken(alias, token)) !== null ? "ok" : "rejected";
+  } catch (err) {
+    logger.warn({ err, alias }, "Device token lookup failed — reporting auth as unavailable");
+    return "unavailable";
   }
 }
 
@@ -501,8 +518,21 @@ export function createWsServer(wss: WebSocketServer): void {
           ws.close(4001, "Unauthorized");
           return;
         }
-        const valid = await validateToken(normalizedAuthAlias, msg.token);
-        if (!valid) {
+        const outcome = await validateToken(normalizedAuthAlias, msg.token);
+        if (outcome === "unavailable") {
+          // Distinct code and message: the client must back off and retry
+          // this credential, NOT throw it away. 4001 here is what took the
+          // receiver out of the app on a cold start.
+          ws.send(JSON.stringify({ type: "error", message: "auth unavailable" }));
+          ws.close(4003, "Auth temporarily unavailable");
+          return;
+        }
+        if (outcome === "rejected") {
+          // Logged: a genuine credential rejection is a real event (stale
+          // install, reused alias, or an attempt), and it was previously
+          // invisible — there is no way to tell from the logs whether a
+          // client that vanished was rejected or just dropped.
+          logger.info({ alias: normalizedAuthAlias }, "WS auth rejected — no matching device token");
           ws.send(JSON.stringify({ type: "error", message: "auth failed" }));
           ws.close(4001, "Unauthorized");
           return;
