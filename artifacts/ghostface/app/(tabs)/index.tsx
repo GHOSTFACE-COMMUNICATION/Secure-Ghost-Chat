@@ -20,7 +20,6 @@ import { SpecularHighlight } from "@/components/GoldGradient";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
-import { VPN_ENABLED } from "@/lib/features";
 import { boxShadow } from "@/lib/shadow";
 
 const BG = "#000";
@@ -281,23 +280,13 @@ export default function HomeScreen() {
       onPress: go(() => router.push("/(tabs)/calls")),
       locked: isSectionLocked("calls"),
     },
-    // VPN is cut from the production artifact for 1.0.2 (see app.config.js):
-    // the entitlements and the networkpackettunnel target are stripped there,
-    // so the native module cannot work and the node must not be reachable.
-    // Spread rather than a `null` entry so `nodes` stays NavNode[] and the
-    // radial menu's index-based layout closes the gap instead of rendering a
-    // hole. Dev/preview builds keep VPN_ENABLED true and are unaffected.
-    ...(VPN_ENABLED
-      ? [
-          {
-            icon: "shield-outline" as const,
-            label: vpnConnected ? "VPN ON" : "VPN",
-            activeKey: "vpn" as const,
-            onPress: go(() => router.push("/(tabs)/vpn")),
-            locked: isSectionLocked("vpn"),
-          },
-        ]
-      : []),
+    {
+      icon: "shield-outline",
+      label: vpnConnected ? "VPN ON" : "VPN",
+      activeKey: "vpn",
+      onPress: go(() => router.push("/(tabs)/vpn")),
+      locked: isSectionLocked("vpn"),
+    },
     {
       icon: "wallet-outline",
       label: "WALLET",

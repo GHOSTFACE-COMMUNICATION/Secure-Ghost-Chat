@@ -337,17 +337,19 @@ async function main() {
 
   const extensionTarget = findTarget(project, EXTENSION_TARGET_NAME);
   if (!extensionTarget) {
-    // Absent by design on production builds: app.config.js strips
-    // @bacons/apple-targets when EAS_BUILD_PROFILE === "production", so the
-    // VPN extension is never generated and there is nothing here to link.
-    // Everything this script does -- the WireGuardKit package reference, the
-    // Go bridge target, and native/vpn-tunnel/ -- exists only to serve that
-    // extension, so the whole script is a no-op in that case rather than a
-    // build failure. It still throws for the main app target below, because
-    // a missing GHOSTFACE target means something genuinely went wrong.
+    // Guard, not a normal path: today every profile generates the extension,
+    // so this should not fire. It exists because a config that drops
+    // @bacons/apple-targets (as the briefly-lived 1.0.2 VPN cut did) leaves
+    // this script throwing on a project that is otherwise perfectly valid,
+    // turning a deliberate configuration choice into an opaque post-install
+    // failure. Everything below -- the WireGuardKit package reference, the Go
+    // bridge target, native/vpn-tunnel/ -- exists only to serve that
+    // extension, so with it absent the right answer is to do nothing rather
+    // than fail. A missing MAIN app target still throws below: that is a real
+    // error, not a configuration choice.
     if (process.env.EAS_BUILD_PROFILE === "production") {
       console.log(
-        `[link-wireguard-kit] "${EXTENSION_TARGET_NAME}" absent and EAS_BUILD_PROFILE=production -- VPN is cut from this artifact, skipping. See app.config.js.`,
+        `[link-wireguard-kit] "${EXTENSION_TARGET_NAME}" not present under EAS_BUILD_PROFILE=production -- nothing to link, skipping.`,
       );
       return;
     }
