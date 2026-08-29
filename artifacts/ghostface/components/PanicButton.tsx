@@ -338,7 +338,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
                 <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
               )}
               <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-              <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
+              <Text style={[styles.btnText, { fontSize: 15 * scale, letterSpacing: 2 * scale }]}>
                 {panicHeld ? "WIPING..." : "WIPE DEVICE"}
               </Text>
             </GlassView>
@@ -358,7 +358,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
                 <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
               )}
               <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-              <Text style={[styles.btnText, { fontSize: 15 * scale }]}>
+              <Text style={[styles.btnText, { fontSize: 15 * scale, letterSpacing: 2 * scale }]}>
                 {panicHeld ? "WIPING..." : "WIPE DEVICE"}
               </Text>
             </BlurView>
@@ -405,6 +405,15 @@ const styles = StyleSheet.create({
   },
   btnText: {
     ...type.labelStrong,
+    // Both fontSize and letterSpacing are overridden per call site as
+    // `* scale`; these are the scale-1 values. Tracking has to scale with the
+    // type or it reads proportionally looser as the font shrinks — the same
+    // fix the caption above already carries.
+    //
+    // Not TRACKING.label * scale, unlike the caption. labelStrong's tracking is
+    // TRACKING.label (1) and this button deliberately overrides it to 2, so
+    // reaching for the token would halve the label's tracking at scale 1 — a
+    // design change wearing a scaling fix's clothes.
     fontSize: 15,
     letterSpacing: 2,
     color: "#ffffff",
