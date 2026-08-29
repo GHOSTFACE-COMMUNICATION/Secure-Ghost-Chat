@@ -4,7 +4,71 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-28 (Claude Code — message-delivery ack fix, plus two
+Last updated: 2026-08-29 (Claude Code — orientation and reconciliation session; no
+product code changed. This file had not been touched since 28 Aug 18:51 while an
+overnight session and four Railway agent sessions all landed work, so this entry is
+a catch-up. FIRST, **production build 74 exists and Apple accepted it.** Commit
+`4c641c6`, tagged `build-74` on origin, `distribution: store`. The signing gate
+cleared: the App Store profile was replaced `89A3CY9F86` (stale) → **`D7R447UX95`**
+after an interactive `eas credentials` run reported `Synced capabilities: Enabled:
+Network Extensions, Personal VPN` on `com.ghostface.app` — so the capability
+question the 28 Aug entry left as "reported, not verified" is now answered by a
+green production build rather than by a summary line. ⚠️ **Upload only — NOT
+submitted for App Review**, as instructed; the binary sits in TestFlight
+processing.
+SECOND, **build 74 carries every "needs an app release" client half.** Verified
+with `git merge-base --is-ancestor`, not assumed: `19db682` and `1268467` (the
+auth-posture client half and the deviceAuthMiddleware consolidation) and `11f5c3a`
+(the msgAck client half) are all ancestors of `4c641c6`. **This does not unblock
+`ENFORCE_ENDPOINT_AUTH`.** Nobody has the binary — upload is not distribution — so
+the flag stays OFF and the flip signal is unchanged: flip only once the
+"ENFORCE_ENDPOINT_AUTH is off" lines stop appearing in Railway logs, filtering by
+message text and not by severity (see the OPEN LOOP below).
+THIRD, ⚠️ **build 74 is already stale for VoIP.** `0278b41` — attach VoIP listeners
+before requesting PushKit credentials, the commit that made calls work end to end
+in both directions on hardware — landed AFTER `4c641c6` and is not in the binary.
+Shipping 74 would ship known-broken calling. A new build is needed before any
+submission; do not treat the one in processing as the release candidate.
+FOURTH, the overnight session's call work, for the record. VoIP verified end to end
+on hardware, both directions (`5161949`). The `Stale call-ring dropped` warning is
+**diagnosed and benign** (`8449e4f`): the drop is a correct `callid-mismatch`
+response to a redial, and **the real defect is cold-start wake latency** —
+`CALL_WAKE_GRACE_MS` is 25s and the user redialled at 20.9s, so the server still had
+four legitimate seconds left. Latency, not state corruption. `cleanup()` keying on
+alias rather than connId was a genuine latent bug and is fixed on its own merits
+(`9c6e50c`), recorded as closed by inspection rather than observation.
+FIFTH, **Railway deploys `main`, and this is verified by commit hash rather than by
+a matching timestamp.** Production `api-server` deployment `5d8b6f71` runs
+commitHash `9c6e50c…` on branch `main`, status SUCCESS, 29 Aug 10:25:55Z. The
+deploy-branch trap (`f13c468`) is closed. `main` is 3 commits ahead of
+`origin/feat/push-notifications`, which no longer matters for deploys but does mean
+that branch is no longer the place to look for what is live.
+SIXTH, ⚠️ **NEW — four unmerged Railway-agent PRs are open, and two of their preview
+deploys are CRASHED for an environment reason that is easy to misread as a broken
+fix.** Open on `ghostzeronz-coder/Secure-Ghost-Chat`, all created 29 Aug, all
+MERGEABLE, none merged: **#8** `fix(ws): deliver call-hangups to a callee who is
+already back online`; **#9** `fix(call): take video from the offer SDP, not the
+route param`; **#10** `fix(ws): don't report a failed token lookup as a rejected
+token`; **#11** `fix(db): retry every transient connection failure, and keep the
+pool warm`. #10 and #11 aim squarely at the cold-start latency this session's own
+diagnosis named as the real defect, and #10 describes a path where a cold-start ring
+makes a client discard a good device token and stop reconnecting for good. **Their
+PR-environment deploys crash with `getaddrinfo ENOTFOUND
+pgbouncer.railway.internal`** — PgBouncer exists only in the `production`
+environment, so `DATABASE_URL` is unresolvable in a PR environment and the process
+dies in `rotationScheduler` tick / `ensureSeedTokens` / the pool. **CRASHED there
+says nothing about the code: those fixes have never been exercised.** Decide whether
+PR environments get a database or stop being deployed, but do not judge the fixes on
+these deploys.
+SEVENTH, two decisions this file asked a session to put to Benji are still
+unresolved. (a) **The Postgres always-on flip** (`deploy.sleepApplication` unset,
+28 Aug) was made without the usual ask-first pattern and is a recurring Railway
+cost — keep it or revert to sleep-on-idle. (b) **The pasted mailbox password is
+still `⬜ not started`** two days on, and one of the five candidates is `legal@`,
+which carries the MinterEllison correspondence GF-01 turns on. It is the oldest
+unaddressed security item on the board.)
+
+Previously updated: 2026-08-28 (Claude Code — message-delivery ack fix, plus two
 infra corrections, one of which was NOT pre-approved and should be reviewed.
 FIRST, TRACKER's "`delivered` does not mean delivered" fix is **code
 complete, verified, and — correcting this entry — COMMITTED as `11f5c3a` and
