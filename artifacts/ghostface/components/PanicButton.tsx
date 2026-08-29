@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { GLASS_TINT_BLACK, SpecularHighlight } from "@/components/GoldGradient";
-import { type } from "@/constants/typography";
+import { TRACKING, type } from "@/constants/typography";
 
 // The surface is the app's ordinary black glass — the same GLASS_TINT_BLACK as
 // every other glass button — and the danger signal lives in the RIM rather than
@@ -297,7 +297,16 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
         <Text
           style={[
             styles.label,
-            { color: colors.mutedForeground, fontSize: 10 * scale, marginBottom: 12 * scale },
+            {
+              color: colors.mutedForeground,
+              fontSize: 10 * scale,
+              // Tracking has to scale with the type. Left fixed, it gets
+              // proportionally looser as the font shrinks, and this caption is
+              // already inside a `scale`-width container. type.label's value is
+              // TRACKING.label, so at scale 1 this is a no-op.
+              letterSpacing: TRACKING.label * scale,
+              marginBottom: 12 * scale,
+            },
           ]}
         >
           HOLD 3 SECONDS TO WIPE ALL DATA
