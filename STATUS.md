@@ -37,11 +37,12 @@ credential, and their origin was never established.)
 Previously updated: 2026-08-28 (Claude Code — a board-hygiene session; no product
 code changed except one entitlement. Everything below is committed and pushed
 (`7182878`, `b2484ce`, `0d92452` on `feat/push-notifications`). **The single
-most important line in this entry: `app.json` now declares
-`com.apple.developer.networking.networkextension: ["packet-tunnel-provider"]`
-on the MAIN target, and profile `89A3CY9F86` does not carry that capability —
-so EVERY iOS build, dev-client profiles included, fails signing until
-interactive `eas credentials` is re-run.** That is the same failure that
+most important line in this entry: `app.json` now declares TWO capabilities on
+the MAIN target — `com.apple.developer.networking.networkextension:
+["packet-tunnel-provider"]` and `com.apple.developer.networking.vpn.api:
+["allow-vpn"]` (the latter added 28 Aug, see below) — and profile `89A3CY9F86`
+carries NEITHER, so EVERY iOS build, dev-client profiles included, fails
+signing until interactive `eas credentials` is re-run.** That is the same failure that
 burned build 65. Do not start a build first.
 FIRST, **the ⚠️ NEW HAZARD in the entry below was false and is retracted
 in place.** STATUS.md and TRACKER.md were tracked at `3c58b67` the whole time

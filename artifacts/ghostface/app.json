@@ -45,6 +45,9 @@
         ],
         "com.apple.developer.networking.networkextension": [
           "packet-tunnel-provider"
+        ],
+        "com.apple.developer.networking.vpn.api": [
+          "allow-vpn"
         ]
       }
     },
