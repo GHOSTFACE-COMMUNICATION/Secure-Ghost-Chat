@@ -41,9 +41,18 @@ most important line in this entry: `app.json` now declares TWO capabilities on
 the MAIN target — `com.apple.developer.networking.networkextension:
 ["packet-tunnel-provider"]` and `com.apple.developer.networking.vpn.api:
 ["allow-vpn"]` (the latter added 28 Aug, see below) — and profile `89A3CY9F86`
-carries NEITHER, so EVERY iOS build, dev-client profiles included, fails
-signing until interactive `eas credentials` is re-run.** That is the same failure that
-burned build 65. Do not start a build first.
+carried NEITHER, so every iOS build, dev-client profiles included, failed
+signing.** **✅ CLEARED 28 Aug — the interactive `eas credentials` run
+completed and reports "All credentials are ready to build" for BOTH targets
+(`com.ghostface.app`, `com.ghostface.app.tunnel`) on `@ghost_face/mayybachh`.**
+⚠️ **Reported, not verified.** That one line proves each target has a profile
+EAS accepts; it does NOT show the capability-sync results. Three things remain
+unconfirmed: whether sync enabled Personal VPN on the main App ID, whether it
+disabled Personal VPN on the tunnel App ID as predicted, and whether the
+regenerated profiles carry new IDs (`89A3CY9F86` / `76QM629KQ5` may both be
+stale). The run's sync output was not captured. Confirm from a real build's
+embedded profile — `unzip -p <ipa> 'Payload/*.app/embedded.mobileprovision' \|
+security cms -D` — before treating the VPN capability as live on device.
 FIRST, **the ⚠️ NEW HAZARD in the entry below was false and is retracted
 in place.** STATUS.md and TRACKER.md were tracked at `3c58b67` the whole time
 (`git ls-tree -r 3c58b67` lists both), `artifacts/` was in that tree, and the
