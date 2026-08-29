@@ -7,8 +7,11 @@ sessions re-derive context wrong.
 Last updated: 2026-08-28 (Claude Code — message-delivery ack fix, plus two
 infra corrections, one of which was NOT pre-approved and should be reviewed.
 FIRST, TRACKER's "`delivered` does not mean delivered" fix is **code
-complete, verified, NOT committed** (sitting in the working tree per
-report-before-code): client now sends `{type:"msgAck", msgId}` after
+complete, verified, and — correcting this entry — COMMITTED as `11f5c3a` and
+deployed to production 28 Aug 16:20 UTC (Railway `998f156a`). The "NOT
+committed / sitting in the working tree" wording below was written before the
+commit and is stale.** The server half is live; the client half still needs an
+app release: client now sends `{type:"msgAck", msgId}` after
 decrypting *and persisting* a message; server deletes the row on that ack
 instead of optimistically flagging `delivered` on send (the three sites that
 did this are gone); client dedupes a redelivered `msgId` instead of
