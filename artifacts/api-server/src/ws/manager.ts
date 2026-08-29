@@ -374,26 +374,34 @@ export function createWsServer(wss: WebSocketServer): void {
     const cleanup = async () => {
       if (!authedAlias) return;
       const alias = authedAlias;
-      // DIAGNOSTIC ONLY — deliberately does not change behaviour.
+
+      // Only the alias's CURRENT holder may tear its state down.
       //
-      // cleanup() is keyed on the alias, never on this socket's connId, so a
-      // superseded socket tearing down late will delete state belonging to
-      // the newer socket that replaced it: connectedClients, the router
-      // registration, and (via clearCallsForAlias) any parked call. That is
-      // the leading suspect behind "Stale call-ring dropped".
+      // Everything below is alias-scoped — connectedClients, the router
+      // registration, presence, parked calls, ghostpad, subscriptions — so a
+      // superseded socket running this would delete state that now belongs to
+      // the newer socket which replaced it. The single-socket invariant makes
+      // that reachable: authenticate elsewhere and :311 closes the old socket,
+      // whose close handler then lands here after the new one has already
+      // registered at :430.
       //
-      // isCurrentHolder === false is the smoking gun: a socket that is no
-      // longer the registered holder still running the teardown.
+      // `connId` existed for exactly this comparison — onKick at :308 already
+      // uses it — but cleanup only ever checked `authedAlias`.
+      //
+      // The undefined case is deliberately treated as "not the holder": it
+      // means either a newer socket has been and gone, or this cleanup is a
+      // second firing (close and error can both fire for one socket, and the
+      // first run's delete leaves no holder behind). Skipping makes the second
+      // run a no-op instead of re-clearing state a reconnect may have set.
       const holder = connectedClients.get(alias);
-      logger.info(
-        {
-          alias,
-          connId,
-          holderConnId: holder?.connId ?? null,
-          isCurrentHolder: holder?.connId === connId,
-        },
-        "WS cleanup running",
-      );
+      if (holder?.connId !== connId) {
+        logger.info(
+          { alias, connId, holderConnId: holder?.connId ?? null },
+          "WS cleanup skipped — socket is no longer this alias's holder",
+        );
+        return;
+      }
+
       connectedClients.delete(alias);
       await router.unregisterLocal(alias);
       try {
