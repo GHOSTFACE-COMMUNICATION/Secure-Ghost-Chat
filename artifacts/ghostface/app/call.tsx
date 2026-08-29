@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { wasCallEnded } from "@/lib/endedCalls";
+import { offerWantsVideo } from "@/lib/sdp";
 import { getDeviceAuth } from "@/lib/deviceAuth";
 import { GoldGradient } from "@/components/GoldGradient";
 import { StatusDot } from "@/components/StatusDot";
@@ -178,8 +179,19 @@ export default function CallScreen() {
   // parses it with NSUUID(uuidString:) — a non-UUID string silently fails
   // there (nil), so the callee's phone would never actually ring.
   const effectiveCallId = useMemo(() => callId ?? Crypto.randomUUID(), []);
-  const isVideo = mode === "video";
+  // What the navigation *thought* this call was. Only a hint: it has to
+  // survive call-ring -> banner/VoIP push -> CallKit -> router params, and
+  // every one of those hops has dropped it at some point (a CallKit answer
+  // with no matching pendingCalls entry navigates here with no mode at all).
+  // When it is lost the callee joins a video call as voice, never opens the
+  // camera, and answers the video m-line recvonly — media then flows caller
+  // -> callee only, which is the "video is one-way" report. The offer SDP
+  // states what the call actually is, so treat that as the truth and keep
+  // this only as the starting value (and as the caller's own intent, which
+  // no signalling hop can lose).
+  const requestedVideo = mode === "video";
 
+  const [isVideo, setIsVideo]         = useState(requestedVideo);
   const [callState, setCallState]     = useState<CallState>(isCaller ? "ringing" : "connecting");
   const [duration, setDuration]       = useState(0);
   const [muted, setMuted]             = useState(false);
@@ -195,6 +207,10 @@ export default function CallScreen() {
   const pcRef          = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
   const remoteStreamRef = useRef<any>(null);
+  // Mirrors isVideo for callbacks captured before an SDP-driven upgrade (the
+  // peer connection is built in the same tick that flips the state, so
+  // ontrack would otherwise read the pre-upgrade value).
+  const isVideoRef     = useRef(requestedVideo);
   const mountedRef     = useRef(true);
   // WS messages are dispatched to the call-signal listener as they arrive,
   // without waiting for a prior dispatch's async work to finish (see
@@ -210,6 +226,7 @@ export default function CallScreen() {
   // Ref so timeout callbacks always read the latest callState without stale closure
   const callStateRef   = useRef<CallState>(isCaller ? "ringing" : "connecting");
   useEffect(() => { callStateRef.current = callState; }, [callState]);
+  useEffect(() => { isVideoRef.current = isVideo; }, [isVideo]);
   // Set true the moment the peer connection actually reaches "connected" —
   // used at teardown to decide whether this call was answered (log with
   // duration) vs missed, independent of what callStateRef reads by then
@@ -307,15 +324,19 @@ export default function CallScreen() {
     };
   }, [isVideo]);
 
+  // isVideo is a dependency because the <video> elements above are created by
+  // an effect keyed on it: on an SDP-driven voice -> video upgrade the stream
+  // can already be in state by the time those elements exist, and an effect
+  // keyed on the stream alone would never re-run to attach it.
   useEffect(() => {
     if (Platform.OS !== "web") return;
     if (localVideoElRef.current) localVideoElRef.current.srcObject = localStream ?? null;
-  }, [localStream]);
+  }, [localStream, isVideo]);
 
   useEffect(() => {
     if (Platform.OS !== "web") return;
     if (remoteVideoElRef.current) remoteVideoElRef.current.srcObject = remoteStream ?? null;
-  }, [remoteStream]);
+  }, [remoteStream, isVideo]);
 
   // ── WebRTC helpers ────────────────────────────────────────────────────────
   const makePC = useCallback(async () => {
@@ -334,7 +355,7 @@ export default function CallScreen() {
         remoteStreamRef.current = stream;
         setRemoteStream(stream);
       }
-      if (Platform.OS === "web" && !isVideo) {
+      if (Platform.OS === "web" && !isVideoRef.current) {
         // Voice calls have no visible <video> element to carry audio, so
         // route it through the hidden element instead (see effect above).
         const el = document.getElementById("gf-remote-audio") as HTMLAudioElement | null;
@@ -377,9 +398,9 @@ export default function CallScreen() {
     };
 
     return pc;
-  }, [alias, effectiveCallId, sendCallSignal, isVideo, isCaller]);
+  }, [alias, effectiveCallId, sendCallSignal, isCaller]);
 
-  const getMedia = useCallback(async (pc: any) => {
+  const getMedia = useCallback(async (pc: any, wantVideo = isVideo) => {
     if (!pc) return;
     try {
       // expo-av and react-native-webrtc share the same native iOS audio
@@ -400,7 +421,7 @@ export default function CallScreen() {
       }
       const devices = Platform.OS === "web" ? navigator.mediaDevices : nativeMediaDevices;
       if (!devices) { setStatusNote("Microphone unavailable on this device"); return; }
-      const stream = await devices.getUserMedia({ audio: true, video: isVideo });
+      const stream = await devices.getUserMedia({ audio: true, video: wantVideo });
       localStreamRef.current = stream;
       setLocalStream(stream);
       stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
@@ -516,7 +537,7 @@ export default function CallScreen() {
           logCall({
             alias: alias ?? "UNKNOWN",
             direction: isCaller ? "outgoing" : "incoming",
-            mode: isVideo ? "video" : "voice",
+            mode: isVideoRef.current ? "video" : "voice",
             outcome: "answered",
             timestamp: Date.now(),
             durationSec: durationRef.current,
@@ -528,7 +549,7 @@ export default function CallScreen() {
           logCall({
             alias: alias ?? "UNKNOWN",
             direction: isCaller ? "outgoing" : "incoming",
-            mode: isVideo ? "video" : "voice",
+            mode: isVideoRef.current ? "video" : "voice",
             outcome: "missed",
             timestamp: Date.now(),
           });
@@ -566,7 +587,7 @@ export default function CallScreen() {
           logCall({
             alias: alias ?? "UNKNOWN",
             direction: "outgoing",
-            mode: isVideo ? "video" : "voice",
+            mode: isVideoRef.current ? "video" : "voice",
             outcome: "missed",
             timestamp: Date.now(),
           });
@@ -612,10 +633,21 @@ export default function CallScreen() {
 
       // ── call-offer (callee receives) ──────────────────────────────────────
       if (signal.type === "call-offer" && !isCaller && signal.payload) {
+        // The offer decides whether this is a video call, not the route
+        // param we were navigated with — see requestedVideo above. Read it
+        // BEFORE getMedia, since that is what opens (or doesn't open) the
+        // camera, and answering an offer that wants video with an
+        // audio-only transceiver set is what makes video one-directional.
+        const offered = offerWantsVideo(signal.payload);
+        const wantVideo = offered ?? requestedVideo;
+        if (wantVideo !== isVideoRef.current) {
+          isVideoRef.current = wantVideo;
+          setIsVideo(wantVideo);
+        }
         const pc = await makePC();
         if (!pc) { everConnectedRef.current = true; setCallState("active"); return; }
         pcRef.current = pc;
-        await getMedia(pc);
+        await getMedia(pc, wantVideo);
         const SDP = Platform.OS === "web" ? (window as any).RTCSessionDescription : NativeRTCSessionDescription;
         if (SDP) {
           await pc.setRemoteDescription(new SDP(JSON.parse(signal.payload)));
@@ -665,7 +697,7 @@ export default function CallScreen() {
     });
 
     return () => registerCallListener(null);
-  }, [alias, effectiveCallId, isCaller, makePC, getMedia, applyIceCandidate, flushPendingIce, sendCallSignal, handleEndInternal, registerCallListener]);
+  }, [alias, effectiveCallId, isCaller, requestedVideo, makePC, getMedia, applyIceCandidate, flushPendingIce, sendCallSignal, handleEndInternal, registerCallListener]);
 
   // ── UI handlers ───────────────────────────────────────────────────────────
   const toggleSpeaker = () => {

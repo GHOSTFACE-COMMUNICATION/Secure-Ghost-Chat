@@ -72,12 +72,22 @@ vi.mock("../lib/pushNotifications", () => ({
   sendExpoPush: async () => ({ ok: false, invalidToken: false }),
 }));
 
+// Shrink the cold-start wake window so the bounce path is testable in
+// milliseconds. Must be set before the module under test is imported.
+const CALL_WAKE_GRACE_MS_TEST = 600;
+// waitForReconnect polls every 500ms, so it can overshoot the grace window by
+// most of one poll before it gives up; wait past that, not just past the grace.
+const CALL_WAKE_POLL_SLACK_MS = 900;
+process.env.CALL_WAKE_GRACE_MS = String(CALL_WAKE_GRACE_MS_TEST);
+
 // Import the module-under-test AFTER mocks.
 const { createWsServer } = await import("../ws/manager.js");
 
 // ── Fake WebSocket / WebSocketServer (same shape as departures.test.ts) ────
 interface FakeWs {
   readyState: number;
+  /** Number of upcoming sends to fail (callback gets an Error, frame dropped). */
+  failSends: number;
   sent: string[];
   closed: boolean;
   listeners: Map<string, ((arg?: unknown) => void)[]>;
@@ -92,10 +102,16 @@ function makeWs(): FakeWs {
   const listeners = new Map<string, ((arg?: unknown) => void)[]>();
   return {
     readyState: 1,
+    failSends: 0,
     sent: [],
     closed: false,
     listeners,
     send(raw: string, cb?: (err?: Error) => void) {
+      if (this.failSends > 0) {
+        this.failSends -= 1;
+        cb?.(new Error("simulated write failure"));
+        return;
+      }
       this.sent.push(raw);
       // The real `ws` invokes this callback once the frame is written, and the
       // router relies on it to confirm delivery. A fake that drops it leaves
@@ -254,6 +270,102 @@ describe("ws/manager.ts call-signal hangup/ring ordering", () => {
     wss.connect(carl2);
     await authAs(carl2, "CARL");
     expect(sentOfType(carl2, "call-hangup")).toHaveLength(0);
+  });
+
+  // The reported bug: "callee still not dropping after caller hangs up on
+  // ring". The callee is CONNECTED (woken by the VoIP push and back on a
+  // socket) but the hangup relay fails anyway — the write races the callee's
+  // registration, or their socket is held by another replica whose delivery
+  // has not settled. The hangup then lands in the deferred queue, which used
+  // to be drained only on `auth`. The callee already authenticated, so nothing
+  // would ever read it: their CallKit banner rang on until the ring timed out.
+  it("flushes a queued hangup to a callee who is already online (drain/queue race)", async () => {
+    const wss = makeWss();
+    createWsServer(wss as never);
+
+    const hal = makeWs();
+    wss.connect(hal);
+    await authAs(hal, "HAL"); // drains an empty queue
+
+    const ivy = makeWs();
+    wss.connect(ivy);
+    await authAs(ivy, "IVY");
+
+    // Hal's next write fails, so the relay reports undelivered and the hangup
+    // is queued even though Hal is online and stays online.
+    hal.failSends = 1;
+    fire(ivy, "message", JSON.stringify({ type: "call-hangup", to: "HAL", callId: "call-5" }));
+    await flush();
+
+    const hangups = sentOfType(hal, "call-hangup");
+    expect(hangups).toHaveLength(1);
+    expect(hangups[0].callId).toBe("call-5");
+    expect(hangups[0].from).toBe("IVY");
+  });
+
+  it("keeps a hangup queued when the flush cannot reach the callee either", async () => {
+    const wss = makeWss();
+    createWsServer(wss as never);
+
+    const jan = makeWs();
+    wss.connect(jan);
+    await authAs(jan, "JAN");
+
+    const kim = makeWs();
+    wss.connect(kim);
+    await authAs(kim, "KIM");
+
+    // Both the relay and the flush retry fail: presence says online, the
+    // socket disagrees. The hangup must survive to Kim's next connection
+    // rather than being consumed by the destructive drain.
+    kim.failSends = 2;
+    fire(jan, "message", JSON.stringify({ type: "call-hangup", to: "KIM", callId: "call-6" }));
+    await flush();
+    expect(sentOfType(kim, "call-hangup")).toHaveLength(0);
+
+    const kim2 = makeWs();
+    wss.connect(kim2);
+    await authAs(kim2, "KIM");
+    const hangups = sentOfType(kim2, "call-hangup");
+    expect(hangups).toHaveLength(1);
+    expect(hangups[0].callId).toBe("call-6");
+  });
+
+  // Cold start: the callee's app was killed, PushKit woke it, CallKit is
+  // ringing — but the launch takes longer than the wake grace window, so the
+  // ring bounces "offline" at the caller. The banner on the callee's phone
+  // outlives that bounce, and nothing used to cancel it: they answered into a
+  // call nobody was on, or waited out CallKit's own timeout.
+  it("queues a hangup for a push-woken callee whose ring bounced before they launched", async () => {
+    const wss = makeWss();
+    createWsServer(wss as never);
+
+    voipTokenAlias = "NED";
+
+    const mia = makeWs();
+    wss.connect(mia);
+    await authAs(mia, "MIA");
+
+    fire(
+      mia,
+      "message",
+      JSON.stringify({ type: "call-ring", to: "NED", callId: "call-7", callMode: "voice" }),
+    );
+    // Ned never shows up inside the grace window, so the ring bounces.
+    await sleep(CALL_WAKE_GRACE_MS_TEST + CALL_WAKE_POLL_SLACK_MS);
+    await flush();
+    expect(sentVoipPushes).toHaveLength(1);
+    expect(sentOfType(mia, "call-hangup").filter((h) => h.payload === "offline")).toHaveLength(1);
+
+    // Ned's cold start finally finishes. The banner is still up — the hangup
+    // has to be waiting for him.
+    const ned = makeWs();
+    wss.connect(ned);
+    await authAs(ned, "NED");
+    const hangups = sentOfType(ned, "call-hangup");
+    expect(hangups).toHaveLength(1);
+    expect(hangups[0].callId).toBe("call-7");
+    expect(hangups[0].from).toBe("MIA");
   });
 
   it("drops a parked call-ring whose call was hung up during the wake wait; callee gets hangup, caller gets no offline bounce", async () => {
