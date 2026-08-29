@@ -1,4 +1,6 @@
 import { SectionLock } from "@/components/SectionLock";
+import { Redirect } from "expo-router";
+import { VPN_ENABLED } from "@/lib/features";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
@@ -457,6 +459,12 @@ function VPNScreenInner() {
 }
 
 export default function VPNScreen() {
+  // The radial menu already hides the VPN node when the feature is cut
+  // (see app.config.js), so this only catches a deep link or a stale
+  // navigation state pointing at /(tabs)/vpn. Redirect rather than render:
+  // the screen would call a native module that is not in the binary.
+  if (!VPN_ENABLED) return <Redirect href="/(tabs)" />;
+
   return (
     <SectionLock sectionKey="vpn" label="VPN">
       <VPNScreenInner />

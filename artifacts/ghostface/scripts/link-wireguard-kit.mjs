@@ -337,6 +337,20 @@ async function main() {
 
   const extensionTarget = findTarget(project, EXTENSION_TARGET_NAME);
   if (!extensionTarget) {
+    // Absent by design on production builds: app.config.js strips
+    // @bacons/apple-targets when EAS_BUILD_PROFILE === "production", so the
+    // VPN extension is never generated and there is nothing here to link.
+    // Everything this script does -- the WireGuardKit package reference, the
+    // Go bridge target, and native/vpn-tunnel/ -- exists only to serve that
+    // extension, so the whole script is a no-op in that case rather than a
+    // build failure. It still throws for the main app target below, because
+    // a missing GHOSTFACE target means something genuinely went wrong.
+    if (process.env.EAS_BUILD_PROFILE === "production") {
+      console.log(
+        `[link-wireguard-kit] "${EXTENSION_TARGET_NAME}" absent and EAS_BUILD_PROFILE=production -- VPN is cut from this artifact, skipping. See app.config.js.`,
+      );
+      return;
+    }
     throw new Error(
       `link-wireguard-kit: could not find the "${EXTENSION_TARGET_NAME}" target in ${pbxprojPath} -- make sure targets/network-packet-tunnel exists and "expo prebuild" completed successfully.`,
     );
