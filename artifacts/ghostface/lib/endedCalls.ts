@@ -22,12 +22,14 @@
  * NSUUID, which does not preserve case.
  */
 
+import { normalizeCallId } from "@/lib/callId";
+
 const ENDED_CALL_TTL_MS = 5 * 60_000;
 const endedCalls = new Map<string, number>(); // normalized callId -> endedAt
 
-function normalize(callId: string): string {
-  return callId.toLowerCase();
-}
+// Shared with the CallKit UUID maps in hooks/usePushNotifications.ts, which
+// need the exact same normalisation for the exact same reason.
+const normalize = normalizeCallId;
 
 function prune(now: number): void {
   for (const [id, at] of endedCalls) {

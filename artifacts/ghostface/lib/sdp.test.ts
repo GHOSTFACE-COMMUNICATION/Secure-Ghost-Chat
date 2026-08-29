@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { offerWantsVideo } from "./sdp.ts";
+import { offerWantsVideo } from "@/lib/sdp";
 
 // The callee used to decide "is this a video call?" purely from the `mode`
 // route param, which has to survive call-ring -> banner/VoIP push -> CallKit

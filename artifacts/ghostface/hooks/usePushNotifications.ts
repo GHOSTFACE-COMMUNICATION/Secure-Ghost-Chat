@@ -4,6 +4,7 @@ import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { Platform } from "react-native";
+import { normalizeCallId } from "@/lib/callId";
 import { wasCallEnded } from "@/lib/endedCalls";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- native-module interop: react-native-callkeep
@@ -153,6 +154,13 @@ interface IncomingCallPayload {
 // answer/end, so this is how the answer handler recovers who/what to dial
 // into. Entries are removed once acted on; a stray entry just means a stale
 // call never got answered, which is harmless.
+//
+// Keyed through normalizeCallId: the key is written from the push payload's
+// own callId and read back from CallKit's answerCall event, which is not the
+// same case (see lib/callId.ts). A miss here is not harmless — the answer
+// handler falls back to `{}` and navigates into the call with no `from` and
+// no call mode, so the callee joins a video call as voice and never opens
+// its camera.
 const pendingCalls = new Map<string, IncomingCallPayload>();
 
 // callIds that currently have a CallKit CXCall outstanding — added the
@@ -164,6 +172,12 @@ const pendingCalls = new Map<string, IncomingCallPayload>();
 // to CallKit at all — including a call answered via the in-app overlay
 // (bypassing CallKit's own answerCall event) while a VoIP push had already
 // reported it, which would otherwise leave a CXCall dangling forever.
+//
+// Also normalised (see lib/callId.ts): this set is written from the VoIP push
+// payload's callId and tested from call.tsx's `effectiveCallId`, which on a
+// CallKit-answered call is the UUID CallKit handed back — different case,
+// same call. A miss makes notifyCallEnded a silent no-op and leaves the
+// native call UI up after the call has ended everywhere else.
 const activeCallKitUUIDs = new Set<string>();
 
 export type CallEndOutcome = "local" | "remote" | "decline" | "unanswered";
@@ -189,8 +203,11 @@ export type CallEndOutcome = "local" | "remote" | "decline" | "unanswered";
  * app for misuse (reporting calls it never properly resolves).
  */
 export function notifyCallEnded(uuid: string, outcome: CallEndOutcome): void {
-  if (!CallKeep || !activeCallKitUUIDs.has(uuid)) return;
-  activeCallKitUUIDs.delete(uuid);
+  const key = normalizeCallId(uuid);
+  if (!CallKeep || !activeCallKitUUIDs.has(key)) return;
+  activeCallKitUUIDs.delete(key);
+  // Note: `uuid` — not `key` — is what goes to CallKeep below. The platform
+  // issued that string; normalisation is only ever for our own bookkeeping.
   try {
     switch (outcome) {
       case "local":
@@ -277,8 +294,8 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
           // WS reconnect now instead of waiting on that listener, or the
           // offer/answer/ICE exchange in call.tsx races a closed socket.
           onForceReconnect?.();
-          const payload = pendingCalls.get(callUUID);
-          pendingCalls.delete(callUUID);
+          const payload = pendingCalls.get(normalizeCallId(callUUID));
+          pendingCalls.delete(normalizeCallId(callUUID));
           // Zombie-join guard: the caller may have hung up while this phone
           // was still ringing (CallKit can't be cancelled on a dead app —
           // the hangup arrives over WS only once the app connects, which may
@@ -346,13 +363,13 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
           // generate a real UUID in app/call.tsx — this is a last-resort
           // fallback only.)
           const callId = payload.callId ?? Crypto.randomUUID();
-          pendingCalls.set(callId, payload);
+          pendingCalls.set(normalizeCallId(callId), payload);
           if (CallKeep) {
             // Must not fire before CallKit's native side has finished setup
             // (see ensureCallKeepSetup) — tightest on a cold, killed-app
             // launch, which is exactly when this fires via didLoadWithEvents.
             await ensureCallKeepSetup();
-            activeCallKitUUIDs.add(callId);
+            activeCallKitUUIDs.add(normalizeCallId(callId));
             // The WS is closed while backgrounded (see AppContext's
             // background-close effect) and only reopens on foreground or on
             // answerCall below — so without this, any call-hangup the caller
