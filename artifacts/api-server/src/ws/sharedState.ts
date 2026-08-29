@@ -17,7 +17,13 @@ import { logger } from "../lib/logger";
  */
 
 export const GHOSTPAD_CODE_TTL_MS = 5 * 60_000;
-export const PENDING_HANGUP_TTL_MS = 60_000;
+// Sized for a COLD start, which is the case that matters: the callee's app was
+// killed, PushKit woke it, and the hangup has to survive until that process has
+// launched, restored state and got a socket up — on a bad network well past a
+// minute, and at 60s the entry expired first, leaving the phone ringing with
+// nothing left to silence it. Matches ENDED_CALL_TTL_MS in the client's
+// lib/endedCalls.ts, the window in which a late hangup is still acted on.
+export const PENDING_HANGUP_TTL_MS = 5 * 60_000;
 export const MAX_CALL_AGE_MS = 2 * 60 * 60 * 1000;
 
 // Presence is refreshed by the 30s protocol heartbeat. The TTL is 3x that so

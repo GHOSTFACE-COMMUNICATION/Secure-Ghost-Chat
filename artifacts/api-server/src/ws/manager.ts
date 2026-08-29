@@ -146,7 +146,12 @@ const CALL_SIGNAL_TYPES = new Set([
 // ringing, before they had a realistic chance to answer. Kept a few
 // seconds under call.tsx's 30s caller-side ring timeout so this bounce
 // fires first rather than racing it.
-const CALL_WAKE_GRACE_MS = 25_000;
+// How long a call-ring waits for a push-woken callee to reconnect before it
+// bounces "offline" at the caller. This is a cold-start budget: killed app,
+// PushKit wake, JS bundle load, socket up. Tunable without a code change
+// because that budget is device- and network-dependent — and because it lets
+// the tests exercise the bounce path without a 25s wait.
+const CALL_WAKE_GRACE_MS = Number(process.env.CALL_WAKE_GRACE_MS ?? 25_000);
 // ws invokes send's callback reliably; this only exists so a pathological
 // socket cannot wedge a message handler indefinitely.
 const SEND_CONFIRM_TIMEOUT_MS = 5_000;
@@ -191,8 +196,49 @@ async function clearActiveCall(a: string, b: string, callId?: string): Promise<v
 async function deliverPendingCallHangups(alias: string, ws: WebSocket): Promise<void> {
   const list = await shared.takePendingCallHangups(alias);
   for (const h of list) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      // Taking is destructive. A socket that died between the drain and this
+      // write would otherwise swallow the hangup outright — the one failure
+      // this queue exists to prevent — so put it back.
+      await shared.queueCallHangup(alias, h.from, h.callId);
+      continue;
+    }
     ws.send(JSON.stringify({ type: "call-hangup", from: h.from, callId: h.callId }));
-    logger.debug({ alias, from: h.from, callId: h.callId }, "Deferred call-hangup delivered on reconnect");
+    logger.info({ alias, from: h.from, callId: h.callId }, "Deferred call-hangup delivered on reconnect");
+  }
+}
+
+/**
+ * Deliver queued hangups to an alias that is ALREADY connected.
+ *
+ * deliverPendingCallHangups above only runs on `auth`, which assumes every
+ * queued hangup is written before its callee authenticates. The VoIP wake path
+ * breaks that assumption: the caller's hangup and the woken callee's reconnect
+ * land within milliseconds of each other, on different replicas, in either
+ * order. When the drain wins that race the callee is left connected with a
+ * hangup nobody will ever read — they do not authenticate a second time — so
+ * their CallKit banner rings on until the ring times out by itself. That is
+ * the "callee doesn't drop when the caller hangs up on ring" report.
+ *
+ * Routed through the router rather than a local socket handle: after a wake
+ * the callee may well be holding a socket on another replica.
+ */
+async function flushPendingCallHangups(alias: string): Promise<void> {
+  if (!(await shared.isOnline(alias))) return;
+  const list = await shared.takePendingCallHangups(alias);
+  for (const h of list) {
+    const sent = await router.sendToAlias(alias, {
+      type: "call-hangup",
+      from: h.from,
+      callId: h.callId,
+    });
+    if (sent) {
+      logger.info({ alias, from: h.from, callId: h.callId }, "Deferred call-hangup flushed to live socket");
+      continue;
+    }
+    // Presence said online but the write did not land (socket dying, or the
+    // holder moved mid-flush). Re-queue so the next auth still delivers it.
+    await shared.queueCallHangup(alias, h.from, h.callId);
   }
 }
 
@@ -494,18 +540,32 @@ export function createWsServer(wss: WebSocketServer): void {
         // process the Map.set above was enough to supersede an older socket;
         // across replicas it is not, so tell the others to drop theirs.
         await router.kickOtherHolders(authedAlias, connId);
-        // Resolve (and warm the cache for) this user's opaque delivery token so
-        // pending messages addressed to it can be routed back to this socket.
-        authedDeliveryId = await ensureDeliveryId(authedAlias);
-        if (authedDeliveryId) deliveryIdToAlias.set(authedDeliveryId, authedAlias);
         ws.send(JSON.stringify({ type: "ack", alias: authedAlias }));
         logger.info({ alias: authedAlias }, "WS client authenticated");
         await shared.setPresence(authedAlias);
         await notifyPresence(authedAlias, true);
 
+        // Hangups first, ahead of anything that touches the database. On a
+        // cold start this socket comes up with a CallKit banner already
+        // ringing on screen, and ensureDeliveryId/deliverPending/departures
+        // are queries against a pool that is itself cold — seconds of extra
+        // ringing for a call that is already over, if the hangup queues behind
+        // them. The hangup queue needs no database at all.
+        //
+        // It must stay AFTER setPresence, though: a caller whose relay just
+        // failed queues the hangup and then re-checks presence to decide
+        // whether to flush it (see flushPendingCallHangups). Presence-then-
+        // drain here is what makes the two orderings exhaustive — if the
+        // caller's presence read misses us, this drain has not run yet and
+        // will find their entry.
+        await deliverPendingCallHangups(authedAlias, ws);
+
+        // Resolve (and warm the cache for) this user's opaque delivery token so
+        // pending messages addressed to it can be routed back to this socket.
+        authedDeliveryId = await ensureDeliveryId(authedAlias);
+        if (authedDeliveryId) deliveryIdToAlias.set(authedDeliveryId, authedAlias);
         if (authedDeliveryId) await deliverPending(authedDeliveryId, ws);
         await deliverPendingDepartures(authedAlias, ws);
-        await deliverPendingCallHangups(authedAlias, ws);
         return;
       }
 
@@ -575,6 +635,10 @@ export function createWsServer(wss: WebSocketServer): void {
         const toAlias = normalizeAlias(msg.to);
         if (!toAlias) return;
         let recipientOnline = await shared.isOnline(toAlias);
+        // Whether a wake push actually went out for this ring — i.e. whether
+        // there is a CallKit banner on the callee's phone that outlives a
+        // failed ring and has to be cancelled. Set in the wake block below.
+        let wokenByPush = false;
 
         if (msg.type === "call-ring") {
           const pairKey = callPairKey(authedAlias, toAlias);
@@ -614,6 +678,21 @@ export function createWsServer(wss: WebSocketServer): void {
         // registered this resolves immediately and falls straight through to
         // the existing offline bounce, unchanged.
         if (!recipientOnline && msg.type === "call-ring") {
+          // Re-read the pair entry immediately before waking the device. The
+          // caller can hang up while we were resolving presence, and a wake
+          // push is the one side effect that cannot be taken back: there is no
+          // cancel-VoIP-push, so a push sent for an already-dead call rings a
+          // phone that nothing on the wire will ever silence. The stale check
+          // further down catches this case too, but only AFTER the push has
+          // gone out and the grace window has elapsed.
+          const stillLive = await shared.getActiveCall(callPairKey(authedAlias, toAlias));
+          if (!stillLive || stillLive.callId !== (msg.callId ?? "")) {
+            logger.info(
+              { from: authedAlias, to: toAlias, callId: msg.callId },
+              "Call-wake push skipped — call already ended",
+            );
+            return;
+          }
           // Best-effort: if the push_token columns aren't migrated yet on this
           // deployment (or the push send throws for any other reason), fall
           // straight through to the existing offline bounce below rather than
@@ -654,6 +733,7 @@ export function createWsServer(wss: WebSocketServer): void {
               logger.warn({ alias: toAlias, callId: msg.callId }, "Call-wake push skipped — no push token on file");
             }
             if (sentOk) {
+              wokenByPush = true;
               recipientOnline = await waitForReconnect(toAlias, CALL_WAKE_GRACE_MS);
             }
           } catch (err) {
@@ -677,11 +757,19 @@ export function createWsServer(wss: WebSocketServer): void {
         if (msg.type === "call-ring") {
           const parked = await shared.getActiveCall(callPairKey(authedAlias, toAlias));
           if (!parked || parked.callId !== (msg.callId ?? "")) {
-            await router.sendToAlias(toAlias, {
+            const sent = await router.sendToAlias(toAlias, {
               type: "call-hangup",
               from: authedAlias,
               callId: msg.callId,
             });
+            // The common case here is a callee who never came back inside the
+            // grace window — so this send usually fails, and dropping it left
+            // a phone that woke up late ringing with no hangup to receive.
+            // Queue it like every other undeliverable hangup.
+            if (!sent) {
+              await shared.queueCallHangup(toAlias, authedAlias, msg.callId);
+              await flushPendingCallHangups(toAlias);
+            }
             // `!parked` and a callId mismatch are different failures wearing
             // one message: the first means the pair entry was deleted (by a
             // hangup, or by clearCallsForAlias on some socket's teardown), the
@@ -715,10 +803,18 @@ export function createWsServer(wss: WebSocketServer): void {
           // hanging up while the callee's phone is still ringing from the
           // VoIP push: the hangup must survive until that device connects.
           await shared.queueCallHangup(toAlias, authedAlias, msg.callId);
-          logger.debug(
+          logger.info(
             { from: authedAlias, to: toAlias, callId: msg.callId },
             "call-hangup queued for offline callee",
           );
+          // The callee may have authenticated in the microseconds between the
+          // failed relay above and this write — their drain has already run
+          // and found nothing, and they will not authenticate again, so
+          // without this the entry just written sits in Redis until its TTL
+          // while their phone rings. See flushPendingCallHangups: the
+          // presence-before-drain ordering on the auth side makes the two
+          // interleavings exhaustive rather than merely narrower.
+          await flushPendingCallHangups(toAlias);
         } else if (msg.type === "call-ring") {
           // Callee is offline (and either has no push token, or didn't
           // reconnect within the wake grace period) — bounce hangup back to
@@ -731,8 +827,18 @@ export function createWsServer(wss: WebSocketServer): void {
               payload: "offline",
             }),
           );
-          logger.debug({ from: authedAlias, to: toAlias }, "Call ring bounced: callee offline");
+          logger.info({ from: authedAlias, to: toAlias, wokenByPush }, "Call ring bounced: callee offline");
           await clearActiveCall(authedAlias, toAlias, msg.callId);
+          // A wake push already went out, so on a cold start the callee's
+          // phone is ringing RIGHT NOW and keeps ringing after this bounce:
+          // they simply did not finish launching inside the grace window.
+          // Queue the cancellation so their late connect silences it, rather
+          // than leaving a banner whose only exits are CallKit's own timeout
+          // or the user answering into a call nobody is on.
+          if (wokenByPush) {
+            await shared.queueCallHangup(toAlias, authedAlias, msg.callId);
+            await flushPendingCallHangups(toAlias);
+          }
         }
         return;
       }
