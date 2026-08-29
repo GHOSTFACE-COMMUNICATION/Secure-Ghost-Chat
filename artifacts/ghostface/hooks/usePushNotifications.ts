@@ -317,8 +317,23 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
 
     if (iosVoipActive) {
       try {
-        VoipPushNotification.registerVoipToken();
-
+        // Listeners FIRST, then registerVoipToken() at the end of this block.
+        //
+        // registerVoipToken() asks PushKit for credentials, and iOS can call
+        // back into didUpdatePushCredentials fast enough that the "register"
+        // event is emitted before a listener exists. Unlike incoming payloads,
+        // which the native module queues and replays via didLoadWithEvents
+        // (see below), the credentials event has no queue: emitted with no
+        // listener, the token is simply dropped and never POSTed to
+        // /push/:alias/register. React Native says so out loud --
+        // "Sending `RNVoipPushRemoteNotificationsRegisteredEvent` with no
+        // listeners registered" -- which was observed on a real launch here.
+        //
+        // The device then looks registered but is unreachable for CallKit
+        // wake: expo_push_token set, voip_push_token NULL. Because it is a
+        // race it does not always fire, which is what makes it nasty --
+        // registration usually works, and the failure looks like a wiped or
+        // rejected token rather than one that was never delivered.
         VoipPushNotification.addEventListener("register", (token: string) => {
           setTokens((prev) => ({ ...prev, voipPushToken: token }));
         });
@@ -373,6 +388,11 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
             }
           },
         );
+
+        // Safe to ask for credentials now: all three listeners are attached,
+        // so whichever event iOS fires -- and however quickly -- lands
+        // somewhere. See the note at the top of this block.
+        VoipPushNotification.registerVoipToken();
       } catch (e) {
         console.warn("[Push] VoIP push registration failed:", e);
       }
