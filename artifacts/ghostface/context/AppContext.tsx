@@ -4782,7 +4782,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // re-register instead of looping blindly. Also catches code 4001 for
         // environments where the proxy passes it through.
         let authRejected = false;
-        // "auth unavailable" is NOT that: it means the server could not check
+        // "credential check unavailable" is NOT that: the server could not check
         // the credential (a database fault), so this token may well be
         // perfectly good. Acting on it as a rejection is what took a receiver
         // out of the app during a cold-start ring — re-registering an alias
@@ -4797,10 +4797,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const parsed = JSON.parse(raw) as { type?: string; message?: string };
             if (parsed.type === "error" && typeof parsed.message === "string") {
               const message = parsed.message.toLowerCase();
-              // Substring matching, but ordered: "auth unavailable" also
-              // contains "auth", and reading it as a rejection is the exact
-              // failure this distinction exists to prevent.
-              if (message.includes("auth unavailable")) {
+              // Ordered, and deliberately keyed on a string with no "auth"
+              // in it. Builds 66 and 74 match rejections with a bare
+              // .includes("auth"), so the server must never put that
+              // substring on the unavailable path — see ws/manager.ts. The
+              // ordering here is belt-and-braces for that contract.
+              if (message.includes("credential check unavailable")) {
                 authUnavailable = true;
                 console.warn("[WS] Server could not verify auth — will retry with the same credential");
                 return;
@@ -4840,7 +4842,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           recomputeLinkQuality();
           if (!mounted) return;
 
-          // Checked before the rejection branch: an "auth unavailable" close
+          // Checked before the rejection branch: a credential-check-unavailable close
           // must never reach the credential-clearing path below, whatever
           // else got flagged on the way here.
           if (event.code === 4003 || authUnavailable) {

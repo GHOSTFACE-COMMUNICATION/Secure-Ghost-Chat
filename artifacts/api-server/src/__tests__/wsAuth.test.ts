@@ -209,7 +209,10 @@ describe("ws/manager.ts auth outcomes", () => {
     expect(ws.closeCode).not.toBe(4001);
     expect(ws.closeCode).toBe(4003);
     const errors = errorsOn(ws);
-    expect(errors).toContain("auth unavailable");
+    // Must not contain "auth": old clients substring-match on it and would
+    // read this as a rejection. See the comment at the send site.
+    expect(errors).toContain("credential check unavailable");
+    expect(errors.some((e: string) => e.toLowerCase().includes("auth"))).toBe(false);
     expect(errors).not.toContain("auth failed");
   });
 

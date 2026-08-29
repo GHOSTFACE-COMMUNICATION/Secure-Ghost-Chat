@@ -523,8 +523,21 @@ export function createWsServer(wss: WebSocketServer): void {
           // Distinct code and message: the client must back off and retry
           // this credential, NOT throw it away. 4001 here is what took the
           // receiver out of the app on a cold start.
-          ws.send(JSON.stringify({ type: "error", message: "auth unavailable" }));
-          ws.close(4003, "Auth temporarily unavailable");
+          //
+          // ⚠️ This message MUST NOT contain the substring "auth". Every
+          // client already in the field (builds 66 and 74) matches auth
+          // rejections with `message.toLowerCase().includes("auth")`, with no
+          // ordering — so "auth unavailable" reads to them as a rejection and
+          // fires the discard-token-and-re-register path that this whole
+          // change exists to prevent. Deploying that wording would trigger
+          // the bug on every existing install before the fixed client ships.
+          // With no "auth" in the string, an old client leaves authRejected
+          // false, sees an unrecognised 4003 rather than 4001, and falls
+          // through to its normal reconnect backoff — which is exactly the
+          // behaviour we want from it. Keep this in sync with the matcher in
+          // AppContext.tsx's ws.onmessage.
+          ws.send(JSON.stringify({ type: "error", message: "credential check unavailable" }));
+          ws.close(4003, "Credential check temporarily unavailable");
           return;
         }
         if (outcome === "rejected") {
