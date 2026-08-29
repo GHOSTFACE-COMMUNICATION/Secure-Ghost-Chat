@@ -308,7 +308,15 @@ export function createWsServer(wss: WebSocketServer): void {
   router.onKick((alias, connId) => {
     const held = connectedClients.get(alias);
     if (!held || held.connId === connId) return;
-    logger.info({ alias }, "Closing superseded socket — same alias authenticated elsewhere");
+    // heldConnId is the socket being closed, winningConnId the one that
+    // superseded it. Without both, this line cannot be correlated against the
+    // cleanup below, and a caller-side supersede is indistinguishable from a
+    // callee-side one — which is exactly the ambiguity blocking the
+    // "Stale call-ring dropped" diagnosis.
+    logger.info(
+      { alias, heldConnId: held.connId, winningConnId: connId },
+      "Closing superseded socket — same alias authenticated elsewhere",
+    );
     held.ws.close(4002, "Superseded by a newer connection");
   });
 
@@ -366,6 +374,26 @@ export function createWsServer(wss: WebSocketServer): void {
     const cleanup = async () => {
       if (!authedAlias) return;
       const alias = authedAlias;
+      // DIAGNOSTIC ONLY — deliberately does not change behaviour.
+      //
+      // cleanup() is keyed on the alias, never on this socket's connId, so a
+      // superseded socket tearing down late will delete state belonging to
+      // the newer socket that replaced it: connectedClients, the router
+      // registration, and (via clearCallsForAlias) any parked call. That is
+      // the leading suspect behind "Stale call-ring dropped".
+      //
+      // isCurrentHolder === false is the smoking gun: a socket that is no
+      // longer the registered holder still running the teardown.
+      const holder = connectedClients.get(alias);
+      logger.info(
+        {
+          alias,
+          connId,
+          holderConnId: holder?.connId ?? null,
+          isCurrentHolder: holder?.connId === connId,
+        },
+        "WS cleanup running",
+      );
       connectedClients.delete(alias);
       await router.unregisterLocal(alias);
       try {
@@ -646,8 +674,20 @@ export function createWsServer(wss: WebSocketServer): void {
               from: authedAlias,
               callId: msg.callId,
             });
-            logger.debug(
-              { from: authedAlias, to: toAlias, callId: msg.callId },
+            // `!parked` and a callId mismatch are different failures wearing
+            // one message: the first means the pair entry was deleted (by a
+            // hangup, or by clearCallsForAlias on some socket's teardown), the
+            // second means it was replaced by a newer call. Reported
+            // separately so the logs can tell them apart.
+            logger.info(
+              {
+                from: authedAlias,
+                to: toAlias,
+                callId: msg.callId,
+                reason: !parked ? "pair-entry-gone" : "callid-mismatch",
+                parkedCallId: parked?.callId ?? null,
+                parkedAgeMs: parked ? Date.now() - parked.startedAt : null,
+              },
               "Stale call-ring dropped: call ended while waiting for callee wake",
             );
             return;
