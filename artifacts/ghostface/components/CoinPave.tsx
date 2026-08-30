@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Image, View } from "react-native";
-import { BlurMask, Canvas, Circle, Group, Path, Skia } from "@shopify/react-native-skia";
+import { BlurMask, Canvas, Circle, Group, Path, RadialGradient, Skia, vec } from "@shopify/react-native-skia";
 
 const GHOST_MARK = require("@/assets/images/ghostface-mark-gold.webp");
 
@@ -38,6 +38,9 @@ const GHOST_MARK = require("@/assets/images/ghostface-mark-gold.webp");
 const LIGHT_X = -0.62;
 const LIGHT_Y = -0.78;
 const SHADE_STEPS = 14;
+// How far the light sits off the surface. Low keeps it raking, which is what
+// throws the long shadows that make the field look deep rather than printed.
+const LIGHT_Z = 0.52;
 
 /** Deterministic 0..1 from an index. Stable across renders so the field does
  *  not shimmer when React re-runs; Math.random() would. */
@@ -48,22 +51,25 @@ function hash(i: number, salt = 0): number {
 
 export function CoinPave({
   size,
-  /** Stone half-width in points. ~1.6 gives a 3.2pt stone, the smallest that
-   *  still reads as a cut stone rather than grit. */
-  stone = 1.6,
+  /** Stone half-width in points. 2.4 gives a 4.8pt stone — big enough that
+   *  the table and girdle of each cut are separately visible, which is what
+   *  makes it read as set stones rather than a texture. Below ~1.6 the
+   *  individual stone stops being legible at all and the field turns to grit. */
+  stone = 2.4,
   /** Mark height as a fraction of the coin. */
-  markScale = 0.62,
+  markScale = 0.78,
 }: {
   size: number;
   stone?: number;
   markScale?: number;
 }) {
-  const { girdles, tables, sparkle } = useMemo(() => {
+  const { shadows, girdles, tables, sparkle } = useMemo(() => {
     const R = size / 2;
     // Leave a sliver bare so the pavé sits inside the rim rather than fighting
     // the milled edge on it.
     const inner = R - stone * 2.2;
     const pitch = stone * 1.85;
+    const shadowPath = Skia.Path.Make();
     const girdlePaths = Array.from({ length: SHADE_STEPS }, () => Skia.Path.Make());
     const tablePaths = Array.from({ length: SHADE_STEPS }, () => Skia.Path.Make());
     const sparklePath = Skia.Path.Make();
@@ -87,12 +93,27 @@ export function CoinPave({
         // reads as textured metal.
         const nx = (x - R) / R;
         const ny = (y - R) / R;
-        const facing = (nx * LIGHT_X + ny * LIGHT_Y) * 0.5 + 0.5; // 0..1
+        // A real dome normal, not a flat plane. z falls off toward the rim, so
+        // stones near the edge turn away from the light and go dark on their
+        // own — that curvature is what reads as depth. The old flat dot product
+        // lit the disc like a printed sheet.
+        const nz = Math.sqrt(Math.max(0, 1 - (nx * nx + ny * ny)));
+        const facing = Math.max(0, nx * LIGHT_X + ny * LIGHT_Y + nz * LIGHT_Z);
         const shade = Math.max(0, Math.min(1, facing * (0.35 + 1.15 * j2)));
         idx += 1;
 
         const b = Math.min(SHADE_STEPS - 1, Math.floor(shade * SHADE_STEPS));
         const s = stone * (0.82 + 0.36 * j0); // stones are not all one size
+        // Cast shadow, offset away from the light. Each stone sitting on its
+        // own shadow is most of what turns a flat mosaic into set stones.
+        const sx = x + s * 0.42;
+        const sy = y + s * 0.5;
+        shadowPath.moveTo(sx, sy - s);
+        shadowPath.lineTo(sx + s, sy);
+        shadowPath.lineTo(sx, sy + s);
+        shadowPath.lineTo(sx - s, sy);
+        shadowPath.close();
+
         const g = girdlePaths[b];
         g.moveTo(x, y - s);
         g.lineTo(x + s, y);
@@ -126,7 +147,7 @@ export function CoinPave({
         }
       }
     }
-    return { girdles: girdlePaths, tables: tablePaths, sparkle: sparklePath };
+    return { shadows: shadowPath, girdles: girdlePaths, tables: tablePaths, sparkle: sparklePath };
   }, [size, stone]);
 
   const R = size / 2;
@@ -147,6 +168,11 @@ export function CoinPave({
           {/* Oxidised setting behind the stones, so the gaps read as metal
               rather than as holes onto whatever is behind the canvas. */}
           <Circle cx={R} cy={R} r={R} color="#0a0b10" />
+          {/* Shadows first, so every stone sits on top of its own. */}
+          <Group>
+            <BlurMask blur={1.1} style="normal" />
+            <Path path={shadows} color="rgba(0,0,0,0.72)" />
+          </Group>
           {girdles.map((p, i) => {
             const t = i / (SHADE_STEPS - 1);
             // Near-black through cool steel to a warm blown highlight. The warm
@@ -174,6 +200,18 @@ export function CoinPave({
             <BlurMask blur={2.2} style="normal" />
             <Path path={sparkle} color="rgba(255,250,240,0.9)" />
           </Group>
+          {/* Dome light and rim falloff over the whole field. Shading the
+              stones individually gets the sparkle right but leaves the disc
+              looking flat; this is the curvature of the object they are set
+              into. */}
+          <Circle cx={R} cy={R} r={R}>
+            <RadialGradient
+              c={vec(R * 0.6, R * 0.52)}
+              r={R * 1.45}
+              colors={["rgba(255,247,232,0.13)", "rgba(0,0,0,0)", "rgba(0,0,0,0.62)"]}
+              positions={[0, 0.52, 1]}
+            />
+          </Circle>
         </Group>
       </Canvas>
       {/* The mark sits ON the stones, so it has to be the alpha asset — the

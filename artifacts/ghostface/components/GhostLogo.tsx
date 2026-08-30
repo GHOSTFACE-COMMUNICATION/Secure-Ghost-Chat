@@ -80,8 +80,9 @@ export function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
   // Narrower than the old 0.72 duty cycle: at half depth a facet as wide as
   // it is tall stops reading as a cut and starts reading as a bead.
   const facetW = Math.max(0.9, facetPitch * 0.55);
-  // Half the previous depth (was rim * 2.1).
-  const facetH = rim * 1.05;
+  // Shallower again: was rim * 2.1, then rim * 1.05. A cut edge is a thin
+  // bright line, and depth is what made it read as a chunky reeded rim.
+  const facetH = rim * 0.55;
   // diamond-cut milled edge
   return (
     <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
