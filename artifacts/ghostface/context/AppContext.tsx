@@ -4822,6 +4822,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
 
         ws.onclose = (event) => {
+          // 4002 = the SERVER closed this socket because a newer socket of
+          // OURS authenticated for the same alias (its single-socket
+          // invariant, ws/manager.ts onKick). This is not a disconnect: the
+          // alias is still connected, just not on this socket. Stand down
+          // before touching anything.
+          //
+          // Reconnecting here is what produced the churn. Our reconnect
+          // becomes the newest socket, the server kicks the one that
+          // superseded us, that one reconnects and kicks ours, and the loop
+          // feeds itself — measured in production 30 Aug 01:10:08–01:10:21 as
+          // eight connIds for one alias across both replicas in 13 seconds,
+          // each "Closing superseded socket" naming the next winner.
+          //
+          // Everything below is also wrong for a supersede: setWsConnected
+          // (false) reports offline while a live socket is serving, the
+          // ghostpad reset clears state the newer socket now owns (the same
+          // class of bug as the server's own cleanup-by-alias, fixed in
+          // 9c6e50c), and recentReconnects poisons the link-quality
+          // classifier with a disconnect that never happened.
+          if (event.code === 4002) {
+            console.warn("[WS] Superseded by a newer socket for this alias — standing down");
+            return;
+          }
           setWsConnected(false);
           // The server unconditionally revokes any pending Ghostpad code and
           // ends any active pairing the instant its socket for this alias
