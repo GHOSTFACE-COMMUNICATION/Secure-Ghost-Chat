@@ -16,7 +16,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { SpecularHighlight } from "@/components/GoldGradient";
+import {
+  GLASS_METALLIC_BLACK,
+  GLASS_REFERENCE_SPECULAR,
+  GLASS_TINT_BLACK,
+  SpecularHighlight,
+} from "@/components/GoldGradient";
+import { COIN_GLOW_WARM_WHITE, CoinFacetRing } from "@/components/GhostLogo";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -30,14 +36,17 @@ const BG = "#000";
 // border, not the fill. Active/inactive is distinguished by the rim border
 // color and icon brightness instead, below.
 const USE_NATIVE_GLASS = isLiquidGlassAvailable();
-// Deliberately its own constant, not the shared GLASS_TINT_BLACK — this
-// menu's look was confirmed as the reference/"perfect" one, so it's frozen
-// here and doesn't drift if the shared tint used by the rest of the app's
-// buttons gets tuned later.
-const NODE_GLASS_TINT = "rgba(10,10,12,0.55)";
+// This menu's look is the reference the rest of the app matches. It used to
+// keep private copies of these values so they couldn't drift when the shared
+// button tint was tuned — but the copies were character-identical to the
+// shared tokens, so they protected nothing while hiding what actually made
+// the menu different: GLASS_REFERENCE_SPECULAR (0.35, against the 0.22
+// default) and no `solid` fill. Now shared, so "match the radial menu" is
+// one import rather than a number to remember.
+const NODE_GLASS_TINT = GLASS_TINT_BLACK;
 const NODE_GLASS_TINT_ACTIVE = NODE_GLASS_TINT;
 const NODE_GLASS_TINT_INACTIVE = NODE_GLASS_TINT;
-const NODE_GLASS_METALLIC_FALLBACK = ["#2a2a2c", "#141416", "#050505", "#000000"] as const;
+const NODE_GLASS_METALLIC_FALLBACK = GLASS_METALLIC_BLACK;
 
 const FONT_SERIF = Platform.select({
   ios: "Georgia",
@@ -460,6 +469,26 @@ export default function HomeScreen() {
                       <View style={[styles.coinStreak, { top: "72%" }]} />
                     </Animated.View>
                   </Animated.View>
+
+                  {/* Diamond-cut milled edge — the same component the
+                      onboarding coin uses, so the two are one design rather
+                      than two that resemble each other. Rendered as a SIBLING
+                      of the rim, not a child: coinRim has overflow:"hidden" to
+                      clip the face image, and these facets deliberately
+                      straddle the edge, so nesting them would shave off their
+                      outer half. Same transform, so it turns with the coin. */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      width: 190,
+                      height: 190,
+                      opacity: circleOpacity,
+                      transform: coinTransform,
+                    }}
+                  >
+                    <CoinFacetRing size={190} rim={5} />
+                  </Animated.View>
                 </Pressable>
 
                 <Animated.Text
@@ -513,7 +542,7 @@ export default function HomeScreen() {
                           tintColor={active ? NODE_GLASS_TINT_ACTIVE : NODE_GLASS_TINT_INACTIVE}
                           isInteractive
                         >
-                          <SpecularHighlight intensity={0.35} />
+                          <SpecularHighlight intensity={GLASS_REFERENCE_SPECULAR} />
                           <Ionicons
                             name={node.icon}
                             size={20}
@@ -536,7 +565,7 @@ export default function HomeScreen() {
                             end={{ x: 0.85, y: 1 }}
                             style={StyleSheet.absoluteFill}
                           />
-                          <SpecularHighlight intensity={0.35} />
+                          <SpecularHighlight intensity={GLASS_REFERENCE_SPECULAR} />
                           <View
                             pointerEvents="none"
                             style={[styles.nodeCircleRim, active && styles.nodeCircleRimActive]}
@@ -659,7 +688,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     boxShadow: [
-      boxShadow("#FFFFFF", 0.45, 18),
+      boxShadow(COIN_GLOW_WARM_WHITE, 0.45, 18),
       "inset 0 2px 6px rgba(255,255,255,0.6)",
       "inset 0 -4px 10px rgba(20,20,24,0.5)",
     ].join(", "),
@@ -677,7 +706,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     boxShadow: [
-      boxShadow("#FFFFFF", 0.5, 14),
+      boxShadow(COIN_GLOW_WARM_WHITE, 0.5, 14),
       "inset 0 0 4px rgba(20,20,24,0.7)",
     ].join(", "),
   },

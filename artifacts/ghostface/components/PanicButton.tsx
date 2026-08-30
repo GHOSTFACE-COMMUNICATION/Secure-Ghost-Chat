@@ -14,7 +14,11 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { GLASS_TINT_BLACK, SpecularHighlight } from "@/components/GoldGradient";
+import {
+  GLASS_REFERENCE_SPECULAR,
+  GLASS_TINT_BLACK,
+  SpecularHighlight,
+} from "@/components/GoldGradient";
 import { TRACKING, type } from "@/constants/typography";
 
 // The surface is the app's ordinary black glass — the same GLASS_TINT_BLACK as
@@ -333,7 +337,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
               tintColor={GLASS_TINT_BLACK}
               isInteractive
             >
-              <SpecularHighlight intensity={0.22} />
+              <SpecularHighlight intensity={GLASS_REFERENCE_SPECULAR} />
               {panicHeld && (
                 <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
               )}
@@ -353,7 +357,7 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
             >
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000000" }]} />
               <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS_TINT_BLACK }]} />
-              <SpecularHighlight intensity={0.22} />
+              <SpecularHighlight intensity={GLASS_REFERENCE_SPECULAR} />
               {panicHeld && (
                 <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
               )}

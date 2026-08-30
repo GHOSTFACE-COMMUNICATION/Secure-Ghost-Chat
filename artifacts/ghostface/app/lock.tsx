@@ -27,6 +27,7 @@ import {
   GLASS_METALLIC_BLACK,
   GLASS_TINT_BLACK,
   GOLD_OUTLINE_COLOR_CLEAR,
+  GLASS_REFERENCE_SPECULAR,
   GoldGradient,
   SpecularHighlight,
 } from "@/components/GoldGradient";
@@ -1306,7 +1307,7 @@ export default function LockScreen() {
                   if (k === "del") {
                     return (
                       <Pressable key={ki} style={styles.keyBtn} onPress={handleDelete}>
-                        <GoldGradient solid style={styles.keyBtnGoldFill}>
+                        <GoldGradient specularIntensity={GLASS_REFERENCE_SPECULAR} style={styles.keyBtnGoldFill}>
                           <Ionicons name="backspace-outline" size={22} color={colors.foreground} />
                         </GoldGradient>
                       </Pressable>
@@ -1339,7 +1340,7 @@ export default function LockScreen() {
                       onPress={() => handleKey(k)}
                       testID={`key-${k}`}
                     >
-                      <GoldGradient solid style={styles.keyBtnGoldFill}>
+                      <GoldGradient specularIntensity={GLASS_REFERENCE_SPECULAR} style={styles.keyBtnGoldFill}>
                         <Text style={styles.keyText}>{k}</Text>
                       </GoldGradient>
                     </Pressable>

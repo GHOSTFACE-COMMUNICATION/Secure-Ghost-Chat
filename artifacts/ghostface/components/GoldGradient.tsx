@@ -179,6 +179,19 @@ function GoldTexture() {
 // up if it needs the stronger sheen.
 const WIDE_SURFACE_SPECULAR = 0.22;
 
+/**
+ * The radial menu's glass specular, promoted to a shared token.
+ *
+ * app/(tabs)/index.tsx kept its own frozen copy of the menu's glass values so
+ * they couldn't drift when the shared button tint was tuned. The tint and the
+ * fallback gradient in that copy turned out to be character-identical to
+ * GLASS_TINT_BLACK / GLASS_METALLIC_BLACK, so the copy was protecting nothing —
+ * what actually set the menu apart was this specular (0.35 against the 0.22
+ * default) and the absence of the `solid` white fill. Sharing the number is
+ * what makes "match the radial menu" checkable instead of a value to remember.
+ */
+export const GLASS_REFERENCE_SPECULAR = 0.35;
+
 export function GoldGradient({
   style,
   children,
