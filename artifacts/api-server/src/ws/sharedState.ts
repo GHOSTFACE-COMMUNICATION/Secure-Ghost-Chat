@@ -256,19 +256,62 @@ export async function clearActiveCall(pairKey: string, callId?: string): Promise
  * Release any call this alias is party to. Called when a socket drops
  * mid-call: without it the pair lock survives and neither party can call the
  * other again until MAX_CALL_AGE_MS ages the entry out.
+ *
+ * `notNewerThanMs` is the teardown cutoff, and it is what stops this from
+ * killing a call it has nothing to do with. The harmful ordering is:
+ *
+ *   T0  A's socket S1 closes (app killed/backgrounded)
+ *   T1  B calls A — setActiveCall parks call2, PushKit wakes A
+ *   T2  S1's cleanup finally runs, still the holder because A is not back yet
+ *   T3  A reconnects; the parked ring re-checks, finds the entry gone,
+ *       and sends a hangup instead of a ring
+ *
+ * The connId guard in cleanup() does not cover this: at T2 there genuinely is
+ * no newer socket, so cleanup is entitled to run. But call2 started at T1,
+ * after S1 was already dead, so it was never S1's to release. Passing S1's
+ * close time as the cutoff skips it. This is the "woke up, got a hangup"
+ * half of the unreliable-VoIP symptom.
+ *
+ * Omit the cutoff to clear unconditionally.
  */
-export async function clearCallsForAlias(alias: string): Promise<void> {
+export async function clearCallsForAlias(alias: string, notNewerThanMs?: number): Promise<void> {
   const r = redis();
   if (r) {
     try {
-      const pairKey = await r.getdel(`call:alias:${alias}`);
+      // GET, not GETDEL: the reverse index has to survive a skipped clear,
+      // or the call it points at can never be released by anything.
+      const pairKey = await r.get(`call:alias:${alias}`);
       if (!pairKey) return;
       const raw = await r.get(`call:${pairKey}`);
-      await r.del(`call:${pairKey}`);
-      if (raw) {
-        const call = JSON.parse(raw) as ActiveCall;
-        const other = call.caller === alias ? call.callee : call.caller;
-        await r.del(`call:alias:${other}`);
+      if (!raw) {
+        await r.del(`call:alias:${alias}`);
+        return;
+      }
+      const call = JSON.parse(raw) as ActiveCall;
+      if (notNewerThanMs !== undefined && call.startedAt > notNewerThanMs) {
+        logger.info(
+          { alias, callId: call.callId, startedAt: call.startedAt, cutoff: notNewerThanMs,
+            newerByMs: call.startedAt - notNewerThanMs },
+          "Call clear SKIPPED — call started after this socket closed",
+        );
+        return;
+      }
+      // Compare-and-delete on the callId just read. If a redial replaced the
+      // entry between the GET and here, this is a no-op instead of deleting a
+      // live call — the same protection clearActiveCall already had, which
+      // this function was missing entirely.
+      const removed = await r.eval(CLEAR_CALL_LUA, 1, `call:${pairKey}`, `"${call.callId}"`);
+      if (removed === 1) {
+        await r.del(`call:alias:${call.caller}`, `call:alias:${call.callee}`);
+        logger.info(
+          { alias, callId: call.callId, ageMs: Date.now() - call.startedAt },
+          "Call cleared on socket teardown",
+        );
+      } else {
+        logger.info(
+          { alias, callId: call.callId },
+          "Call clear SKIPPED — entry was replaced while clearing",
+        );
       }
       return;
     } catch (err) {
@@ -276,7 +319,20 @@ export async function clearCallsForAlias(alias: string): Promise<void> {
     }
   }
   for (const [pairKey, call] of memActiveCalls) {
-    if (call.caller === alias || call.callee === alias) memActiveCalls.delete(pairKey);
+    if (call.caller !== alias && call.callee !== alias) continue;
+    if (notNewerThanMs !== undefined && call.startedAt > notNewerThanMs) {
+      logger.info(
+        { alias, callId: call.callId, startedAt: call.startedAt, cutoff: notNewerThanMs,
+          newerByMs: call.startedAt - notNewerThanMs },
+        "Call clear SKIPPED — call started after this socket closed",
+      );
+      continue;
+    }
+    memActiveCalls.delete(pairKey);
+    logger.info(
+      { alias, callId: call.callId, ageMs: Date.now() - call.startedAt },
+      "Call cleared on socket teardown",
+    );
   }
 }
 

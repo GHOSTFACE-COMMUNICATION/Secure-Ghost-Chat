@@ -435,6 +435,10 @@ export function createWsServer(wss: WebSocketServer): void {
     const myPresenceSubscriptions = new Set<string>(); // targets this socket is watching
 
     const cleanup = async () => {
+      // Captured synchronously, before any await: this is effectively the
+      // socket's close time, and it is the cutoff clearCallsForAlias uses to
+      // avoid releasing a call that only started after this socket died.
+      const teardownAt = Date.now();
       if (!authedAlias) return;
       const alias = authedAlias;
 
@@ -473,8 +477,11 @@ export function createWsServer(wss: WebSocketServer): void {
         await shared.clearPresence(alias);
         // A dropped connection mid-call must release its pair lock too,
         // otherwise this alias can never call (or be called by) the other
-        // party again until the entry ages out.
-        await shared.clearCallsForAlias(alias);
+        // party again until the entry ages out. Bounded by this socket's close
+        // time: a call parked AFTER this socket died belongs to the wake that
+        // is currently in flight, not to us, and clearing it is what turns a
+        // successful PushKit wake into a hangup. See clearCallsForAlias.
+        await shared.clearCallsForAlias(alias, teardownAt);
         await shared.revokeGhostpadCode(alias);
         await endGhostpadSession(alias);
         await shared.clearSubscriptions(alias);
