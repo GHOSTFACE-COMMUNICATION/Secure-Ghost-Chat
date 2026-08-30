@@ -8,7 +8,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
-  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -22,6 +21,7 @@ import {
   GLASS_TINT_BLACK,
   SpecularHighlight,
 } from "@/components/GoldGradient";
+import { CoinPave } from "@/components/CoinPave";
 import { COIN_GLOW_WARM_WHITE, CoinFacetRing } from "@/components/GhostLogo";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
@@ -419,6 +419,42 @@ export default function HomeScreen() {
                     menuOpen ? "Hide menu" : "Tap to reveal menu"
                   }
                 >
+                  {/* Warm halo BEHIND the coin, matching onboarding.
+                      Deliberately OUTSIDE the rotating element: a glow that
+                      spun with the coin would squash to a sliver every half
+                      turn and read as flicker rather than light. It fades as
+                      the coin goes edge-on so the light stays attached to the
+                      object making it — a constant full circle around a
+                      silhouette that collapses twice per revolution strobes at
+                      roughly 2Hz at the idle spin rate. */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      width: 190 * 0.92,
+                      height: 190 * 0.92,
+                      borderRadius: 190,
+                      backgroundColor: "rgba(255,246,232,0.035)",
+                      opacity: Animated.multiply(
+                        circleOpacity,
+                        coinEdge.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 0.28],
+                          extrapolate: "clamp",
+                        }),
+                      ),
+                      // Three stacked layers — a wide soft bloom, a mid
+                      // falloff and a tight core. Stacking beats one huge
+                      // blur, which just goes evenly grey; the layers give the
+                      // falloff a shape.
+                      boxShadow: [
+                        boxShadow(COIN_GLOW_WARM_WHITE, 0.13, 190 * 0.42),
+                        boxShadow(COIN_GLOW_WARM_WHITE, 0.16, 190 * 0.2),
+                        boxShadow(COIN_GLOW_WARM_WHITE, 0.14, 190 * 0.08),
+                      ].join(", "),
+                    }}
+                  />
+
                   {/* Fake thickness: edge band flashes when edge-on */}
                   <Animated.View
                     pointerEvents="none"
@@ -443,11 +479,9 @@ export default function HomeScreen() {
                       },
                     ]}
                   >
-                    <Image
-                      source={require("../../assets/images/ghostface-logo.jpeg")}
-                      resizeMode="cover"
-                      style={styles.coinImage}
-                    />
+                    {/* Pavé face: the whole disc set with 1pt diamonds, with
+                        the GF mark on top. Replaces the flat logo plate. */}
+                    <CoinPave size={176} />
                     {/* Motion blur: pre-blurred face crossfades in with boost
                         velocity so top-speed spins read as a whirl */}
                     <Animated.Image

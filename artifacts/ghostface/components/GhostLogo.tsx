@@ -67,15 +67,21 @@ export const COIN_GLOW_WARM_WHITE = "#FFF6E8";
 export function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
   // Thin sparkling diamond edge: fine high-contrast facets with a brighter
   // glint every few facets — the sparkle carries it, not thickness.
-  const facetCount = 132;
+  // More cuts at half the depth: a real diamond-cut edge is a dense band of
+  // shallow flats, and 132 x (rim * 2.1) read as a chunky reeded rim rather
+  // than a cut edge.
+  const facetCount = 168;
   const facetR = size / 2 - rim / 2;
   // Derive facet width from the actual pitch so the cuts nearly touch,
   // separated only by a thin dark line. A fixed width leaves gaps that read
   // as a bead chain rather than milled reeding — at 132 facets on a 180pt
   // coin the pitch is ~4.2pt, so a 1.5pt facet was only ~35% duty cycle.
   const facetPitch = (2 * Math.PI * facetR) / facetCount;
-  const facetW = Math.max(1.2, facetPitch * 0.72);
-  const facetH = rim * 2.1;
+  // Narrower than the old 0.72 duty cycle: at half depth a facet as wide as
+  // it is tall stops reading as a cut and starts reading as a bead.
+  const facetW = Math.max(0.9, facetPitch * 0.55);
+  // Half the previous depth (was rim * 2.1).
+  const facetH = rim * 1.05;
   // diamond-cut milled edge
   return (
     <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
@@ -91,21 +97,43 @@ export function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
         // Light from upper-left, the convention the rest of the coin's
         // inset highlights already assume.
         const LIGHT = -Math.PI * 0.75;
-        const facing = Math.cos(theta - LIGHT); // -1 (away) .. 1 (toward)
-        const lit = Math.pow(Math.max(0, facing), 1.6); // 0..1 diffuse
+        // Per-facet tilt. Without this every cut faces the same way, the
+        // light sweeps them in perfect order, and the result is machined
+        // reeding — a silver coin edge, not a diamond cut. Real cut stones
+        // sparkle irregularly: neighbours sit at different angles, so one
+        // blazes while the one beside it stays dark. Deterministic (a hashed
+        // sine of the index) so it does not shimmer between renders.
+        const jitter = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+        const tilt = (jitter - 0.5) * 1.15;
+        const facing = Math.cos(theta - LIGHT + tilt); // -1 (away) .. 1 (toward)
+        // Tighter falloff than a matte surface: a cut flat is near-mirror,
+        // so it stays dark until it swings close to the light and then comes
+        // up fast. That is most of what separates a cut edge from brushed
+        // metal.
+        const lit = Math.pow(Math.max(0, facing), 2.4);
         // Alternating cut faces: every other facet is the opposing
         // flank of the groove, so it catches noticeably less light.
-        const flank = i % 2 === 0 ? 1 : 0.42;
+        const flank = i % 2 === 0 ? 1 : 0.24;
         const shade = lit * flank;
         // Specular: a tight highlight only where a facet points almost
         // straight at the light, so sparkle is localised instead of
         // sprinkled evenly around the circumference.
-        const spec = Math.pow(Math.max(0, facing), 22);
-        const isGlint = spec > 0.35 && i % 2 === 0;
+        const spec = Math.pow(Math.max(0, facing), 40);
+        // No `i % 2` gate: which facet catches the light is now decided by its
+        // own tilt, not by its parity, which is the whole point.
+        const isGlint = spec > 0.16;
         // Blend near-black → warm steel → white with the shade term.
-        const lo = [22, 22, 30];
-        const hi = [248, 250, 255];
+        // True black -> white. The old floor (22,22,30) never let the
+        // grooves go properly dark, which flattened the whole band.
+        const lo = [5, 6, 10];
+        const hi = [255, 255, 255];
         const c = lo.map((v, k) => Math.round(v + (hi[k] - v) * shade));
+        // Dispersion: a cut edge splits light, so the flank leading into the
+        // source skews warm and the one falling away skews cool. A couple of
+        // levels only, but it stops the sparkle reading as grey plastic.
+        const disp = Math.sin(theta - LIGHT + tilt) * 34 * shade;
+        c[0] = Math.max(0, Math.min(255, Math.round(c[0] + disp)));
+        c[2] = Math.max(0, Math.min(255, Math.round(c[2] - disp)));
         return (
           <View
             key={i}
@@ -115,12 +143,25 @@ export function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
               left: size / 2 - facetW / 2,
               width: isGlint ? facetW * 1.5 : facetW,
               height: isGlint ? facetH * 1.35 : facetH,
-              borderRadius: facetW,
+              // Square corners. `borderRadius: facetW` fully rounded a facet
+              // this small, turning every cut into a dot — the bead chain the
+              // duty-cycle note above warns about. A diamond cut has hard
+              // edges; that is what catches the light.
+              borderRadius: 0,
               backgroundColor: `rgb(${c[0]}, ${c[1]}, ${c[2]})`,
               opacity: 0.55 + 0.45 * shade,
+              // A crisp lit lip along the top of each flat. An inset shadow
+              // keeps this at one view per facet; a second view for the
+              // highlight would double an already 168-view ring.
               boxShadow: isGlint
-                ? [boxShadow(COIN_GLOW_WARM_WHITE, spec, 8), boxShadow(COIN_GLOW_WARM_WHITE, spec * 0.8, 3)].join(", ")
-                : undefined,
+                ? [
+                    boxShadow(COIN_GLOW_WARM_WHITE, spec, 8),
+                    boxShadow(COIN_GLOW_WARM_WHITE, spec * 0.8, 3),
+                    `inset 0 ${facetH * 0.22}px 0 rgba(255,255,255,${(0.55 * shade).toFixed(3)})`,
+                  ].join(", ")
+                : shade > 0.12
+                  ? `inset 0 ${facetH * 0.22}px 0 rgba(255,255,255,${(0.4 * shade).toFixed(3)})`
+                  : undefined,
               transform: [{ rotate: `${(360 / facetCount) * i}deg` }, { translateY: -facetR }],
             }}
           />

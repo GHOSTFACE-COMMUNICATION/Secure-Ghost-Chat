@@ -1,6 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
-import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -14,11 +12,7 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import {
-  GLASS_REFERENCE_SPECULAR,
-  GLASS_TINT_BLACK,
-  SpecularHighlight,
-} from "@/components/GoldGradient";
+import { GLASS_REFERENCE_SPECULAR, GoldGradient } from "@/components/GoldGradient";
 import { TRACKING, type } from "@/constants/typography";
 
 // The surface is the app's ordinary black glass — the same GLASS_TINT_BLACK as
@@ -32,7 +26,6 @@ import { TRACKING, type } from "@/constants/typography";
 // BG "#000"), so there is nothing behind the glass to refract — the
 // GLASS_SOLID_FILL case GoldGradient documents, where clear glass over black
 // renders as black and a low-alpha tint composites to dead grey.
-const useNativeGlass = isLiquidGlassAvailable();
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -327,46 +320,32 @@ export function PanicButton({ onWipe, scale = 1 }: PanicButtonProps) {
           onPressOut={cancelPanic}
           testID="panic-btn"
         >
-          {useNativeGlass ? (
-            <GlassView
-              style={[
-                styles.btn,
-                { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
-              ]}
-              glassEffectStyle="clear"
-              tintColor={GLASS_TINT_BLACK}
-              isInteractive
-            >
-              <SpecularHighlight intensity={GLASS_REFERENCE_SPECULAR} />
-              {panicHeld && (
-                <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
-              )}
-              <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-              <Text style={[styles.btnText, { fontSize: 15 * scale, letterSpacing: 2 * scale }]}>
-                {panicHeld ? "WIPING..." : "WIPE DEVICE"}
-              </Text>
-            </GlassView>
-          ) : (
-            <BlurView
-              intensity={32}
-              tint="dark"
-              style={[
-                styles.btn,
-                { borderRadius: colors.radius, paddingVertical: 17 * scale, gap: 12 * scale },
-              ]}
-            >
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000000" }]} />
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS_TINT_BLACK }]} />
-              <SpecularHighlight intensity={GLASS_REFERENCE_SPECULAR} />
-              {panicHeld && (
-                <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
-              )}
-              <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
-              <Text style={[styles.btnText, { fontSize: 15 * scale, letterSpacing: 2 * scale }]}>
-                {panicHeld ? "WIPING..." : "WIPE DEVICE"}
-              </Text>
-            </BlurView>
-          )}
+          {/* The same GoldGradient every other button in the app uses,
+              rather than a hand-rolled GlassView with a BlurView twin — that
+              duplication is why this drifted from the rest in the first place.
+              borderWidth 0 because the Pressable above already draws the
+              destructive rim: the danger signal is the rim, not the surface,
+              so the component's own gold outline would fight it. */}
+          <GoldGradient
+            specularIntensity={GLASS_REFERENCE_SPECULAR}
+            style={[
+              styles.btn,
+              {
+                borderRadius: colors.radius,
+                paddingVertical: 17 * scale,
+                gap: 12 * scale,
+                borderWidth: 0,
+              },
+            ]}
+          >
+            {panicHeld && (
+              <View style={[styles.progressFill, { width: `${panicProgress}%` }]} />
+            )}
+            <Ionicons name="nuclear-outline" size={22 * scale} color="#ffffff" allowFontScaling={false} />
+            <Text style={[styles.btnText, { fontSize: 15 * scale, letterSpacing: 2 * scale }]}>
+              {panicHeld ? "WIPING..." : "WIPE DEVICE"}
+            </Text>
+          </GoldGradient>
         </Pressable>
       </View>
     </>
