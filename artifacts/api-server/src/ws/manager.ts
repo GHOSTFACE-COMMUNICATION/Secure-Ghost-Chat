@@ -152,6 +152,68 @@ const CALL_SIGNAL_TYPES = new Set([
 // because that budget is device- and network-dependent — and because it lets
 // the tests exercise the bounce path without a 25s wait.
 const CALL_WAKE_GRACE_MS = Number(process.env.CALL_WAKE_GRACE_MS ?? 25_000);
+
+// How long a socket teardown waits before releasing the alias's call.
+//
+// Releasing it immediately is wrong while the alias is merely RECONNECTING.
+// Production trace, 30 Aug 00:41:26.844–27.361: a call rang, and 529ms later
+// `Call cleared on socket teardown alias=N0GANG callId=6ec056c8 ageMs=529`
+// deleted it, leaving the caller with "hangup queued for offline callee".
+// N0GANG had authenticated three times in 38s, hopping replicas — and every
+// one of those teardowns clears any in-flight call for that alias. The churn
+// was killing the calls, not anything in the call path.
+//
+// So: wait, then release only if the alias is genuinely still gone.
+const CALL_CLEAR_GRACE_MS = Number(process.env.CALL_CLEAR_GRACE_MS ?? 12_000);
+
+// Pending releases, keyed by alias. Per-replica, which is fine: the timer is
+// only an optimisation for the local case. The authoritative check is
+// shared.isOnline at fire time, which is Redis-backed and therefore sees a
+// reconnect on ANY replica — connectedClients cannot, it is per-replica by
+// design (see sharedState's docstring).
+const pendingCallClears = new Map<string, NodeJS.Timeout>();
+
+function cancelPendingCallClear(alias: string, reason: string): void {
+  const timer = pendingCallClears.get(alias);
+  if (!timer) return;
+  clearTimeout(timer);
+  pendingCallClears.delete(alias);
+  logger.info({ alias, reason }, "Deferred call release cancelled");
+}
+
+function scheduleCallClear(alias: string, teardownAt: number): void {
+  // A second teardown supersedes the first: restart the window rather than
+  // stacking timers for one alias.
+  cancelPendingCallClear(alias, "superseded by a newer teardown");
+  const timer = setTimeout(() => {
+    pendingCallClears.delete(alias);
+    void (async () => {
+      try {
+        if (await shared.isOnline(alias)) {
+          // Back on some replica. Either the call is genuinely live, or it is
+          // dead and the client's own call-hangup will clear it.
+          //
+          // ⚠️ Residual: if the client reconnects but never sends that hangup,
+          // the pair entry lingers and the busy-check at the call-ring site
+          // rejects new rings between this pair until MAX_CALL_AGE_MS (2h)
+          // ages it out. Tracked — the fix is to bound the busy-check, not to
+          // go back to clearing a live call out from under a reconnect.
+          logger.info(
+            { alias },
+            "Deferred call release SKIPPED — alias is online again",
+          );
+          return;
+        }
+        await shared.clearCallsForAlias(alias, teardownAt);
+      } catch (err) {
+        logger.warn({ err, alias }, "Deferred call release failed");
+      }
+    })();
+  }, CALL_CLEAR_GRACE_MS);
+  // Never hold the event loop open for this.
+  timer.unref?.();
+  pendingCallClears.set(alias, timer);
+}
 // ws invokes send's callback reliably; this only exists so a pathological
 // socket cannot wedge a message handler indefinitely.
 const SEND_CONFIRM_TIMEOUT_MS = 5_000;
@@ -475,13 +537,13 @@ export function createWsServer(wss: WebSocketServer): void {
         // Presence goes first: everything below is best-effort, and a watcher
         // seeing a stale "online" is the most visible failure here.
         await shared.clearPresence(alias);
-        // A dropped connection mid-call must release its pair lock too,
-        // otherwise this alias can never call (or be called by) the other
-        // party again until the entry ages out. Bounded by this socket's close
-        // time: a call parked AFTER this socket died belongs to the wake that
-        // is currently in flight, not to us, and clearing it is what turns a
-        // successful PushKit wake into a hangup. See clearCallsForAlias.
-        await shared.clearCallsForAlias(alias, teardownAt);
+        // A dropped connection mid-call must release its pair lock, or this
+        // alias can never call (or be called by) the other party again until
+        // the entry ages out — but NOT synchronously, and not while the alias
+        // is only reconnecting. Deferred by CALL_CLEAR_GRACE_MS and cancelled
+        // if the alias comes back; still bounded by this socket's close time
+        // when it does fire. See scheduleCallClear.
+        scheduleCallClear(alias, teardownAt);
         await shared.revokeGhostpadCode(alias);
         await endGhostpadSession(alias);
         await shared.clearSubscriptions(alias);
@@ -559,6 +621,9 @@ export function createWsServer(wss: WebSocketServer): void {
         }
 
         authedAlias = normalizedAuthAlias;
+        // This alias is demonstrably back: drop any release its previous
+        // socket queued, before the window can expire under a live call.
+        cancelPendingCallClear(authedAlias, "alias reconnected");
         connectedClients.set(authedAlias, { ws, alias: authedAlias, connId });
         // Writes to this socket, confirming via ws.send's callback — the only
         // place that confirmation is possible, since it cannot cross a process.
