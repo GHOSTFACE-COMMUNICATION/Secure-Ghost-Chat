@@ -184,8 +184,12 @@ Consequences currently in force:
   encryption**, with the mass-market exemption relied upon (memo §7.8).
 - **Guarded in CI:** `artifacts/ghostface/lib/exportCompliance.test.ts` fails the
   test suite if `ITSAppUsesNonExemptEncryption` is not `true`, citing this file.
-  The flag had flipped six times because it lived in config with no rationale
-  attached; it cannot silently flip again.
+  The flag's value changed **ten times** between 10 Jun and 30 Aug 2026 (four
+  of them since 6 Aug) because it lived in config with no rationale attached;
+  it cannot silently flip again. Verified from git history 30 Aug 2026:
+  `git log -G'ITSAppUsesNonExemptEncryption' -- artifacts/ghostface/app.json`
+  — note `-S` undercounts here, as it only sees the key appear or disappear,
+  not `true`↔`false` flips.
 
 ### App Store Connect questionnaire
 

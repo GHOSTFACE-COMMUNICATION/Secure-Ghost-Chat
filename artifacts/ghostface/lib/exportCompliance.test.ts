@@ -5,11 +5,17 @@ import { readFileSync } from "node:fs";
 /**
  * Export-compliance guard.
  *
- * ITSAppUsesNonExemptEncryption has flip-flopped six times since 6 Aug 2026
- * (true -> false -> true -> exempt), because it lived in config with no
+ * ITSAppUsesNonExemptEncryption changed value ten times between 10 Jun and
+ * 30 Aug 2026 (four of them since 6 Aug), because it lived in config with no
  * rationale attached to it. Build 63 shipped the wrong value, and so did build
  * 74 — verified by reading the compiled Info.plist out of the .ipa, not the
  * config.
+ *
+ * The flips were not random: every upload carrying `true` was rejected by
+ * Apple with error 90592, and the flag was reverted to `false` within days
+ * each time (17 Jun, 11 Jul, 6 Aug, 16 Aug). That rejection is NOT caused by
+ * this flag being wrong — see COMPLIANCE.md §4. Reverting it is the reflex
+ * this test exists to stop.
  *
  * The value is not a preference. It follows from the classification in
  * COMPLIANCE.md: the app DOES use encryption, and relies on the mass-market
