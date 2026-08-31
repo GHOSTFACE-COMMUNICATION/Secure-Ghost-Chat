@@ -4,7 +4,39 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-30 (Claude Code — a long session: four PRs merged, two
+Last updated: 2026-08-30 (Claude Code — **GF-01 IS CLOSED** and the submit
+freeze is replaced by a conditional gate. MinterEllisonRuddWatts (Salmond /
+Vaughan-Jones), matter 1056841, 31 Aug 2026: **ECCN 5D992.c mass-market
+self-classification, no CCATS, no MFAT permit, distribution may resume.** New
+`COMPLIANCE.md` at the repo root is now the standing record — classification
+statement, the reviewed crypto baseline, the BIS annual-report obligation, the
+per-build release record and the standing rule.
+⛔ **BUT NOTHING SHIPS YET, on two counts found while doing the paperwork.**
+FIRST, **build 74's compiled `ITSAppUsesNonExemptEncryption` is `false`** —
+read from `Payload/GHOSTFACE.app/Info.plist` inside the actual `.ipa`, not from
+config. That is the same wrong value the memo records against build 63 (§7.6(f)),
+and §7.8 requires the setting to say the app USES encryption with the exemption
+relied on separately. `app.json` is corrected to `true`, but the flag is compiled
+in, so **a new build is required**. That flag has flip-flopped six times since
+6 Aug; nothing anchored it to a rationale until now.
+SECOND, ⛔ **argon2id is not in the materials counsel reviewed.** `lib/recoveryPin.ts`
+blinds the identity key with argon2id, and **"argon" appears zero times in the
+Cryptographic Inventory** (verified by text search; every other algorithm does
+appear). It landed on devtest 27 Aug, at or after the materials were prepared,
+and is an ancestor of build 74. Memo §3.1(b) conditions the opinion on the
+description being complete. **This goes to counsel as an addendum to 1056841
+before any public release.**
+**The standing rule (COMPLIANCE.md §5) replaces the freeze:** a build ships only
+if its crypto diff against the reviewed baseline is zero AND that zero is
+recorded. Any material change to cryptographic functionality goes to counsel
+first — the pending AEAD associated-data fix is held behind this rule.
+📅 **BIS annual self-classification report due 1 Feb 2027** for CY2026, to
+crypt-supp8@bis.doc.gov and enc@nsa.gov. Not started.
+ASC questionnaire on public release: **uses encryption YES**, mass-market
+exemption per the 5D992.c self-classification.
+Previous entry follows.)
+
+Previously updated: 2026-08-30 (Claude Code — a long session: four PRs merged, two
 production data wipes, a churn root-cause, a local-build discovery, and the
 home coin redesigned. FIRST, **the four Railway-agent PRs are merged and
 deployed** (`2ec4851` #8+#9, `a33d155`+`9013490` #10, `c8d6875` #11), in three
