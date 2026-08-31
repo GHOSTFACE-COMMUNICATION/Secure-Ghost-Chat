@@ -4,7 +4,8 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-30 (Claude Code — GF-01 closed, and the compliance
+Last updated: 2026-08-31 (Claude Code — **90592 root cause found: two abandoned
+June declarations on the ASC record**, see below. GF-01 closed, and the compliance
 machinery now actually exists. **Build 75 is the first conforming build**: EAS
 `22413bd1`, 1.0.2 / build 75, artifact `sOwNGmCL…ipa`, with compiled
 `ITSAppUsesNonExemptEncryption` = **`true`** — verified by reading the
@@ -12,9 +13,64 @@ machinery now actually exists. **Build 75 is the first conforming build**: EAS
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
-⏸ **`eas submit` has NOT been run** — the sandbox classifier refused it, not any
-compliance gate. `eas submit --platform ios --id 22413bd1-7944-4338-aeb1-77efb86233fb
---non-interactive`. Upload-only to internal TestFlight; **not** for App Review.
+🔴 **Build 75 CANNOT be submitted — Apple rejects it with error 90592.** Three
+attempts on 31 Aug (`b4f9d3ae`, `b19f9856`, `4ecd1537`), each failing at
+validation in under a minute with no binary accepted. Verbatim, from the EAS
+job log (brotli-encoded; decode with `zlib.brotliDecompressSync`, the CLI never
+prints it and `--verbose`/`--verbose-fastlane` do not help):
+
+> Invalid Export Compliance Code. The export compliance key value [] in the
+> app's Info.plist doesn't match the key value of the app's export compliance
+> documentation. To find the correct value, go to My Apps on App Store Connect.
+> (90592)
+
+**Root cause — read from the App Store Connect API on 31 Aug.** The app record
+holds **two App Encryption Declarations, both stuck in state `CREATED` with
+`codeValue: null`**:
+
+| Declaration | Created | State | Code |
+|---|---|---|---|
+| `e4bdc6a7-7013-4a0c-b91c-21fb7766af56` | 19 Jun 2026 | `CREATED` | `null` |
+| `2cb25cc0-c76e-429f-9d10-260946eda9af` | 18 Jun 2026 | `CREATED` | `null` |
+
+`CREATED` = started, never submitted for review, so no code was ever issued.
+Both carry the correct 5D992.c mass-market wording in `appDescription` and
+neither is attached to a build — they are abandoned June drafts. They match the
+flag history exactly (`true` on 17 Jun → declarations 18–19 Jun → reverted
+5 Jul).
+
+`ITSAppUsesNonExemptEncryption: true` makes Apple look for a compliance code;
+the record's code is `null` and the plist's is `[]`; they "don't match" and the
+upload is rejected. **Every one of the ten builds ASC has ever accepted carries
+`usesNonExemptEncryption = false`** — the untrue answer has never been
+challenged and the true one has never got through.
+
+⚠️ The `[]` is `ITSEncryptionExportComplianceCode`, **not**
+`ITSAppUsesNonExemptEncryption`. Do not "fix" this by reverting the flag — that
+is the exact reflex that produced builds 63 and 74, and `lib/exportCompliance.test.ts`
+now fails the suite for it.
+
+✅ **The app extension is NOT implicated.** `networkpackettunnel.appex` lacks
+`ITSAppUsesNonExemptEncryption` in both builds 74 and 75 (verified by unzipping
+each `.ipa` and reading every bundled `Info.plist`), but the 90592 log names
+only the compliance code. Adding the key to the appex would cost a build and
+fix nothing. Worth folding in whenever a rebuild happens for another reason.
+
+**Next action — needs Benji in the ASC UI:** discard both June declarations
+(App Information → App Encryption Documentation). With them gone and the
+questionnaire already answered "no documents needed", `true` has nothing to
+mismatch and **build 75 resubmits unchanged** — no rebuild. The submissions are
+`canRetry: true`, so testing costs a minute. The alternative (finish a
+declaration, take Apple's issued code into `ITSEncryptionExportComplianceCode`,
+rebuild as 76) puts the app on the documentation path the memo says it is not
+on. ⚠️ The ASC API exposes no `DELETE` for declarations — removal is UI-only,
+and it is unverified whether they can be deleted rather than only completed.
+
+**ASC API access (for future sessions):** issuer `abba23f8-558e-49d5-bdc6-f80952590f8e`,
+working local key `~/Keys/AuthKey_WD424K32M4.p8`. The key Benji named
+(`JYNUC3BXLU`) is not on disk — Apple allows one download only. Five of the ten
+local `.p8` keys return 401; `WD424K32M4` authenticates but is scoped too
+narrowly for declaration→build links (403).
 ✅ **ASC App Encryption Documentation filed 30 Aug**, recorded verbatim in
 `COMPLIANCE.md` §7 — purpose text, standard-algorithms YES / proprietary NO
 (memo §4.4, §4.10–4.11), France NO (matching the NZ/AU/UK/US launch decision).
