@@ -4,7 +4,36 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-30 (Claude Code — **GF-01 IS CLOSED** and the submit
+Last updated: 2026-08-30 (Claude Code — GF-01 closed, and the compliance
+machinery now actually exists. **Build 75 is the first conforming build**: EAS
+`22413bd1`, 1.0.2 / build 75, artifact `sOwNGmCL…ipa`, with compiled
+`ITSAppUsesNonExemptEncryption` = **`true`** — verified by reading the
+`Info.plist` out of the `.ipa`, the same way builds 63 and 74 were disproved. It
+also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
+before PushKit), so it is the build that tests whether the kick loop was behind
+the stale-ring drops.
+⏸ **`eas submit` has NOT been run** — the sandbox classifier refused it, not any
+compliance gate. `eas submit --platform ios --id 22413bd1-7944-4338-aeb1-77efb86233fb
+--non-interactive`. Upload-only to internal TestFlight; **not** for App Review.
+✅ **ASC App Encryption Documentation filed 30 Aug**, recorded verbatim in
+`COMPLIANCE.md` §7 — purpose text, standard-algorithms YES / proprietary NO
+(memo §4.4, §4.10–4.11), France NO (matching the NZ/AU/UK/US launch decision).
+Apple confirmed no documents need uploading. ⚠️ **Apple offers a hint on the last
+screen to declare no-encryption in `Info.plist` — never take it.** That is
+precisely the defect in builds 63/74; it contradicts §7.8 and now fails the test
+suite via `lib/exportCompliance.test.ts`, which was mutation-checked.
+✅ **Annexes archived** to `~/Documents/Ghostface-Legal/1056841-export-control/`
+(mirror to the company OneDrive; the memo email still needs exporting as PDF
+into the same folder).
+✅ **Counsel asked** — reply on the memo thread to Sarah Salmond, cc Sian
+Vaughan-Jones and Isabelle Pou, covering the argon2id omission from Annex 1 and
+the pending AEAD associated-data encoding fix, both framed on §7.5's revisit
+trigger.
+⛔ **Public release still gated.** The crypto diff against the reviewed baseline
+is non-zero until Sarah answers on argon2id. `COMPLIANCE.md` §5 holds that line;
+the AEAD fix sits behind the same rule. Previous entry follows.)
+
+Previously updated: 2026-08-30 (Claude Code — **GF-01 IS CLOSED** and the submit
 freeze is replaced by a conditional gate. MinterEllisonRuddWatts (Salmond /
 Vaughan-Jones), matter 1056841, 31 Aug 2026: **ECCN 5D992.c mass-market
 self-classification, no CCATS, no MFAT permit, distribution may resume.** New
