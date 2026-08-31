@@ -58,6 +58,8 @@ Source: memo §4.3–§4.4 and §4.10, and the Cryptographic Inventory (Annex 1)
 - SHA-256, SHA-512
 - HKDF-HMAC-SHA256
 - PBKDF2-HMAC-SHA256
+- Argon2id (RFC 9106) — recovery-PIN key blinding, added to the baseline per
+  counsel's email of **31 August 2026**
 
 **Implementation**
 
@@ -69,6 +71,14 @@ Source: memo §4.3–§4.4 and §4.10, and the Cryptographic Inventory (Annex 1)
   HKDF-SHA256 key-derivation combining X25519 and ML-KEM-768 shared secrets in
   the hybrid handshake. Counsel assessed this at §4.10–§4.11 and concluded it is
   **not** a novel primitive and does not require separate BIS classification.
+- `argon2id` (`artifacts/ghostface/lib/recoveryPin.ts`) — RFC 9106 Argon2id via
+  `react-native-argon2` (t=3, m=64 MiB, p=1, 32-byte output), used to blind the
+  identity key with a user-chosen PIN before the recovery phrase is encoded.
+  Counsel considered this on **31 August 2026** and concluded it is "a published
+  and widely used key derivation function being applied in a conventional
+  manner", not "a novel encryption algorithm or other material departure", and
+  that it does **not** affect the classification conclusions. Recorded in
+  Cryptographic Inventory rev. 2 §2–§3 as counsel recommended.
 
 ---
 
@@ -106,8 +116,8 @@ against §2.
 | Version | Build | Date | `ITSAppUsesNonExemptEncryption` (compiled) | Crypto diff vs reviewed materials | Distribution |
 |---|---|---|---|---|---|
 | 1.0.2 | 63 | 20 Aug 2026 | ❌ `false` | not assessed at the time | TestFlight internal, director's accounts only (memo §7.6(f)) |
-| 1.0.2 | 74 | 29 Aug 2026 | ❌ `false` — **verified from the compiled `Info.plist` inside the `.ipa`**, not from config | ⛔ **NON-ZERO — see below** | Uploaded to ASC, accepted by processing. **Not submitted for review. Must not be.** |
-| 1.0.2 | 75 | 30 Aug 2026 | ✅ `true` — **verified from the compiled `Info.plist` inside the `.ipa`** (EAS artifact `sOwNGmCL…`), not from config | ⛔ **NON-ZERO — argon2id still open, see below** | Internal TestFlight only, director's accounts — the footing the memo treats as unproblematic at §7.6(f). **NOT submitted for App Review, and must not be until counsel answers on argon2id.** |
+| 1.0.2 | 74 | 29 Aug 2026 | ❌ `false` — **verified from the compiled `Info.plist` inside the `.ipa`**, not from config | ✅ **ZERO** — argon2id cleared 31 Aug 2026 and now in the baseline (§2); the AEAD canonical-AD change (`10400e8`, 19 Aug) was also present and unrecorded at the time, cleared 31 Aug | Uploaded to ASC, accepted by processing. **Not submitted for review. Must not be** — its compiled flag is `false`, which the memo does not support (§7.8). Unshippable for the declaration, not for its crypto. |
+| 1.0.2 | 75 | 30 Aug 2026 | ✅ `true` — **verified from the compiled `Info.plist` inside the `.ipa`** (EAS artifact `sOwNGmCL…`), not from config | ✅ **ZERO** — argon2id cleared by counsel 31 Aug 2026 and recorded in the baseline (§2); the AEAD canonical-AD change (`10400e8`, 19 Aug) was also present and unrecorded at the time, cleared 31 Aug | Internal TestFlight only, director's accounts — the footing the memo treats as unproblematic at §7.6(f). Upload currently blocked by ASC error 90592 (stale June encryption declarations), a **declaration-record** issue, not a crypto-diff one — see TRACKER GF-15. |
 
 ### Build 75 — the export declaration is now correct
 
@@ -136,7 +146,7 @@ Two independent defects:
    corrected to `true`; **a new build is required** — the flag is compiled in.
 2. **Cryptographic functionality outside the reviewed materials.** See below.
 
-### ⛔ Open diff: argon2id (recovery PIN)
+### ✅ Resolved diff: argon2id (recovery PIN)
 
 `artifacts/ghostface/lib/recoveryPin.ts` derives a blinding key with **argon2id**
 (`react-native-argon2`), used as `phraseValue = identityKey XOR argon2id(pin,
@@ -154,11 +164,26 @@ cosmetic. Memo §3.1(b) conditions the opinion on the description being complete
 and §7.5 recommends revisiting the classification if cryptographic functionality
 materially changes.
 
-**Status: asked.** Put to Sarah Salmond on 30 Aug 2026 in reply on the memo
-thread, alongside the AEAD question. **Awaiting response — record the outcome
-here when it lands.** Assessment on the face of the memo's
-own reasoning is that a standard published KDF should not disturb 5D992.c — but
-that is counsel's call to make, not ours.
+**Status: ✅ RESOLVED — 31 August 2026.** Sarah Salmond replied on the memo
+thread (cc Sian Vaughan-Jones, Isabelle Pou):
+
+> "argon2id appears to be a published and widely used key derivation function
+> being applied in a conventional manner. As described, it does not appear to
+> constitute a novel encryption algorithm or other material departure from the
+> cryptographic functionality we considered in our analysis. Accordingly, we do
+> not consider the inclusion of argon2id to affect the classification
+> conclusions reached in the memorandum."
+
+Counsel recommended updating the Cryptographic Inventory to record its use "so
+that the inventory remains a complete and accurate description of the
+Application's cryptographic functionality". **Done — Inventory rev. 2, 31 Aug
+2026** (§2 primitives table, §3 recovery-PIN subsection, §6 change record).
+Argon2id is now part of the reviewed baseline in §2, so it is no longer a diff.
+
+⚠️ Counsel's conclusions remain "subject to the assumptions and qualifications
+in the advice, including our reliance on the accuracy and completeness of the
+technical information provided by Ghostface" — which is why the inventory has to
+stay accurate, not merely be updated once.
 
 ---
 
@@ -175,10 +200,34 @@ a conditional gate:
 
 Consequences currently in force:
 
-- **The pending AEAD associated-data fix is held behind this rule.** It changes
-  cryptographic functionality and must go to counsel first.
-- **The argon2id recovery PIN is an open, unresolved diff** (§4). Until counsel
-  responds, no build containing it may be publicly released.
+- ✅ **The AEAD associated-data fix is CLEARED** (counsel, 31 Aug 2026) —
+  assessed as "a correction to the way existing encryption functionality is
+  implemented, rather than a change to the encryption itself… a routine
+  implementation correction rather than a material change". Algorithms, protocol
+  and intended functionality unchanged. Recorded in Cryptographic Inventory
+  rev. 2 §5. The clearance is conditional in counsel's own words — "provided the
+  change is limited to the implementation issue identified in your email" — so
+  any further behavioural change bundled into that work is a new diff and comes
+  back here.
+  ⚠️ **Correction of record (31 Aug 2026): this fix had already SHIPPED when it
+  was put to counsel.** It is commit `10400e8` ("fix(crypto): canonical binary
+  AEAD associated data"), 19 Aug 2026 02:15 PDT — an ancestor of build 74
+  (`4c641c6`) and build 75, and present in builds 62, 63, 74 and 75. The 30 Aug
+  email to counsel described it as "a **pending** bug fix", and this file
+  previously described it as "held behind this rule". Both were wrong: it had
+  been in TestFlight builds for eleven days.
+  **This is a breach of the rule above** — a change to cryptographic
+  functionality shipped before counsel saw it. Cured retrospectively by the
+  31 Aug clearance, and materially harmless (distribution has only ever been
+  internal TestFlight to the director's own two Apple IDs, the footing the memo
+  treats as unproblematic at §7.6(f); no third party has ever received a build).
+  But counsel's conclusions are expressly conditioned on "the accuracy and
+  completeness of the technical information provided by Ghostface", so the
+  timing must be corrected to counsel — fold it into the note accompanying
+  Inventory rev. 2. **The lesson the rule exists for: check `git log` before
+  calling something pending.**
+- ✅ **The argon2id recovery PIN is RESOLVED** (counsel, 31 Aug 2026) and is now
+  part of the reviewed baseline in §2. See §4.
 - Before any public release, the App Store questionnaire answers and the
   compiled `ITSAppUsesNonExemptEncryption` must both say the app **uses
   encryption**, with the mass-market exemption relied upon (memo §7.8).
@@ -216,7 +265,9 @@ cloud durability under the company's own account.
 | Cryptographic Inventory (Annex 1) | ✅ archived |
 | Technical Memorandum (Annex 2) | ✅ archived |
 | ASC Declaration Exhibits (Annex 3) | ✅ archived |
-| Follow-up to counsel, 30 Aug 2026 | ✅ sent — reply on the memo thread to Sarah Salmond, cc Sian Vaughan-Jones / Isabelle Pou: argon2id omission from Annex 1, and the pending AEAD associated-data encoding fix. Both framed against §7.5's revisit trigger. **Awaiting response.** |
+| Follow-up to counsel, 30 Aug 2026 | ✅ sent — reply on the memo thread to Sarah Salmond, cc Sian Vaughan-Jones / Isabelle Pou: argon2id omission from Annex 1, and the pending AEAD associated-data encoding fix. Both framed against §7.5's revisit trigger. |
+| **Counsel's response, 31 Aug 2026** | ✅ received — Gmail message `1a05644d32bf7630`. Neither item changes the classification analysis or the memorandum's conclusions. Argon2id: conventional published KDF, no effect on classification; inventory to record it. AEAD: routine implementation correction, no revisit required, **provided the change is limited to the issue described**. ✅ **filed** as `2026-08-31_Counsel_Response_argon2id_AEAD.pdf` in the archive, alongside the memo. |
+| Cryptographic Inventory rev. 2, 31 Aug 2026 | ✅ updated in `compliance/` (argon2id §2–§3, AEAD correction §5, change record §6), exported to PDF and archived as `GHOSTFACE_Cryptographic_Inventory_rev2_2026-08-31.pdf`. ⬜ **Send to counsel** — Sarah offered to review it and issue "a short addendum recording our consideration of these points, so that the advice package and supporting documents remain fully aligned". Worth taking: it closes the loop in the file counsel holds, not just ours. |
 | BIS/ENC reports + evidence of submission | none yet — see §3 |
 | Release records (versions, build numbers, crypto feature sets) | §4 of this file |
 | App Store / TestFlight / Play export-compliance declarations | ✅ ASC App Encryption Documentation completed 30 Aug 2026 — answers recorded in §7 |
