@@ -139,8 +139,9 @@ cosmetic. Memo §3.1(b) conditions the opinion on the description being complete
 and §7.5 recommends revisiting the classification if cryptographic functionality
 materially changes.
 
-**Required before public release:** put argon2id to counsel as an addendum to
-matter 1056841, and record the outcome here. Assessment on the face of the memo's
+**Status: asked.** Put to Sarah Salmond on 30 Aug 2026 in reply on the memo
+thread, alongside the AEAD question. **Awaiting response — record the outcome
+here when it lands.** Assessment on the face of the memo's
 own reasoning is that a standard published KDF should not disturb 5D992.c — but
 that is counsel's call to make, not ours.
 
@@ -166,6 +167,10 @@ Consequences currently in force:
 - Before any public release, the App Store questionnaire answers and the
   compiled `ITSAppUsesNonExemptEncryption` must both say the app **uses
   encryption**, with the mass-market exemption relied upon (memo §7.8).
+- **Guarded in CI:** `artifacts/ghostface/lib/exportCompliance.test.ts` fails the
+  test suite if `ITSAppUsesNonExemptEncryption` is not `true`, citing this file.
+  The flag had flipped six times because it lived in config with no rationale
+  attached; it cannot silently flip again.
 
 ### App Store Connect questionnaire
 
@@ -182,12 +187,17 @@ On public release, answer:
 Held outside this repository — a git repo is the wrong place for privileged
 correspondence.
 
+**Archive:** `~/Documents/Ghostface-Legal/1056841-export-control/`
+Mirror this folder to the Ghostface M365 / OneDrive tenancy — local working copy,
+cloud durability under the company's own account.
+
 | Record | Status |
 |---|---|
-| This opinion (memo, 31 Aug 2026) | in email; **to be archived** |
-| Cryptographic Inventory (Annex 1) | `~/Downloads/GHOSTFACE_Cryptographic_Inventory.pdf` |
-| Technical Memorandum (Annex 2) | `~/Downloads/GHOSTFACE_Classification_Memo.pdf` |
-| ASC Declaration Exhibits (Annex 3) | `~/Downloads/GHOSTFACE_ASC_Declaration_Exhibits.pdf` |
+| This opinion (memo, 31 Aug 2026) | ⬜ **still in Gmail — export the message as PDF (Print → Save as PDF) into the archive folder**, so the transmittal is preserved with the advice |
+| Cryptographic Inventory (Annex 1) | ✅ archived |
+| Technical Memorandum (Annex 2) | ✅ archived |
+| ASC Declaration Exhibits (Annex 3) | ✅ archived |
+| Follow-up to counsel, 30 Aug 2026 | ✅ sent — reply on the memo thread to Sarah Salmond, cc Sian Vaughan-Jones / Isabelle Pou: argon2id omission from Annex 1, and the pending AEAD associated-data encoding fix. Both framed against §7.5's revisit trigger. **Awaiting response.** |
 | BIS/ENC reports + evidence of submission | none yet — see §3 |
 | Release records (versions, build numbers, crypto feature sets) | §4 of this file |
 | App Store / TestFlight / Play export-compliance declarations | to collect |
