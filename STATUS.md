@@ -56,6 +56,8 @@ each `.ipa` and reading every bundled `Info.plist`), but the 90592 log names
 only the compliance code. Adding the key to the appex would cost a build and
 fix nothing. Worth folding in whenever a rebuild happens for another reason.
 
+⚠️ **Both drafts say `availableOnFrenchStore: true` — contradicting the 30 Aug questionnaire (France NO) and the NZ/AU/UK/US launch decision — and both have `documentUrl: null`. A France requirement asserted with no document is the most likely reason Apple expects a code at all. **Do not complete a June draft unchanged.** Apple's rule: “Once your documentation is approved, Apple will provide you a key value” — no approval, no code, nothing for the plist to match.
+
 **Next action — needs Benji in the ASC UI:** discard both June declarations
 (App Information → App Encryption Documentation). With them gone and the
 questionnaire already answered "no documents needed", `true` has nothing to
