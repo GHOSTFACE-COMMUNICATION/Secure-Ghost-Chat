@@ -215,4 +215,66 @@ cloud durability under the company's own account.
 | Follow-up to counsel, 30 Aug 2026 | ✅ sent — reply on the memo thread to Sarah Salmond, cc Sian Vaughan-Jones / Isabelle Pou: argon2id omission from Annex 1, and the pending AEAD associated-data encoding fix. Both framed against §7.5's revisit trigger. **Awaiting response.** |
 | BIS/ENC reports + evidence of submission | none yet — see §3 |
 | Release records (versions, build numbers, crypto feature sets) | §4 of this file |
-| App Store / TestFlight / Play export-compliance declarations | to collect |
+| App Store / TestFlight / Play export-compliance declarations | ✅ ASC App Encryption Documentation completed 30 Aug 2026 — answers recorded in §7 |
+
+---
+
+## 7. App Store Connect — encryption declaration as filed
+
+Completed **30 August 2026**, in reliance on the classification in §1. Retained
+here because memo §7.4(f) requires keeping the declarations made on the strength
+of this advice, and because the *answers* are the record — not merely the fact
+that the flow was completed.
+
+**Screen 1 — App Purpose** (298 / 300 characters, as filed):
+
+> GHOSTFACE is a consumer end-to-end encrypted messaging and calling app.
+> Encryption (standard published algorithms: ChaCha20-Poly1305, X25519,
+> ML-KEM-768, Ed25519, HKDF, PBKDF2, Argon2id) secures user communications only.
+> Mass-market product, self-classified ECCN 5D992.c under US EAR §740.17(b)(1).
+
+Note this text names **Argon2id**, which is *not* in Annex 1. That is deliberate:
+the declaration to Apple states what the app actually does. Omitting it to match
+the annex would have been a false declaration. The inventory is the thing that
+needs correcting — see the open diff in §4.
+
+**Screen 2 — algorithms implemented:**
+
+| Option | Answer | Basis |
+|---|---|---|
+| Proprietary / not accepted as standard by IEEE, IETF, ITU etc. | **NOT selected** | Memo §4.4 — no proprietary primitives. §4.10–4.11 — `kdfRkPQ` is a standard KDF applied conventionally, expressly not novel. |
+| Standard algorithms, instead of or in addition to Apple's OS encryption | **SELECTED** | Memo §4.3 — published algorithms via open-source `@noble/*` **and** OS facilities. |
+
+Every algorithm declared is a published standard: ChaCha20-Poly1305 (RFC 8439),
+X25519 (RFC 7748), Ed25519 (RFC 8032), ML-KEM-768 (FIPS 203), SHA-256/512
+(FIPS 180-4), HKDF (RFC 5869), PBKDF2 (RFC 8018), Argon2id (RFC 9106).
+
+**Screen 3 — distribution in France: NO.** Consistent with the recorded launch
+decision (STATUS.md): App Store availability limited to **NZ / AU / UK / US**,
+with local advice to be taken before opening any further market. Answering yes
+would additionally engage the French encryption declaration regime, on which no
+advice has been sought.
+
+**Outcome:** Apple confirmed no documents need uploading — expected, since
+mass-market self-classification requires no CCATS (memo §2.1(a)).
+
+### ⚠️ Apple's `Info.plist` hint — do not take it
+
+That final screen offers: *"You can specify that you don't use encryption in the
+information property list (Info.plist)… to avoid answering encryption questions
+with each app submission."*
+
+**This must not be followed.** It means setting
+`ITSAppUsesNonExemptEncryption = false`, which:
+
+- is untrue — the app implements the algorithms listed above, as declared on
+  screen 2;
+- is the exact defect that made builds 63 and 74 non-conforming, each verified by
+  reading the compiled `Info.plist` out of the `.ipa`;
+- contradicts memo §7.8, which requires the build setting and the questionnaire
+  to both reflect that the app **uses** encryption; and
+- now fails the test suite — `artifacts/ghostface/lib/exportCompliance.test.ts`.
+
+The exemption is claimed through the ECCN 5D992.c mass-market
+self-classification. It is **not** claimed by declaring that no encryption is
+used. Apple's hint conflates the two.
