@@ -107,6 +107,21 @@ against §2.
 |---|---|---|---|---|---|
 | 1.0.2 | 63 | 20 Aug 2026 | ❌ `false` | not assessed at the time | TestFlight internal, director's accounts only (memo §7.6(f)) |
 | 1.0.2 | 74 | 29 Aug 2026 | ❌ `false` — **verified from the compiled `Info.plist` inside the `.ipa`**, not from config | ⛔ **NON-ZERO — see below** | Uploaded to ASC, accepted by processing. **Not submitted for review. Must not be.** |
+| 1.0.2 | 75 | 30 Aug 2026 | ✅ `true` — **verified from the compiled `Info.plist` inside the `.ipa`** (EAS artifact `sOwNGmCL…`), not from config | ⛔ **NON-ZERO — argon2id still open, see below** | Internal TestFlight only, director's accounts — the footing the memo treats as unproblematic at §7.6(f). **NOT submitted for App Review, and must not be until counsel answers on argon2id.** |
+
+### Build 75 — the export declaration is now correct
+
+First build carrying the corrected flag. Verified the same way build 74 was
+disproved: by reading `Payload/GHOSTFACE.app/Info.plist` out of the actual
+`.ipa`, not by trusting `app.json`. Also carries `c1657d0` (the 4002 kick-loop
+stand-down) and `0278b41` (VoIP listeners before PushKit registration), neither
+of which build 74 had.
+
+⚠️ **The crypto diff is still non-zero** — argon2id remains unanswered by
+counsel, so this build goes no further than internal TestFlight. That is the
+same distribution footing as builds 63 and 74, which the memo addresses at
+§7.6(f) as internal-only to the director's own accounts and not made available
+to any third party.
 
 ### Build 74 — why it is not shippable
 
