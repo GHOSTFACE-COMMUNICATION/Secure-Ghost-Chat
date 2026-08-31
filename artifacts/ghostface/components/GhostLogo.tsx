@@ -49,7 +49,9 @@ interface GhostLogoProps {
  * silver rather than a cold LED, and the home screen's coin uses the same
  * value so both coins are lit by the same source.
  */
-export const COIN_GLOW_WARM_WHITE = "#FFF6E8";
+// Module-private: the home screen used to import this, but its coin dropped
+// the warm halo for a plain white one and now shares nothing with onboarding.
+const COIN_GLOW_WARM_WHITE = "#FFF6E8";
 
 /**
  * The diamond-cut milled edge, shared by the onboarding coin and the home
@@ -64,7 +66,9 @@ export const COIN_GLOW_WARM_WHITE = "#FFF6E8";
  * `rim` is the ring thickness the facets sit on — facet height derives from
  * it, so passing the coin's real rim keeps the cuts proportional at any size.
  */
-export function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
+// Module-private for the same reason: the home coin no longer has a milled
+// edge, so this is the onboarding coin's alone.
+function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
   // Thin sparkling diamond edge: fine high-contrast facets with a brighter
   // glint every few facets — the sparkle carries it, not thickness.
   // More cuts at half the depth: a real diamond-cut edge is a dense band of

@@ -4,7 +4,60 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-29 (Claude Code — orientation and reconciliation session; no
+Last updated: 2026-08-30 (Claude Code — a long session: four PRs merged, two
+production data wipes, a churn root-cause, a local-build discovery, and the
+home coin redesigned. FIRST, **the four Railway-agent PRs are merged and
+deployed** (`2ec4851` #8+#9, `a33d155`+`9013490` #10, `c8d6875` #11), in three
+stages so each layer has its own deploy and a bisect point. They had no CI —
+their red checks were a PR-environment artefact (PgBouncer/Postgres defined but
+never deployed there), so verification was local: typecheck clean, api-server
+92 passed, app 125 passed, lint delta zero, no dependency change.
+SECOND, ⛔ **#10 could not be merged as written and would have broken every
+install in the field.** It sent `{type:"error", message:"auth unavailable"}`
+before closing 4003 and ordered the NEW client's matcher accordingly — but
+builds 66 and 74, i.e. everything on a phone, match with a bare
+`includes("auth")` and no ordering. That wording sets `authRejected`, takes the
+`code === 4001 || authRejected` branch, and makes the device discard its token
+and re-register: **precisely the failure #10 exists to prevent**. Fixed by
+renaming the wire message to `credential check unavailable`, which removes the
+trigger instead of gating the deploy behind an app release. A test asserts
+nothing on that path contains `auth`.
+THIRD, ⛔ **the VoIP churn root cause is a KICK LOOP, and the fix is
+client-side and unshipped.** The server closes a superseded socket with **4002**;
+the client has cases for 4003 and 4001 and nothing else, so 4002 falls through
+to the generic reconnect — and reconnecting is exactly wrong, because that
+reconnect becomes the newest socket and kicks the one that superseded it.
+Measured 30 Aug 01:10:08–01:10:21: **alias `GHOST` held eight connIds across both
+replicas in thirteen seconds.** `c1657d0` makes the client stand down on 4002,
+before any state mutation. ⚠️ **It needs a build to reach devices** — pair it
+with `0278b41`, which build 74 already predates. The AppState
+background/active handler is the trigger, not the cause.
+FOURTH, **the database was wiped twice and the earlier wipes were incomplete.**
+Every previous wipe covered 9 alias-keyed tables; there are **14**. 150 rows for
+10 identities, then a **99-row orphan sweep** from the 17–20 Aug wipes,
+including three `ghost_entitlements` grants owned by nobody. Scripts are now
+committed at `scripts/dbwipe/` instead of being retyped. ⚠️ `ghost_numbers`
+deliberately NOT deleted: removing the row does not release the number at
+Vonage. ⚠️ **A wipe does not stick while the app is running** — the client
+re-registers its stored alias on the 4001 path.
+FIFTH, ✅ **local iOS SIMULATOR builds work on this Mac — the `fmt`/`consteval`
+wall is DEVICE-only.** The blocker was one command nothing runs locally:
+`pnpm run eas-build-post-install` (link-wireguard-kit.mjs is an EAS hook, so
+`WireGuardKitC`/`WireGuardKitGo` are never linked locally). With it, both Debug
+and **Release** build clean — Release produces a 7.4 MB production
+`main.jsbundle`. Sequence: `pod install` → that hook → `pnpm ios:sim:build`.
+`Podfile.lock` is new and still uncommitted by choice.
+SIXTH, **the home coin was redesigned** — glass coin, two struck faces, milled
+edge. Three approaches were tried and abandoned (pavé, single sphere decal,
+holographic globe); the TRACKER row records why, including the two rules that
+cost the most time: a flat `rotateY` is right for a coin and wrong for a
+sphere, and `scaleX = cos` alone is a mirror, not a reverse.
+⚠️ **NOT DONE AND STILL BLOCKING: `eas submit` remains FROZEN on GF-01.** The
+written opinion from Sarah Salmond was expected ~week of 1 Sep and
+`ITSAppUsesNonExemptEncryption` must be re-decided against it before any
+submission. Nothing tonight changes that. Previous entry follows.)
+
+Previously updated: 2026-08-29 (Claude Code — orientation and reconciliation session; no
 product code changed. This file had not been touched since 28 Aug 18:51 while an
 overnight session and four Railway agent sessions all landed work, so this entry is
 a catch-up. FIRST, **production build 74 exists and Apple accepted it.** Commit

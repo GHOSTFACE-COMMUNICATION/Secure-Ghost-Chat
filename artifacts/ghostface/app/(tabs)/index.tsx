@@ -15,14 +15,16 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Canvas } from "@shopify/react-native-skia";
+import ReAnimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import {
   GLASS_METALLIC_BLACK,
   GLASS_REFERENCE_SPECULAR,
   GLASS_TINT_BLACK,
+  GoldGradient,
   SpecularHighlight,
 } from "@/components/GoldGradient";
-import { CoinPave } from "@/components/CoinPave";
-import { COIN_GLOW_WARM_WHITE, CoinFacetRing } from "@/components/GhostLogo";
+import { CoinEdge, GlobeCoinMark, GlobeShade } from "@/components/CoinGlobe";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -60,6 +62,16 @@ const FONT_MONO = Platform.select({
 });
 
 type IconName = keyof typeof Ionicons.glyphMap;
+
+// Coin diameter. Everything about the coin derives from this — rim, edge band,
+// blur streaks, halo and tap target — so it is one number to change.
+const COIN_SIZE = 174;
+// Mark height as a fraction of the coin. Over 1, so the mark is TALLER than
+// the disc and deliberately overflows it — the coin is now plain glass and the
+// trademark is the subject, not a badge on a face. Note ~0.79 is the largest
+// that fits fully inside the circle (the mark is taller than it is wide, so
+// the diagonal binds), which is why this one is drawn over the glass rather
+// than inside it.
 
 // ── Radial menu geometry ──────────────────────────────────────────────────────
 const ORBIT_SIZE = 340;
@@ -109,12 +121,28 @@ export default function HomeScreen() {
 
   // Decorative ring spin
   const spin = useRef(new Animated.Value(0)).current;
-  // Coin physics values — driven by rAF, not Animated.timing
-  const coinRotY = useRef(new Animated.Value(0)).current;
-  // 0..1 — how edge-on the coin is; drives the fake "thickness" rim band
-  const coinEdge = useRef(new Animated.Value(0)).current;
+  // Coin physics values — driven by rAF, not Animated.timing.
+  //
+  // coinRotY and coinEdge used to live here too. Both became write-only when
+  // the coin became a sphere: coinRotY's only reader was the flat rotateY
+  // (the mark now reads globePhase on the UI thread), and coinEdge drove the
+  // fake edge band and the halo, neither of which exists any more. They were
+  // still being computed and set 60 times a second on the JS thread, which is
+  // the same thread the physics loop and Metro share.
   // 0..1 — motion-blur mix; crossfades a pre-blurred face over the crisp one
   const coinBlur = useRef(new Animated.Value(0)).current;
+  // Spin angle for the globe mesh. Deliberately a reanimated shared value and
+  // not the Animated.Value above: the mesh is rebuilt inside a Skia worklet on
+  // the UI thread, and an Animated.Value cannot be read from there.
+  const globePhase = useSharedValue(0);
+  // The disc's own foreshortening. A coin's FACE narrows to D*|cos| as it
+  // turns — without this only the mark flipped and the glass stayed a full
+  // circle, which reads as a picture spinning inside a window. Reanimated, not
+  // RN Animated, so it runs on the UI thread alongside the Skia faces and
+  // cannot drift from them.
+  const coinFaceStyle = useAnimatedStyle(() => ({
+    transform: [{ scaleX: Math.abs(Math.cos((globePhase.value * Math.PI) / 180)) }],
+  }));
   // Spin velocity (deg/s) + accumulated angle; taps kick the velocity up,
   // holding brakes it to zero, release spins it back up to the base rate.
   const spinVel = useRef(BASE_SPIN_DEG_S);
@@ -190,15 +218,16 @@ export default function HomeScreen() {
           spinVel.current =
             BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.08, dt);
         }
-        spinAngle.current = (spinAngle.current + spinVel.current * dt) % 360;
+        // Direction is applied HERE, not by negating spinVel: the velocity is
+        // compared against positive thresholds all through this loop (haptic
+        // start, blur ramp, brake floor), and a negative value would silently
+        // disable every one of them. The extra +360 keeps the angle in 0..360
+        // — JS % returns a negative for a negative left operand, and the
+        // cos/sin the coin faces are built from would then jump at the wrap.
+        spinAngle.current =
+          ((spinAngle.current - spinVel.current * dt) % 360 + 360) % 360;
         const totalRotY = spinAngle.current;
-        coinRotY.setValue(totalRotY);
-        // Edge band peaks when the face is edge-on
-        const edgeOn = Math.pow(
-          Math.abs(Math.sin((totalRotY * Math.PI) / 180)),
-          3,
-        );
-        coinEdge.setValue(edgeOn);
+        globePhase.value = totalRotY;
         // Motion blur: ramp with spin velocity, smoothstep-shaped so it eases
         // in near top speed and fades out smoothly as the boost decays.
         const blurT = Math.max(
@@ -339,16 +368,7 @@ export default function HomeScreen() {
 
   // Coin transform — driven by physics rAF loop via setValue. Always upright:
   // the coin spins around its vertical axis and never tilts or falls.
-  const coinTransform = [
-    { perspective: 800 },
-    {
-      rotateY: coinRotY.interpolate({
-        inputRange: [0, 360],
-        outputRange: ["0deg", "360deg"],
-        extrapolate: "clamp",
-      }),
-    },
-  ];
+
 
   return (
     <TabScreenWrapper>
@@ -419,77 +439,50 @@ export default function HomeScreen() {
                     menuOpen ? "Hide menu" : "Tap to reveal menu"
                   }
                 >
-                  {/* Warm halo BEHIND the coin, matching onboarding.
-                      Deliberately OUTSIDE the rotating element: a glow that
-                      spun with the coin would squash to a sliver every half
-                      turn and read as flicker rather than light. It fades as
-                      the coin goes edge-on so the light stays attached to the
-                      object making it — a constant full circle around a
-                      silhouette that collapses twice per revolution strobes at
-                      roughly 2Hz at the idle spin rate. */}
-                  <Animated.View
-                    pointerEvents="none"
-                    style={{
-                      position: "absolute",
-                      width: 190 * 0.92,
-                      height: 190 * 0.92,
-                      borderRadius: 190,
-                      backgroundColor: "rgba(255,246,232,0.035)",
-                      opacity: Animated.multiply(
-                        circleOpacity,
-                        coinEdge.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [1, 0.28],
-                          extrapolate: "clamp",
-                        }),
-                      ),
-                      // Three stacked layers — a wide soft bloom, a mid
-                      // falloff and a tight core. Stacking beats one huge
-                      // blur, which just goes evenly grey; the layers give the
-                      // falloff a shape.
-                      boxShadow: [
-                        boxShadow(COIN_GLOW_WARM_WHITE, 0.13, 190 * 0.42),
-                        boxShadow(COIN_GLOW_WARM_WHITE, 0.16, 190 * 0.2),
-                        boxShadow(COIN_GLOW_WARM_WHITE, 0.14, 190 * 0.08),
-                      ].join(", "),
-                    }}
-                  />
+                  {/* The coin's fake edge band is gone with the disc. A sphere
+                      has no edge-on state — its outline is a circle from every
+                      angle — so a flashing thickness band was the one thing
+                      that would have given the globe away as a flat plate.
+                      coinEdge went with it — see the physics values. */}
 
-                  {/* Fake thickness: edge band flashes when edge-on */}
+                  {/* Physics-driven spinning coin. The face is the SAME
+                      GoldGradient glass as every radial button around it —
+                      same tint, same reference specular, same rim — so the
+                      coin reads as the centre of one set rather than a metal
+                      object dropped into a glass menu. The trademark is the
+                      subject; the disc is just its surface. */}
                   <Animated.View
                     pointerEvents="none"
-                    style={[
-                      styles.coinEdgeBand,
-                      {
-                        opacity: Animated.multiply(coinEdge, circleOpacity),
-                      },
-                    ]}
+                    style={[styles.coinBall, { opacity: circleOpacity }]}
                   >
-                    <View style={styles.coinEdgeHighlight} />
-                  </Animated.View>
+                    {/* The glass body. Same GoldGradient as every button, and
+                        it does NOT rotate — a sphere's outline never changes,
+                        so the silhouette stays a circle while the surface
+                        turns inside it. */}
+                    {/* Same specular as every button — the globe's override is
+                        gone and the shared constant carries the brighter value
+                        instead, so one number drives the whole set. */}
+                    <ReAnimated.View style={[styles.coinFace, coinFaceStyle]}>
+                      <GoldGradient
+                        specularIntensity={GLASS_REFERENCE_SPECULAR}
+                        style={styles.coinFace}
+                      />
+                    </ReAnimated.View>
+                    {/* The wireframe. Static: the grid is drawn as a full
+                        globe already, so turning it with a flat rotateY would
+                        squash the whole cage rather than move meridians across
+                        the surface. The rotation you read is the mark
+                        travelling over it. */}
+                    {/* Glass body + the flipping trademark. The wireframe,
+                        mark field, scanlines and chromatic fringe are gone —
+                        they stacked up busier than the coin itself. */}
+                    <View style={styles.coinSurface} pointerEvents="none">
+                      <Canvas style={styles.coinFace}>
+                        <CoinEdge size={COIN_SIZE} phase={globePhase} />
+                        <GlobeCoinMark size={COIN_SIZE} phase={globePhase} />
+                      </Canvas>
+                    </View>
 
-                  {/* Physics-driven spinning coin with metallic rim */}
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      styles.coinRim,
-                      {
-                        opacity: circleOpacity,
-                        transform: coinTransform,
-                      },
-                    ]}
-                  >
-                    {/* Pavé face: the whole disc set with 1pt diamonds, with
-                        the GF mark on top. Replaces the flat logo plate. */}
-                    <CoinPave size={176} />
-                    {/* Motion blur: pre-blurred face crossfades in with boost
-                        velocity so top-speed spins read as a whirl */}
-                    <Animated.Image
-                      source={require("../../assets/images/ghostface-logo.jpeg")}
-                      resizeMode="cover"
-                      blurRadius={18}
-                      style={[styles.coinBlurImage, { opacity: coinBlur }]}
-                    />
                     {/* Faint horizontal streaks sell the spin direction */}
                     <Animated.View
                       pointerEvents="none"
@@ -502,26 +495,16 @@ export default function HomeScreen() {
                       <View style={[styles.coinStreak, { top: "50%" }]} />
                       <View style={[styles.coinStreak, { top: "72%" }]} />
                     </Animated.View>
-                  </Animated.View>
 
-                  {/* Diamond-cut milled edge — the same component the
-                      onboarding coin uses, so the two are one design rather
-                      than two that resemble each other. Rendered as a SIBLING
-                      of the rim, not a child: coinRim has overflow:"hidden" to
-                      clip the face image, and these facets deliberately
-                      straddle the edge, so nesting them would shave off their
-                      outer half. Same transform, so it turns with the coin. */}
-                  <Animated.View
-                    pointerEvents="none"
-                    style={{
-                      position: "absolute",
-                      width: 190,
-                      height: 190,
-                      opacity: circleOpacity,
-                      transform: coinTransform,
-                    }}
-                  >
-                    <CoinFacetRing size={190} rim={5} />
+                    {/* Light, LAST and un-rotated. A ball lit from the upper
+                        left keeps its highlight in the upper left however fast
+                        it turns; rotating the shading is exactly what makes a
+                        sphere look like a painted plate. Limb darkening here is
+                        what gives the outline its roundness. */}
+                    <ReAnimated.View style={[styles.coinShade, coinFaceStyle]} pointerEvents="none">
+                      <GlobeShade size={COIN_SIZE} />
+                    </ReAnimated.View>
+
                   </Animated.View>
                 </Pressable>
 
@@ -705,67 +688,49 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   centerHit: {
-    width: 196,
-    height: 196,
+    width: COIN_SIZE + 6,
+    height: COIN_SIZE + 6,
     alignItems: "center",
     justifyContent: "center",
   },
-  // Metallic coin rim — conic-gradient-style white/silver ring
-  coinRim: {
-    width: 190,
-    height: 190,
-    borderRadius: 95,
-    padding: 5,
-    borderWidth: 4,
-    borderColor: "rgba(255,255,255,0.0)", // transparent — visual ring comes from backgroundColor
-    backgroundColor: "#d4d4d8",
+  // The globe. Static and circular: a sphere's silhouette never changes, so
+  // this does NOT carry the rotation — the surface inside it does. overflow
+  // hidden is what keeps the turning surface inside the limb.
+  coinBall: {
+    width: COIN_SIZE,
+    height: COIN_SIZE,
+    borderRadius: COIN_SIZE / 2,
     alignItems: "center",
     justifyContent: "center",
-    boxShadow: [
-      boxShadow(COIN_GLOW_WARM_WHITE, 0.45, 18),
-      "inset 0 2px 6px rgba(255,255,255,0.6)",
-      "inset 0 -4px 10px rgba(20,20,24,0.5)",
-    ].join(", "),
     overflow: "hidden",
   },
-  // Fake coin thickness — vertical white/silver band shown when the coin is edge-on
-  coinEdgeBand: {
+  // The rotating surface: grid + mark. Carries coinTransform.
+  coinSurface: {
     position: "absolute",
-    width: 16,
-    height: 190,
-    top: (196 - 190) / 2,
-    left: (196 - 16) / 2,
-    borderRadius: 8,
-    backgroundColor: "#8a8a92",
+    width: COIN_SIZE,
+    height: COIN_SIZE,
     alignItems: "center",
     justifyContent: "center",
-    boxShadow: [
-      boxShadow(COIN_GLOW_WARM_WHITE, 0.5, 14),
-      "inset 0 0 4px rgba(20,20,24,0.7)",
-    ].join(", "),
   },
-  coinEdgeHighlight: {
-    width: 4,
-    height: 176,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.85)",
-  },
-  coinImage: {
-    width: 176,
-    height: 176,
-    borderRadius: 88,
-  },
-  coinBlurImage: {
+  // View-space lighting, drawn over everything and never rotated.
+  coinShade: {
     position: "absolute",
-    width: 176,
-    height: 176,
-    borderRadius: 88,
+    width: COIN_SIZE,
+    height: COIN_SIZE,
+  },
+  // Fake coin thickness — the band shown when the coin turns edge-on.
+  coinFace: {
+    width: COIN_SIZE,
+    height: COIN_SIZE,
+    borderRadius: COIN_SIZE / 2,
+    alignItems: "center",
+    justifyContent: "center",
   },
   coinBlurStreaks: {
     position: "absolute",
-    width: 176,
-    height: 176,
-    borderRadius: 88,
+    width: COIN_SIZE,
+    height: COIN_SIZE,
+    borderRadius: COIN_SIZE / 2,
     overflow: "hidden",
   },
   coinStreak: {
