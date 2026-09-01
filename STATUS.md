@@ -4,9 +4,14 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-01 (Claude Code — **coturn hardened end to end and GF-01
-closed**; see the coturn section immediately below, then the 90592 blocker which
-is unchanged and still the only thing standing between build 75 and TestFlight.
+Last updated: 2026-09-01 (Claude Code — **ASC submission audit: the 90592 story
+was under-recorded and two figures in this file were wrong.** Read the audit
+section immediately below first — build 75 has EIGHT failed submissions, not
+three, the failure mode CHANGED mid-morning on 31 Aug, ASC holds 66 accepted
+builds rather than ten, and an EXTERNAL TestFlight public link has been live
+since 31 Jul. ⚠️ **90592 is no longer the only thing between build 75 and
+TestFlight** — the previous entry's claim to that effect is superseded. Then the
+coturn section. Previously: **coturn hardened end to end and GF-01 closed**.
 The compliance machinery now actually exists. **Build 75 is the first conforming build**: EAS
 `22413bd1`, 1.0.2 / build 75, artifact `sOwNGmCL…ipa`, with compiled
 `ITSAppUsesNonExemptEncryption` = **`true`** — verified by reading the
@@ -14,6 +19,148 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 1 Sep 2026 — ASC submission audit (read before touching the 90592 blocker)
+
+Prompted by a `prepare_asc_api_key` failure log. Everything here was read live
+off the App Store Connect API and the EAS GraphQL API, not from config.
+
+### The submission count in this file was wrong: EIGHT, not three
+
+All eight target the same build — EAS `22413bd1`, 1.0.2 / build 75. Times UTC
+(NZ local in brackets, UTC+12):
+
+| Created (UTC) | NZ | ID | Failure |
+|---|---|---|---|
+| 31 Aug 02:32 | 14:32 | `4bf1739c` | **unknown — undocumented** |
+| 31 Aug 03:03 | 15:03 | `e7f4c557` | **unknown — undocumented** |
+| 31 Aug 10:42 | 22:42 | `b4f9d3ae` | 90592 at Apple validation |
+| 31 Aug 10:55 | 22:55 | `b19f9856` | 90592 at Apple validation |
+| 31 Aug 10:58 | 22:58 | `4ecd1537` | 90592 at Apple validation |
+| 31 Aug 11:42 | 23:42 | `98304150` | credential prep (inferred) |
+| 31 Aug 12:18 | 1 Sep 00:18 | `55bdf40d` | credential prep (inferred) |
+| 31 Aug 13:24 | 1 Sep 01:24 | `d0144476` | credential prep (inferred) |
+
+🔴 **The failure mode CHANGED between 10:58 and 11:42 UTC on 31 Aug.** The three
+recorded attempts reached Apple and were rejected with 90592. The three after
+them never reached Apple at all — they die in the `prepare_asc_api_key` step
+("Prepare credentials"), which runs *before* the binary is offered:
+
+> eas-cli failed to resolve submission config. Add EXPO_DEBUG: "1" to the job
+> env to see the error.
+
+**Something changed in that 44-minute window and it is not identified.** That is
+the live lead, and it is not an export problem — chasing 90592 will not fix it.
+
+⚠️ **Scope of the inference, stated honestly.** Only ONE credential-prep log was
+seen (pasted from the ASC/EAS dashboard, 1 Sep). It belongs to one of the last
+three; which one is unknown. The other two are attributed to the same mode by
+position, not by evidence. **The two 31 Aug early-afternoon attempts
+(`4bf1739c`, `e7f4c557`) have no recorded failure mode at all.**
+
+⚠️ **`error: null` and `logFiles: []` come back on all eight from the EAS
+GraphQL `submissions` field — including the three that demonstrably produced a
+verbatim 90592 job log. Those fields are not populated on that surface. Their
+emptiness is NOT evidence of anything.**
+
+**Decisive next test: re-run one submission with `EXPO_DEBUG: "1"` in the job
+env.** Nothing else here is diagnostic.
+
+### The EAS credential store is intact — the key is configured
+
+Read from EAS GraphQL. `com.ghostface.app` (and `com.ghostface.app.tunnel`)
+both carry ASC API key **`2JQFNUQ274`** — `[Expo] EAS Submit deyVcPcxYd`, issuer
+`abba23f8-558e-49d5-bdc6-f80952590f8e`, credential id
+`e2bf0b08-19f4-409e-a9ce-40cd00ee94b9`, created 13 Aug, Apple team `98337579X8`.
+So the key is *configured*; what fails is resolution or validity. ⚠️ **It cannot
+be tested from this machine — the private half lives on EAS servers, never on
+this disk** (same as recorded for `JYNUC3BXLU`). Note `com.ghostface.app.tunnel`
+has `appleTeam: null` where `com.ghostface.app` has the team set; unexamined,
+possibly irrelevant.
+
+### Build count: 66 accepted, not ten — every one says `false`
+
+Counted off the ASC API and grouped by pre-release version:
+
+| App version | Builds in ASC | `usesNonExemptEncryption` |
+|---|---|---|
+| 1.0.0 | 18 | all `false` |
+| 1.0.1 | 18 | all `false` |
+| 1.0.2 | 30 | all `false` |
+| **Total** | **66** | **all `false`** |
+
+**Build 75 is NOT among them** — validation rejected it, so no binary was ever
+accepted. There is nothing of build 75 in ASC to remove or expire.
+
+### The app has NEVER been submitted for App Store review
+
+App Store version **1.0.2 sits in `PREPARE_FOR_SUBMISSION`**, created
+17 Jun 2026, with **no `appStoreVersionSubmission` attached**. It is the only
+App Store version record.
+
+### ⚠️ But EXTERNAL TestFlight is live, and has been since 31 Jul
+
+| Group | Kind | Created | Public link | Builds | Testers now |
+|---|---|---|---|---|---|
+| `GF` | internal | 30 Jul 2026 | — | all builds | 2 |
+| **`mb`** | **EXTERNAL** | **31 Jul 2026** | **enabled, limit 100** | 61, 48, 47 (+34, 33, 8 expired) | **0** |
+
+`betaAppReviewDetail` is populated (Benjamin Henderson,
+`support@ghostface.co.nz`, no demo account required). **Builds reach a
+public-link group only through Apple's Beta App Review** — so the app HAS been
+through an Apple review, just not App Store review.
+
+⚠️ **"0 testers now" is NOT "nobody ever installed it."** A removed tester would
+not appear in that count, and builds 34/33/8 are marked `expired`, meaning they
+were live on that group at some point. The app-level `betaTesters` endpoint
+returns **403** at `WD424K32M4`'s scope, so historical membership is **not
+visible from here**. Do not upgrade this to "no external distribution occurred."
+
+📋 **This goes to counsel** on the already-drafted 1056841 reply, framed as a
+question and not a conclusion: public-link TestFlight enabled since 31 Jul,
+current testers zero, historical membership not visible to us — does that count
+as distribution for the `COMPLIANCE.md` §5 gate and the BIS annual report?
+
+### Declarations re-verified 1 Sep — unchanged
+
+Both June declarations are still present and still stuck:
+`e4bdc6a7-7013-4a0c-b91c-21fb7766af56` (19 Jun) and
+`2cb25cc0-c76e-429f-9d10-260946eda9af` (18 Jun) — both `CREATED`,
+`codeValue: null`, `usesEncryption: null`, `exempt: false`,
+`availableOnFrenchStore: true`, `documentUrl: null`. **They are attached to the
+APP, not to a version** — which is why deleting a build or a version record does
+not clear 90592. The fix is unchanged: discard both in the ASC UI, then build 75
+resubmits with no rebuild.
+
+### ⛔ Settled again 1 Sep: do not defer the export answer to submission time
+
+Proposed this session: drop the version/build and let Apple ask at review time,
+on the reasoning that documentation is not required until submission. **The
+documentation half is correct** — Apple confirmed on 30 Aug that no documents
+need uploading, because the 5D992.c mass-market exemption applies. **The answer
+half is not:** `ITSAppUsesNonExemptEncryption` is read at **build upload**, not
+at review submission, which is exactly why 66 uploaded builds already carry an
+answer and every one of them says `false`. `lib/exportCompliance.test.ts`
+already records this in its second assertion — omitting the key means "Apple
+then prompts per-submission and the answer goes unrecorded." Deferring does not
+avoid the declaration; it makes it untracked.
+
+### Tooling notes (both were needed this session, neither was written down)
+
+- **ASC API needs no `pyjwt`.** Node's built-in `crypto` signs ES256 directly:
+  `crypto.sign(null, buf, { key, dsaEncoding: "ieee-p1363" })` gives the raw
+  R||S form a JWT wants. Script kept at the scratchpad path for the session only.
+- **`WD424K32M4` scope, measured:** works for `apps`, `builds`,
+  `appStoreVersions`, `preReleaseVersions`, `betaGroups`, per-group `builds` and
+  per-group `betaTesters` counts, and `appEncryptionDeclarations`. **403s** on
+  app-level `betaTesters`. Note `appEncryptionDeclarations` is *not* an app
+  relationship — use `/v1/appEncryptionDeclarations?filter[app]=<id>`.
+- **EAS GraphQL** (`https://api.expo.dev/graphql`) authenticates with the
+  `sessionSecret` from `~/.expo/state.json` as an `expo-session` header, **and
+  requires a `User-Agent`** — it returns a bare 403 without one. `App.submissions`
+  takes `filter: {platform: IOS}`, not a `platform` argument.
 
 ---
 
@@ -76,7 +223,9 @@ impossible and the relay is doing real work.
 
 🔴 **Build 75 CANNOT be submitted — Apple rejects it with error 90592.** Three
 attempts on 31 Aug (`b4f9d3ae`, `b19f9856`, `4ecd1537`), each failing at
-validation in under a minute with no binary accepted. Verbatim, from the EAS
+validation in under a minute with no binary accepted. ⚠️ **CORRECTED 1 Sep —
+there are EIGHT submissions of build 75, not three; see the audit section at the
+top of this file.** Verbatim, from the EAS
 job log (brotli-encoded; decode with `zlib.brotliDecompressSync`, the CLI never
 prints it and `--verbose`/`--verbose-fastlane` do not help):
 
@@ -102,9 +251,11 @@ flag history exactly (`true` on 17 Jun → declarations 18–19 Jun → reverted
 
 `ITSAppUsesNonExemptEncryption: true` makes Apple look for a compliance code;
 the record's code is `null` and the plist's is `[]`; they "don't match" and the
-upload is rejected. **Every one of the ten builds ASC has ever accepted carries
+upload is rejected. **Every build ASC has ever accepted carries
 `usesNonExemptEncryption = false`** — the untrue answer has never been
-challenged and the true one has never got through.
+challenged and the true one has never got through. ⚠️ **CORRECTED 1 Sep: that is
+66 builds, not ten** (1.0.0 ×18, 1.0.1 ×18, 1.0.2 ×30) — counted off the ASC API,
+see the audit section at the top.
 
 ⚠️ The `[]` is `ITSEncryptionExportComplianceCode`, **not**
 `ITSAppUsesNonExemptEncryption`. Do not "fix" this by reverting the flag — that
