@@ -128,7 +128,7 @@ export class RateLimiter {
  * Per-IP limits cannot discriminate under carrier NAT — thousands of real
  * subscribers share one address, so any ceiling low enough to constrain an
  * attacker also breaks legitimate users. For unauthenticated endpoints that
- * consume a real resource (disk, Twilio spend) there is no per-user key to
+ * consume a real resource (disk, relay bandwidth) there is no per-user key to
  * fall back on, so the resource itself gets the cap instead. This bounds the
  * blast radius; it does not identify the abuser.
  */

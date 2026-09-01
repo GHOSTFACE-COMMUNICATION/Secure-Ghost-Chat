@@ -14,7 +14,7 @@ type IceServer = {
 
 type IceConfigResponse = {
   iceServers: IceServer[];
-  source: "twilio" | "coturn" | "static" | "stun-only";
+  source: "coturn" | "static" | "stun-only";
   ttl: number;
 };
 
@@ -25,20 +25,21 @@ const STUN_SERVERS: IceServer[] = [
 
 const REFRESH_SKEW_MS = 60_000;
 const STUN_FALLBACK_TTL_SECONDS = 300;
-const TWILIO_FETCH_TIMEOUT_MS = 4_000;
 const DEFAULT_TURN_TTL_SECONDS = 3_600;
 
 type CachedConfig = { body: IceConfigResponse; expiresAt: number };
 let cached: CachedConfig | null = null;
 
-// Per-IP rate limit. TURN credentials are real money (Twilio NTS) and even
-// though we cache them, leaking a fresh token lets a stranger relay media
-// through our account. 600 requests / hour / IP covers normal call usage
+// Per-IP rate limit. A leaked credential lets a stranger relay media through
+// our own coturn box — bandwidth and CPU on hardware we pay for — so these
+// stay bounded even though the credentials are cached. 600 requests / hour / IP
+// covers normal call usage
 // (including client reconnect/retry bursts around CallKit answer/WS
 // re-auth) while still bounding scraping.
 const limiter = new RateLimiter({ windowMs: 60 * 60 * 1000, max: 6_000, prefix: "iceConfig" });
-// This hands out Twilio TURN credentials, so the cost is ours. Per-IP cannot
-// discriminate under carrier NAT; the global cap is what actually bounds spend.
+// This hands out credentials to our own relay, so the cost is ours. Per-IP
+// cannot discriminate under carrier NAT; the global cap is what actually
+// bounds abuse.
 const globalLimiter = new GlobalLimiter({ windowMs: 60 * 60 * 1000, max: 30_000, prefix: "iceConfigGlobal" });
 
 // Literal, pre-issued static credentials — only reached when TURN_SECRET
@@ -95,58 +96,6 @@ function coturnConfig(): IceConfigResponse | null {
   };
 }
 
-async function twilioConfig(): Promise<IceConfigResponse | null> {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
-  const apiKeySid = process.env.TWILIO_API_KEY_SID?.trim();
-  const apiKeySecret = process.env.TWILIO_API_KEY_SECRET?.trim();
-  if (!accountSid || !apiKeySid || !apiKeySecret) return null;
-
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(
-    accountSid,
-  )}/Tokens.json`;
-  const auth = Buffer.from(`${apiKeySid}:${apiKeySecret}`).toString("base64");
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TWILIO_FETCH_TIMEOUT_MS);
-  let res: Response | globalThis.Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: "Ttl=3600",
-      signal: ctrl.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Twilio NTS request failed: ${res.status} ${text.slice(0, 200)}`);
-  }
-  const data = (await res.json()) as {
-    ice_servers?: Array<{ url?: string; urls?: string; username?: string; credential?: string }>;
-    ttl?: string;
-  };
-  const servers: IceServer[] = (data.ice_servers ?? [])
-    .map((s) => {
-      const urls = s.urls ?? s.url;
-      if (!urls) return null;
-      const entry: IceServer = { urls };
-      if (s.username) entry.username = s.username;
-      if (s.credential) entry.credential = s.credential;
-      return entry;
-    })
-    .filter((s): s is IceServer => s !== null);
-
-  if (servers.length === 0) return null;
-
-  const ttl = Math.max(120, Number(data.ttl ?? 3600) || 3600);
-  return { iceServers: servers, source: "twilio", ttl };
-}
-
 router.get("/ice-config", async (req: Request, res: Response) => {
   // Authenticated read — the TURN credentials handed out here are our spend.
   // Gated by ENFORCE_ENDPOINT_AUTH; off (the default) this is a no-op.
@@ -170,17 +119,6 @@ router.get("/ice-config", async (req: Request, res: Response) => {
   if (cached && now < cached.expiresAt - REFRESH_SKEW_MS) {
     res.json(cached.body);
     return;
-  }
-
-  try {
-    const fromTwilio = await twilioConfig();
-    if (fromTwilio) {
-      cached = { body: fromTwilio, expiresAt: now + fromTwilio.ttl * 1000 };
-      res.json(fromTwilio);
-      return;
-    }
-  } catch (err) {
-    logger.warn({ err }, "Twilio NTS unavailable, falling back");
   }
 
   const fromCoturn = coturnConfig();
@@ -208,7 +146,7 @@ router.get("/ice-config", async (req: Request, res: Response) => {
   // flows for anyone behind a symmetric NAT. Log loudly so this shows up in
   // deploy logs immediately instead of only surfacing as a user report.
   logger.warn(
-    "No TURN configured (TWILIO_*, TURN_SECRET, or TURN_USERNAME/TURN_CREDENTIAL); " +
+    "No TURN configured (TURN_SECRET, or TURN_USERNAME/TURN_CREDENTIAL); " +
       "serving STUN-only. Calls will fail behind symmetric NAT.",
   );
   res.json(fallback);

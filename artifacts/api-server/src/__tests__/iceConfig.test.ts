@@ -6,7 +6,7 @@
  *
  * Hermetic: iceConfig.ts touches no database, and an unauthenticated request
  * carries no Bearer token, so getAuthedAlias() returns before it would
- * lazily import @workspace/db. With no Twilio or TURN env vars set the
+ * lazily import @workspace/db. With no TURN env vars set the
  * route falls back to STUN-only, which is all these assertions need.
  *
  * ⚠️ The behaviour under test is exactly the one that makes this endpoint
