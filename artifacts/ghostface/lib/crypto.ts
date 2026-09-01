@@ -20,10 +20,12 @@
  *
  * Safety Numbers
  * ──────────────
- *   generateSafetyNumber()         — legacy alias-based (kept for compatibility)
- *   generateSafetyNumberFromKeys() — cryptographically correct: derived from
- *                                    both parties' Ed25519 identity signing public keys,
+ *   generateSafetyNumberFromKeys() — the only one. Derived from both parties'
+ *                                    long-term X25519 identity public keys,
  *                                    matching Signal's safety number design.
+ *                                    An alias-based variant was removed in
+ *                                    audit #11; see the function for why a
+ *                                    fallback would have been worse than none.
  *
  * All operations run 100% on-device. Nothing leaves the device unencrypted.
  */
@@ -214,37 +216,55 @@ export function messageFingerprint(msg: AnyEncryptedMessage): string {
 // ── Safety numbers ────────────────────────────────────────────────────────────
 
 /**
- * Derive a human-readable safety number from two Ed25519 identity signing public keys.
+ * Derive a human-readable safety number from the two parties' long-term X25519
+ * identity public keys (`ikA` in X3DH terms) — the keys actually used in every
+ * DH of the handshake.
  *
- * Cryptographically correct approach — matches Signal's safety number design:
- *   - Uses the actual cryptographic identity material (IK signing public keys)
- *   - Keys are sorted canonically so A↔B and B↔A produce the same number
- *   - Displayed as 6 groups of 5 digits for out-of-band verification
+ * Audit finding #11. This replaces an alias-based function that hashed two
+ * USERNAME strings and no key material whatsoever. That number matched whenever
+ * the two aliases matched — including when a malicious server had substituted
+ * identity keys entirely, which is the only thing a safety number exists to
+ * detect. It manufactured confidence in precisely the MITM scenario it was
+ * displayed to rule out, so it has been deleted rather than demoted: a fallback
+ * would fire exactly when the session is missing, which is the moment an
+ * attacker would engineer.
  *
- * Preferred over generateSafetyNumber() when IK public keys are available.
+ * Design notes:
+ *   - Identity keys, not signing keys. The Ed25519 `ikSign` key is not
+ *     symmetrically available: the X3DH header carries `ikA` but never
+ *     `ikSign`, so the responder has no access to the initiator's signing key
+ *     and would compute a different number from the initiator — a safety number
+ *     that disagrees between the two parties fails verification for every
+ *     legitimate pair. `ikA` is held by both sides at session establishment
+ *     with no extra fetch, and matches Signal's identity-key-based design.
+ *   - Case is normalised before hashing. Hex reaches these call sites from
+ *     different sources (a fetched bundle on one side, a wire header on the
+ *     other) and the codebase compares such keys with `.toLowerCase()`
+ *     elsewhere, so without this the two ends could derive different numbers
+ *     from identical keys.
+ *   - Keys are sorted canonically so A↔B and B↔A agree.
+ *   - Throws on missing/short input rather than returning a number derived from
+ *     nothing — a displayed safety number must never be computable without real
+ *     key material.
  */
 export function generateSafetyNumberFromKeys(
-  myIKSignPub: string,
-  theirIKSignPub: string,
+  myIdentityKey: string,
+  theirIdentityKey: string,
 ): string {
-  const [keyA, keyB] = [myIKSignPub, theirIKSignPub].sort();
-  const combined = strToBytes(`GHOSTFACE_SAFETY_NUMBER_v2:${keyA}:${keyB}`);
-  const hash = sha256(combined);
-  return Array.from({ length: 6 }, (_, i) => {
-    const slice = hash.slice(i * 5, i * 5 + 5);
-    const num = Array.from<number>(slice).reduce((acc, b) => acc * 256 + b, 0);
-    return (num % 100000).toString().padStart(5, "0");
-  }).join(" ");
-}
+  const mine   = (myIdentityKey ?? "").trim().toLowerCase();
+  const theirs = (theirIdentityKey ?? "").trim().toLowerCase();
 
-/**
- * Derive a human-readable safety number from two aliases (legacy).
- * Kept for backward compatibility — prefer generateSafetyNumberFromKeys()
- * when Ed25519 identity keys are available, as aliases are not cryptographic
- * identity material and can be impersonated.
- */
-export function generateSafetyNumber(myAlias: string, theirAlias: string): string {
-  const combined = strToBytes(`${myAlias}:${theirAlias}`);
+  for (const [label, k] of [["own", mine], ["peer", theirs]] as const) {
+    if (k.length !== 64 || !/^[0-9a-f]+$/.test(k)) {
+      throw new Error(
+        `[safetyNumber] ${label} identity key must be 64 hex chars — refusing to ` +
+          `derive a safety number without real key material`,
+      );
+    }
+  }
+
+  const [keyA, keyB] = [mine, theirs].sort();
+  const combined = strToBytes(`GHOSTFACE_SAFETY_NUMBER_v3:${keyA}:${keyB}`);
   const hash = sha256(combined);
   return Array.from({ length: 6 }, (_, i) => {
     const slice = hash.slice(i * 5, i * 5 + 5);

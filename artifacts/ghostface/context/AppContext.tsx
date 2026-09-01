@@ -50,7 +50,7 @@ import React, {
   useState,
 } from "react";
 import {
-  generateSafetyNumber,
+  generateSafetyNumberFromKeys,
 } from "@/lib/crypto";
 import {
   initSessionAliceWithHeader,
@@ -3220,6 +3220,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       let drSession: DRSession;
       let usedOPK = false;
       let pendingX3DHHeader: string;
+      // Audit #11 — stays undefined if it cannot be derived from real key
+      // material; the UI renders "not yet verifiable" rather than substituting.
+      let safetyNumber: string | undefined;
 
       try {
         const [myIKPriv, myIKPub, mySpkPriv, mySpkPub] = await Promise.all([
@@ -3273,6 +3276,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         drSession = session;
         usedOPK = !!bundle.opkPublicKey;
         pendingX3DHHeader = JSON.stringify(x3dhHeader);
+
+        // Audit #11: derived from the two long-term X25519 identity keys this
+        // handshake actually used — ours, and the one from the bundle whose SPK
+        // signature we just verified. Inner try so a display-layer failure can
+        // never abort a successful session: on failure the conversation carries
+        // NO safety number and the UI says "not yet verifiable". It must never
+        // fall back to a number derived from anything but real key material.
+        try {
+          safetyNumber = generateSafetyNumberFromKeys(ikPubFinal, bundle.ikPublicKey);
+        } catch (snErr) {
+          console.error("[safetyNumber] could not derive for", aliasUpper, snErr);
+        }
       } catch (e) {
         if (e instanceof PqDowngradeError) {
           console.error("[X3DH] Refusing classical-only session for", aliasUpper, e);
@@ -3284,7 +3299,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setState((prev) => {
         const id = `${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
-        const safetyNumber = generateSafetyNumber(prev.alias ?? "GHOST_USER", aliasUpper);
         const newConv: Conversation = {
           id,
           alias: aliasUpper,
@@ -4523,7 +4537,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.warn("[DR] Glare with", senderAlias, "— sender wins; adopting rebuilt Bob session");
       }
 
-      const safetyNumber = generateSafetyNumber(latestStateRef.current.alias ?? "GHOST_USER", senderAlias);
+      // Audit #11: same derivation as the initiator side, from the identity key
+      // in the X3DH header we just bound to this alias via resolveIdentityKey.
+      // Because both ends sort and lowercase the pair, the two devices agree.
+      let safetyNumber: string | undefined;
+      try {
+        safetyNumber = generateSafetyNumberFromKeys(myIKPub, x3dhHeader.ikA);
+      } catch (e) {
+        console.error("[safetyNumber] could not derive for", senderAlias, e);
+      }
 
       // ── Reaction arriving via first-message bootstrap (session re-init,
       // glare, or literally someone's first-ever contact). A reaction always

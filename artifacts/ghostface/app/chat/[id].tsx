@@ -1921,7 +1921,20 @@ export default function ChatScreen() {
                 </Pressable>
               </View>
               <ScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator={false}>
-                {/* Safety number */}
+                {/* Safety number — audit #11. Absent means we could not derive
+                    one from real identity keys (no session yet, or a malformed
+                    key). Say so plainly: the old behaviour substituted an
+                    alias-derived number here, which looked identical to a real
+                    one and matched whenever two usernames matched. */}
+                {!conv.safetyNumber && (
+                  <View style={styles.safetyRow}>
+                    <Text style={styles.safetyLabel}>SAFETY NUMBER</Text>
+                    <Text style={[styles.safetyNote, { marginTop: 6 }]}>
+                      Not yet verifiable — no established session with {conv.alias}.
+                      A safety number appears once an encrypted session exists.
+                    </Text>
+                  </View>
+                )}
                 {conv.safetyNumber && (
                   <View style={[
                     styles.safetyRow,
