@@ -68,6 +68,43 @@ emptiness is NOT evidence of anything.**
 **Decisive next test: re-run one submission with `EXPO_DEBUG: "1"` in the job
 env.** Nothing else here is diagnostic.
 
+### Third failure, 1 Sep: submitting the WRONG BUILD — a June artifact that expired in July
+
+```
+Expected extensions: [ipa]
+Downloading build 459fe23c-42f0-425b-8f6a-fd3501a32c9f...
+Unexpected response from server (404): <Code>NoSuchKey</Code>
+```
+
+✅ **Fully explained, nothing to fix in config.** `459fe23c-42f0-425b-8f6a-fd3501a32c9f`
+is **1.0.0 build 9**, created 18 Jun 2026 off commit `1e0e9999` — *not* build 75.
+Its `expirationDate` was **18 Jul 2026**, so EAS garbage-collected the artifact
+six weeks ago. Confirmed directly: a range request against its `.ipa` URL returns
+**404**, while build 75's returns **206**. The `NoSuchKey` is literal and correct.
+
+**The build to submit is `22413bd1-7944-4338-aeb1-77efb86233fb`** (1.0.2 / 75).
+Target it explicitly rather than picking from a list:
+`eas submit -p ios --id 22413bd1-7944-4338-aeb1-77efb86233fb`.
+
+⚠️ **No submission record was created for this attempt** — it died at artifact
+download, before registering. The submissions list is still the same eight, all
+against build 75, newest 31 Aug 13:24 UTC. **There is still no 1 Sep submission
+of any kind.**
+
+### ⏳ DEADLINE — build 75's artifact expires 30 Sep 2026
+
+`22413bd1` has `expirationDate: 2026-09-30T02:13:35Z` — **29 days from today**.
+Artifact confirmed live right now (HTTP 206). **After that date the "no rebuild
+needed" path is gone**: clearing the two June declarations only lets build 75
+resubmit *while its artifact still exists*. Past 30 Sep it is a rebuild as 76,
+with the money and the flag-verification cycle that implies. The declarations
+fix now has a clock on it.
+
+For reference, the only other FINISHED production builds are 74 (`593e86c9`,
+exp 28 Sep) and 66 (`5fab5058`, exp 24 Sep) — and both carry
+`usesNonExemptEncryption = false`, so neither is a conforming fallback.
+Builds 65 and 67–73 all ERRORED.
+
 ### The EAS credential store is intact — the key is configured
 
 Read from EAS GraphQL. `com.ghostface.app` (and `com.ghostface.app.tunnel`)
