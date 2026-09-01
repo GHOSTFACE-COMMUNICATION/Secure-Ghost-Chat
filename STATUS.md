@@ -105,6 +105,46 @@ exp 28 Sep) and 66 (`5fab5058`, exp 24 Sep) — and both carry
 `usesNonExemptEncryption = false`, so neither is a conforming fallback.
 Builds 65 and 67–73 all ERRORED.
 
+### ✅ 1 Sep re-run: credential prep did NOT reproduce — 90592 is the sole blocker
+
+Ran on Benji's instruction, targeting build 75 by id:
+`EXPO_DEBUG=1 eas submit -p ios --profile production --id 22413bd1-7944-4338-aeb1-77efb86233fb --non-interactive --verbose --wait`
+
+**Ninth submission: `bb61e6b3-768e-4523-ac5b-c33ae847b181`**, created
+2026-09-01T21:14:34Z, ERRORED at 21:15:23 — 49 seconds, matching the earlier
+"under a minute" pattern.
+
+✅ **Credentials resolved cleanly.** The CLI printed *"App Store Connect API Key
+already set up. Using Api Key ID: 2JQFNUQ274 ([Expo] EAS Submit deyVcPcxYd)"*,
+`Key Source: EAS servers`, and scheduled the submission. **The
+`prepare_asc_api_key` failure did not reproduce.**
+
+⚠️ **"Did not reproduce" is NOT "fixed" and NOT "explained."** Nothing was
+changed that would account for it — the credential store held the same key
+before and after. It failed three times in a row on 31 Aug and worked first try
+on 1 Sep. Treat it as **transient and unexplained**, and expect it may return.
+
+🔴 **It reached Apple and got 90592 again**, verbatim, decoded from the job log:
+
+> Invalid Export Compliance Code. The export compliance key value [] in the
+> app's Info.plist doesn't match the key value of the app's export compliance
+> documentation. To find the correct value, go to My Apps on App Store Connect.
+> (90592)
+> Build upload (ID: `9b36032d-cf81-440a-98be-d5bd0ac37823`) failed.
+> Build step "Upload to App Store Connect" failed
+
+**Expected** — the two June declarations were still unchanged at the time of the
+run. This is a clean confirmation, not a regression: **with credentials working,
+the declarations are now the only thing between build 75 and TestFlight.**
+
+⚠️ **Neither `--verbose` nor `EXPO_DEBUG=1` printed the Apple error.** The CLI
+still ends at "Something went wrong when submitting your app". **How to actually
+read it:** GraphQL `submissions { byId { jobRun { logFileUrls } } }` — note
+`jobRun`, because the submission's own `error` and `logFiles` fields are `null`
+and `[]` even on a failure that plainly produced a log. Fetch that URL and
+`zlib.brotliDecompressSync` it; the payload is newline-delimited JSON and the
+Apple error is the `level >= 40` line in phase `CUSTOM`.
+
 ### The EAS credential store is intact — the key is configured
 
 Read from EAS GraphQL. `com.ghostface.app` (and `com.ghostface.app.tunnel`)
