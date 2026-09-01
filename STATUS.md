@@ -4,15 +4,76 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-08-31 (Claude Code — **90592 root cause found: two abandoned
-June declarations on the ASC record**, see below. GF-01 closed, and the compliance
-machinery now actually exists. **Build 75 is the first conforming build**: EAS
+Last updated: 2026-09-01 (Claude Code — **coturn hardened end to end and GF-01
+closed**; see the coturn section immediately below, then the 90592 blocker which
+is unchanged and still the only thing standing between build 75 and TestFlight.
+The compliance machinery now actually exists. **Build 75 is the first conforming build**: EAS
 `22413bd1`, 1.0.2 / build 75, artifact `sOwNGmCL…ipa`, with compiled
 `ITSAppUsesNonExemptEncryption` = **`true`** — verified by reading the
 `Info.plist` out of the `.ipa`, the same way builds 63 and 74 were disproved. It
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 1 Sep 2026 — coturn hardened, GF-01 closed
+
+✅ **coturn is done.** `turns:` live on **5349** (tcp+udp), Let's Encrypt cert
+`CN=turn.ghostface.co.nz` valid to **30 Nov 2026**, issued with hooks that make
+renewal self-healing — they open and re-close ufw 80, re-apply `chgrp turnserver`
+on the cert tree, and reload coturn on every renewal, so nothing rots in 90 days.
+The `static-auth-secret` was rotated and set atomically on the box and in Railway
+`TURN_SECRET`; `TURN_URLS` moved off the bare IP to
+`turn:turn.ghostface.co.nz:3478,turns:turn.ghostface.co.nz:5349`. Verified
+**end-to-end**: credentials fetched from the live `/api/ice-config`, HMAC checked
+against the box, then relayed over both transports — 4/4 packets, 0 lost on each.
+Box patched (32 updates, 1 security) and rebooted; coturn came back
+`active/enabled` with all 8 sockets unaided.
+
+✅ **Exposure assessment — no confirmed leak.** While the box was unfirewalled the
+only publicly-bound services were **sshd on 22 and coturn on 3478**; everything
+else was loopback-only, and the coturn **CLI was never bound** (nothing on 5766,
+`no-cli` set). The secret does not appear in git history or the working tree.
+**The rotation was precautionary, not a response to a known compromise.**
+
+✅ **SSH hardened.** `PermitRootLogin no`, `PasswordAuthentication no`,
+key-only — confirmed from the server's own `sshd -T` and from the client, where a
+password attempt is now refused with `Permission denied (publickey)` where it
+previously read `publickey,password`. The blocker was a root-only cloud-init
+drop-in that beat both the main config and the hardening file on sshd's
+first-match-wins. `coturnops` has **intentionally root-equivalent sudo**: the
+boundary is key-only SSH with no root and no passwords, *not* the sudo list, and
+the sudoers file says so in its own comments.
+
+⚠️ **Two traps worth not relearning.** (1) Railway `skipDeploys:true` stages
+variables but the running container keeps its old environment, and
+`restart-service` reuses that stale snapshot — only a real deployment applies new
+vars, and every recent deploy was `SKIPPED` because `watchPatterns` filtered
+docs-only commits. This produced a live secret mismatch mid-session that had to be
+rolled back. (2) `artifacts/api-server/CLAUDE.md` says Railway watches
+`feat/push-notifications`; **it actually watches `main`**.
+
+✅ **GF-01 closed.** Counsel's memo (30 Aug) gives **ECCN 5D992.c mass-market
+self-classification, no CCATS, no MFAT permit**; the 31 Aug follow-up confirms
+argon2id and the AEAD correction change nothing. Inventory **rev. 2** records both.
+⏸ **The reply to counsel is DRAFTED, NOT SENT** — needs the rev. 2 PDF attached and
+a read of its section 3, the timing correction (the AEAD fix shipped 19 Aug, and
+was described to counsel as "pending"). No France/ANSSI question has been raised.
+The **BIS/ENC report due 1 Feb 2027** remains open and is not closed by GF-01.
+
+🔵 **Crypto review complete — 14 findings**, fix order #7 → #11 → #12 → #13 → #9 →
+#10 → #6 then the dead-code batch. **#7 and #11 are done** (`137b8b4`, `ae81b63`);
+#12 is next. All implementation corrections, none touching algorithms or the
+classification. See TRACKER GF-16.
+
+⏳ **Outstanding and only yours:** the **cellular call** — 12 Pro → 14, both off
+Wi-Fi — to see a relay allocation land on 5349 over TLS from a real carrier NAT.
+No self-test proves that. Note Starlink is CGNAT (TRACKER GF-17), so inbound is
+impossible and the relay is doing real work.
+
+---
+
 🔴 **Build 75 CANNOT be submitted — Apple rejects it with error 90592.** Three
 attempts on 31 Aug (`b4f9d3ae`, `b19f9856`, `4ecd1537`), each failing at
 validation in under a minute with no binary accepted. Verbatim, from the EAS
