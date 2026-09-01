@@ -110,17 +110,50 @@ test("readEncryptedString migrates legacy no-AD data and rewrites it immediately
   assert.equal(migrated, '{"legacy":true}');
 });
 
-test("readEncryptedString migrates legacy pre-encryption plaintext and rewrites it immediately", async () => {
-  const legacyPlaintext = '{"pre-encryption":"plaintext, not hex, not even-length!"}';
-  setRawStorage("ghostface_call_history", legacyPlaintext);
+/**
+ * Audit finding #7. These four tests pin the behaviour that replaced the
+ * pre-encryption plaintext migration tier. That tier returned any blob which
+ * failed both authenticated decrypts as if it were legacy plaintext, and
+ * re-encrypted it under the master key — so whoever could write the storage
+ * slot chose the value this function returned, permanently. The test that
+ * used to live here asserted exactly that behaviour and had to be inverted.
+ */
+test("readEncryptedString REFUSES unauthenticated bytes instead of adopting them", async () => {
+  const attackerBytes = '{"conversations":"attacker-chosen, never encrypted by us"}';
+  setRawStorage("ghostface_call_history", attackerBytes);
 
   const result = await readEncryptedString("ghostface_call_history");
-  assert.equal(result, legacyPlaintext);
+  assert.equal(result, null, "unauthenticated bytes must not be returned to the caller");
+});
 
-  const rewritten = getRawStorage("ghostface_call_history")!;
-  assert.notEqual(rewritten, legacyPlaintext);
-  const migrated = await decryptFromStorage(rewritten, "ghostface_call_history");
-  assert.equal(migrated, legacyPlaintext);
+test("readEncryptedString does not rewrite unauthenticated bytes into the encrypted format", async () => {
+  const attackerBytes = "not our ciphertext";
+  setRawStorage("ghostface_call_history", attackerBytes);
+
+  await readEncryptedString("ghostface_call_history");
+
+  // Left exactly as found: not adopted, not laundered into the current format,
+  // and not destroyed — a genuinely corrupted blob stays recoverable.
+  assert.equal(getRawStorage("ghostface_call_history"), attackerBytes);
+});
+
+test("readEncryptedString refuses a valid ciphertext moved to a different key", async () => {
+  // AD binds the slot name, so a blob lifted from one slot into another fails
+  // tier 1. It must not then fall through to being adopted as plaintext.
+  await writeEncryptedString("ghostface_conversations", '{"real":"data"}');
+  const validButForAnotherSlot = getRawStorage("ghostface_conversations")!;
+  setRawStorage("ghostface_call_history", validButForAnotherSlot);
+
+  assert.equal(await readEncryptedString("ghostface_call_history"), null);
+});
+
+test("the wallet key path cannot be substituted through a failed read", async () => {
+  // LOCAL_WALLET_PRIV_KEY is read through readEncryptedString. Under the old
+  // tier 3 this returned the attacker's hex string as the wallet private key.
+  const attackerKeyHex = "de".repeat(32);
+  setRawStorage("ghostface_local_wallet_priv", attackerKeyHex);
+
+  assert.equal(await readEncryptedString("ghostface_local_wallet_priv"), null);
 });
 
 test("readEncryptedString returns null for a missing key", async () => {

@@ -148,17 +148,33 @@ async function decryptFromStorageLegacyNoAD(ciphertextHex: string): Promise<stri
 
 /**
  * Read a string previously written with writeEncryptedString(), decrypting
- * it transparently. Three tiers, oldest data first:
+ * it transparently. Two tiers, oldest data first:
  *   1. Current AD-bound format.
  *   2. Legacy no-AD format (data from a build that predates audit #6) —
  *      decrypts under the same master key, just without AD. On success,
  *      immediately re-encrypts in the current format so this tier isn't
  *      hit again for this key.
- *   3. Pre-encryption-at-rest legacy plaintext (predates this file
- *      entirely) — same immediate-migration treatment.
- * Both fallback tiers are temporary; once real-world migration telemetry
- * shows they're no longer hit, they should be deleted (tracked as a
- * follow-up in docs/AUDIT_FINDINGS.md).
+ * Both tiers are authenticated by the master key: tier 2 drops the AD
+ * binding, not the AEAD tag, so it still proves the bytes were written by
+ * something holding the Keychain key. Tier 2 is temporary; once real-world
+ * migration telemetry shows it's no longer hit, it should be deleted
+ * (tracked as a follow-up in docs/AUDIT_FINDINGS.md).
+ *
+ * Audit finding #7. There used to be a third tier: if both decrypts failed,
+ * the raw stored bytes were RETURNED AS PLAINTEXT and re-encrypted under the
+ * master key. That turned an AEAD tag failure — the one signal that says
+ * "these bytes are not ours" — into "assume they're pre-encryption legacy
+ * data and adopt them". Anything that could write the AsyncStorage slot
+ * could therefore choose the value this function returns, and have it
+ * durably re-encrypted so it looked authentic ever after. The blast radius
+ * was not limited to conversation history: LOCAL_WALLET_PRIV_KEY is read
+ * through here too, so the same path could substitute the user's wallet key.
+ *
+ * A failed read now returns null. Callers treat that as "no stored data" and
+ * start clean, which is the correct failure mode: losing local history is
+ * recoverable, silently adopting an attacker's bytes is not. The stored value
+ * is deliberately left untouched rather than cleared, so a genuinely corrupted
+ * blob can still be recovered off-device for diagnosis.
  */
 export async function readEncryptedString(key: string): Promise<string | null> {
   const raw = await AsyncStorage.getItem(key);
@@ -167,7 +183,7 @@ export async function readEncryptedString(key: string): Promise<string | null> {
   try {
     return await decryptFromStorage(raw, key);
   } catch {
-    // fall through to legacy tiers
+    // fall through to the legacy tier
   }
 
   try {
@@ -176,12 +192,15 @@ export async function readEncryptedString(key: string): Promise<string | null> {
     await writeEncryptedString(key, plaintext).catch(() => {});
     return plaintext;
   } catch {
-    // fall through to plaintext tier
+    // Not ours. Do NOT adopt it — see the note above.
   }
 
-  console.warn(`[secureStorage] migrated "${key}" from legacy plaintext format`);
-  await writeEncryptedString(key, raw).catch(() => {});
-  return raw;
+  console.error(
+    `[secureStorage] "${key}" failed authenticated decryption under every ` +
+      `supported format — refusing to adopt it. Treating as absent. The stored ` +
+      `value has been left in place for diagnosis.`,
+  );
+  return null;
 }
 
 /** Encrypt and write a string to AsyncStorage under `key`. */
