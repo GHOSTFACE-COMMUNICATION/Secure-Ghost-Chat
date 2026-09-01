@@ -155,10 +155,36 @@ were live on that group at some point. The app-level `betaTesters` endpoint
 returns **403** at `WD424K32M4`'s scope, so historical membership is **not
 visible from here**. Do not upgrade this to "no external distribution occurred."
 
-📋 **This goes to counsel** on the already-drafted 1056841 reply, framed as a
-question and not a conclusion: public-link TestFlight enabled since 31 Jul,
-current testers zero, historical membership not visible to us — does that count
-as distribution for the `COMPLIANCE.md` §5 gate and the BIS annual report?
+✅ **CLOSED 1 Sep on Benji's explicit instruction — link disabled, builds expired.**
+Done through the ASC API in that order (link first, so the download surface shut
+before anything else changed):
+1. `PATCH /v1/betaGroups/9f6a23a2-9f56-4a78-8892-02623570ae27` →
+   `publicLinkEnabled: false`. The link `https://testflight.apple.com/join/f6jGTjV8`
+   no longer admits anyone. The group still exists; only the public join is off.
+2. `PATCH /v1/builds/<id>` → `expired: true` on the three live builds, targeted
+   **by ASC build id, not by number** — `7a7cf021…` (61), `20d1d0f7…` (48),
+   `6578c17d…` (47), all 1.0.2. ⚠️ **This mattered: ASC holds two builds numbered
+   61 and two numbered 33/34, across different pre-release versions.** Expiring by
+   version string would have hit the wrong record.
+
+**Verified by re-reading, not trusting the write responses:** `mb` is now
+`publicLinkEnabled=false` with **zero live builds** (61, 48, 47, 34, 33, 8 all
+expired). Internal group `GF` still has **27 live builds including 74**, so
+internal testing is unaffected. Build 74 untouched (`expired=false`).
+
+⚠️ **Build expiry is global and irreversible.** It is per-build, not per-group, so
+61/48/47 also left the internal group's live list; ASC offers no un-expire. Build
+74 remains the newest testable build for `GF`.
+
+⚠️ **This does NOT retract anything already distributed** — it closes the surface
+going forward. The compliance question below is unchanged by it.
+
+📋 **STILL OPEN — this goes to counsel** on the already-drafted 1056841 reply,
+framed as a question and not a conclusion: public-link TestFlight was enabled
+**31 Jul – 1 Sep 2026**, current testers zero, historical membership not visible
+to us — does that count as distribution for the `COMPLIANCE.md` §5 gate and the
+BIS annual report? **Closing the link does not answer this and does not make it
+go away.**
 
 ### Declarations re-verified 1 Sep — unchanged
 
