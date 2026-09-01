@@ -226,6 +226,40 @@ to us — does that count as distribution for the `COMPLIANCE.md` §5 gate and t
 BIS annual report? **Closing the link does not answer this and does not make it
 go away.**
 
+### ✅ SETTLED 1 Sep — the API can NEVER remove or edit a declaration
+
+A real `DELETE` was sent to `2cb25cc0-c76e-429f-9d10-260946eda9af` on Benji's
+explicit instruction. Apple's answer, verbatim:
+
+> 403 FORBIDDEN_ERROR — "The resource 'appEncryptionDeclarations' does not allow
+> 'DELETE'. **Allowed operations are: CREATE, GET_COLLECTION, GET_INSTANCE**"
+
+**This closes the "deletability UNVERIFIED" flag that had been open since
+31 Aug** — and it closes more than was asked. The allowed-operations list has no
+`UPDATE`/`PATCH` either, so:
+
+- ❌ **No DELETE** — declarations cannot be removed via the API, ever.
+- ❌ **No PATCH** — so the previously-floated *"if they can be edited, set
+  France = NO via the API"* fallback **is dead too**. It was never possible.
+- ✅ **CREATE is allowed** — a *new* declaration can be POSTed. That adds, it
+  does not remove, so it does not by itself clear the two stuck records. Treat
+  as unexplored, not as a fix.
+
+Nothing was deleted (the 403 is a rejection, not a partial write) — re-read
+confirms both declarations still present, both `CREATED`, both `codeValue: null`.
+
+**Consequence: the only two routes left are the ASC UI and Apple Developer
+Support.** No script can do this. Apple's own help page documents only *adding*
+and *completing* App Encryption Documentation — it documents no delete — so if
+the UI offers no delete either, **Developer Support becomes the primary route
+and should be opened now**, in parallel with anything else, because of the
+30 Sep artifact deadline.
+
+⚠️ Also closed cheaply 1 Sep: the theory that `ITSEncryptionExportComplianceCode`
+was present-but-empty in the build (a config bug fixable without ASC).
+**It is not in `app.json` at all** — `ios.infoPlist` carries only
+`ITSAppUsesNonExemptEncryption: true`. Apple's `[]` means *absent*, as assumed.
+
 ### Declarations re-verified 1 Sep — unchanged
 
 Both June declarations are still present and still stuck:
