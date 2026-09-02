@@ -23,30 +23,45 @@ const LIGHT_DEPTH_SHADOW = [
 // Pale-gold highlight → bright gold → deep gold → dark edge gives a polished,
 // beveled-metal look that a single flat fill cannot. Also doubles as the
 // fallback gradient on platforms without native Liquid Glass (below).
-// Anchored on #F5D26B — the actual registered trademark gold (see the GF
-// monogram artwork) — not an approximation of it.
-export const GOLD_METALLIC = ["#FBEACB", "#F5D26B", "#D1A94A", "#9C7A2E"] as const;
+//
+// SAMPLED FROM THE TRADEMARK ARTWORK, 2 Sep 2026. These four stops are not
+// chosen by eye: they are the luminance-banded averages of the 135,090 gold
+// pixels in `assets/images/ghostface-mark-gold.webp`, so the app's gold and
+// the mark's gold are the same gold.
+//
+//   band 4 highlight  #FCED86      band 3 light-mid  #DEB451
+//   band 2 mid        #AD7D2E      band 1 deep       #6F4512
+//   (mean across the whole mark: #A8843B)
+//
+// ⚠️ The previous palette was anchored on #F5D26B and this comment claimed it
+// was "the actual registered trademark gold, not an approximation of it".
+// The sampling contradicts that: #F5D26B is paler and less saturated than
+// anything in the artwork — it sits above even the mark's brightest mid-tone,
+// which is why the UI read as lemon-yellow next to a coppery mark.
+// ⚠️ If a filed brand specification names #F5D26B, that document outranks this
+// pixel sample and this palette should go back — see TRACKER.
+export const GOLD_METALLIC = ["#FCED86", "#DEB451", "#AD7D2E", "#6F4512"] as const;
 export const GOLD_METALLIC_LOCATIONS = [0, 0.45, 0.75, 1] as const;
 
 // Same gold used as the "active" tint on the home screen's radial-menu glass
 // nodes — kept in one place so every gold-glass surface in the app tints
-// identically. rgba of #F5D26B. Alpha deliberately high (not a "subtle
+// identically. rgba of #DEB451. Alpha deliberately high (not a "subtle
 // tint" value): native Liquid Glass tintColor alpha-composites over
 // whatever's behind it, and this app's backdrop is solid black almost
 // everywhere — at low alpha the result reads as dark olive-brown, not
 // gold (rgba(...,0.4) over black renders ~rgb(98,84,43); confirmed on
 // device). 0.82 is the lowest alpha that still reads unambiguously gold
 // against a black backdrop while keeping some genuine translucency.
-export const GOLD_GLASS_TINT = "rgba(245,210,107,0.82)";
+export const GOLD_GLASS_TINT = "rgba(222,180,81,0.82)";
 
 // Light-theme glass tint. A white backdrop has the OPPOSITE problem from
 // black: alpha-compositing gold over white lightens it toward pastel cream
 // rather than muddying it toward brown, so it actually needs a HIGHER alpha
 // than the dark-mode tint to read as true gold rather than a wash — e.g.
-// rgba(245,210,107,0.62) over solid white composites to ~rgb(249,227,163),
+// rgba(222,180,81,0.62) over solid white composites to ~rgb(249,227,163),
 // a pale cream, not gold. 0.85 composites to ~rgb(246,214,118), close to
 // the trademark hex itself.
-export const GOLD_GLASS_TINT_LIGHT = "rgba(245,210,107,0.85)";
+export const GOLD_GLASS_TINT_LIGHT = "rgba(222,180,81,0.85)";
 
 // Black liquid-glass tint — MUST match the home screen's radial-menu nodes
 // (NODE_GLASS_TINT in app/(tabs)/index.tsx). Those are the reference
@@ -59,7 +74,7 @@ export const GOLD_GLASS_TINT_LIGHT = "rgba(245,210,107,0.85)";
 // the rest of the app diverged from it.
 export const GLASS_TINT_BLACK = "rgba(10,10,12,0.55)";
 
-export const GOLD_OUTLINE_COLOR = "#F5D26B";
+export const GOLD_OUTLINE_COLOR = "#DEB451";
 
 // Neutral white rim, matching nodeCircleGlassBorder on the home screen.
 //
@@ -144,7 +159,7 @@ export function SpecularHighlight({ intensity = 0.65, rgb = "255,255,255" }: { i
 // GLASS_METALLIC_GOLD_LIGHT fill already provides the banding.
 const GOLD_TEXTURE_LIGHT = [
   "rgba(255,250,235,0.55)",
-  "rgba(245,210,107,0.1)",
+  "rgba(222,180,81,0.1)",
   "rgba(184,137,42,0.4)",
 ] as const;
 

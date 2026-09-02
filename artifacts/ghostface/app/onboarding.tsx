@@ -756,7 +756,7 @@ export default function OnboardingScreen() {
                 else in the app. */}
             <View style={styles.giftCard}>
               <GoldGradient style={styles.giftCardInner}>
-                <Text style={{ ...type.labelStrong, fontSize: 9, color: "#F5D26B", letterSpacing: 1.5 }}>
+                <Text style={{ ...type.labelStrong, fontSize: 9, color: "#DEB451", letterSpacing: 1.5 }}>
                   {WELCOME_GIFT.eyebrow}
                 </Text>
                 <Text style={{ ...type.subheading, fontSize: 13, color: colors.foreground, marginTop: 2 }}>

@@ -373,7 +373,7 @@ export default function HomeScreen() {
                           <Ionicons
                             name={node.icon}
                             size={20}
-                            color={active ? "#F5D26B" : "rgba(255,255,255,0.88)"}
+                            color={active ? "#DEB451" : "rgba(255,255,255,0.88)"}
                           />
                         </GlassView>
                       ) : (
@@ -400,7 +400,7 @@ export default function HomeScreen() {
                           <Ionicons
                             name={node.icon}
                             size={20}
-                            color={active ? "#F5D26B" : "rgba(255,255,255,0.88)"}
+                            color={active ? "#DEB451" : "rgba(255,255,255,0.88)"}
                           />
                         </View>
                       )}
@@ -449,19 +449,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     letterSpacing: 8,
     fontWeight: "400" as const,
-    color: "rgba(245,210,107,0.78)",
+    color: "rgba(222,180,81,0.78)",
   },
   aliasDivider: {
     width: 32,
     height: 1,
     marginVertical: 12,
-    backgroundColor: "rgba(245,210,107,0.3)",
+    backgroundColor: "rgba(222,180,81,0.3)",
   },
   aliasTagline: {
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 5,
-    color: "rgba(245,210,107,0.5)",
+    color: "rgba(222,180,81,0.5)",
   },
 
   // Radial dial
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     width: 2,
     height: 10,
     borderRadius: 1,
-    backgroundColor: "rgba(245,210,107,0.4)",
+    backgroundColor: "rgba(222,180,81,0.4)",
   },
 
   // Central coin
@@ -522,7 +522,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 4,
-    color: "rgba(245,210,107,0.6)",
+    color: "rgba(222,180,81,0.6)",
   },
 
   panicWrap: {
@@ -568,7 +568,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   nodeCircleGlassBorderActive: {
-    borderColor: "#F5D26B",
+    borderColor: "#DEB451",
   },
   nodeCircleRim: {
     ...StyleSheet.absoluteFillObject,
@@ -577,7 +577,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   nodeCircleRimActive: {
-    borderColor: "rgba(245,210,107,0.85)",
+    borderColor: "rgba(222,180,81,0.85)",
   },
   nodeLockBadge: {
     position: "absolute",
@@ -598,5 +598,5 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     color: "rgba(255,255,255,0.78)",
   },
-  nodeLabelActive: { color: "#F5D26B" },
+  nodeLabelActive: { color: "#DEB451" },
 });

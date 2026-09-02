@@ -1,7 +1,7 @@
 const colors = {
   dark: {
     text: "#FFFFFF",
-    tint: "#F5D26B",
+    tint: "#DEB451",
 
     background: "#000000",
     foreground: "#FFFFFF",
@@ -9,7 +9,7 @@ const colors = {
     card: "#0A0A0A",
     cardForeground: "#FFFFFF",
 
-    primary: "#F5D26B",
+    primary: "#DEB451",
     primaryForeground: "#000000",
 
     secondary: "#0F0F0F",
@@ -18,7 +18,7 @@ const colors = {
     muted: "#161616",
     mutedForeground: "#6B6B6B",
 
-    accent: "#F5D26B",
+    accent: "#DEB451",
     accentForeground: "#000000",
 
     destructive: "#FF3B30",
@@ -28,7 +28,7 @@ const colors = {
     input: "#0F0F0F",
 
     success: "#7dd3fc",
-    warning: "#F5D26B",
+    warning: "#DEB451",
     ghost: "#FFFFFF",
   },
 
@@ -39,7 +39,7 @@ const colors = {
   // values since those read as near-invisible on white.
   light: {
     text: "#0A0A0A",
-    tint: "#F5D26B",
+    tint: "#DEB451",
 
     background: "#FFFFFF",
     foreground: "#0A0A0A",
@@ -47,7 +47,7 @@ const colors = {
     card: "#F7F7F8",
     cardForeground: "#0A0A0A",
 
-    primary: "#F5D26B",
+    primary: "#DEB451",
     primaryForeground: "#000000",
 
     secondary: "#F0F0F0",
@@ -56,7 +56,7 @@ const colors = {
     muted: "#EDEDED",
     mutedForeground: "#6B6B6B",
 
-    accent: "#F5D26B",
+    accent: "#DEB451",
     accentForeground: "#000000",
 
     destructive: "#FF3B30",

@@ -1700,7 +1700,7 @@ function SettingsScreenInner() {
                     mutedColor={colors.border}
                   />
                   {pinSimilar && (
-                    <Text style={{ ...type.micro, color: "#F5D26B", marginTop: -8, marginBottom: 10 }}>
+                    <Text style={{ ...type.micro, color: "#DEB451", marginTop: -8, marginBottom: 10 }}>
                       TOO SIMILAR TO CURRENT PIN
                     </Text>
                   )}

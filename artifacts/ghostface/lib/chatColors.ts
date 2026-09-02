@@ -17,7 +17,7 @@ export const CHAT_COLOR_PALETTE: string[] = [
   "#8E8E93", // grey
   "#0A84FF", // blue
   "#FF3B30", // red
-  "#F5D26B", // gold — the app's brand gold, see GoldGradient.tsx
+  "#DEB451", // gold — the app's brand gold, see GoldGradient.tsx
 ];
 
 /**

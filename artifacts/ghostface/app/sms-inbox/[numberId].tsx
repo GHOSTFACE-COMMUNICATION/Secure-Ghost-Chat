@@ -172,7 +172,7 @@ export default function SmsInboxScreen() {
       width: 64,
       height: 64,
       borderRadius: 32,
-      backgroundColor: "rgba(245,210,107,0.08)",
+      backgroundColor: "rgba(222,180,81,0.08)",
       alignItems: "center",
       justifyContent: "center",
       marginBottom: 4,
@@ -225,7 +225,7 @@ export default function SmsInboxScreen() {
       width: 28,
       height: 28,
       borderRadius: 14,
-      backgroundColor: "rgba(245,210,107,0.12)",
+      backgroundColor: "rgba(222,180,81,0.12)",
       alignItems: "center",
       justifyContent: "center",
     },
@@ -254,7 +254,7 @@ export default function SmsInboxScreen() {
       flex: 1,
     },
     badgeCurrent: {
-      backgroundColor: "rgba(245,210,107,0.15)",
+      backgroundColor: "rgba(222,180,81,0.15)",
       borderRadius: 3,
       paddingHorizontal: 6,
       paddingVertical: 2,
@@ -273,7 +273,7 @@ export default function SmsInboxScreen() {
     badgeArchivedText: {
       ...type.micro,
       fontSize: 8,
-      color: "#F5D26B",
+      color: "#DEB451",
     },
     body: {
       ...type.caption,
