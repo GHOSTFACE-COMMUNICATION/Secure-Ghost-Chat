@@ -36,7 +36,7 @@
 // or after every prebuild.
 import {
   XcodeProject,
-  XCRemoteSwiftPackageReference,
+  XCLocalSwiftPackageReference,
   XCSwiftPackageProductDependency,
   PBXAggregateTarget,
   PBXShellScriptBuildPhase,
@@ -50,14 +50,25 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
-// Pinned to our own fork, not the official repo: upstream's Package.swift
-// (both on GitHub and the true upstream git.zx2c4.com) currently declares
+// VENDORED, not fetched. See native/wireguard-apple/VENDORED.md.
+//
+// This was an XCRemoteSwiftPackageReference to a personal GitHub fork. The
+// fork existed for one reason: upstream's Package.swift declares
 // swift-tools-version:5.3 while using PackageDescription 5.5 APIs
-// (.macOS(.v12), .iOS(.v15)), which modern Xcode refuses to resolve at all
-// ("'v12'/'v15' is unavailable"). Our fork carries a one-line fix bumping
-// the version declaration to match -- no other changes. If upstream ever
-// fixes this, switch back to WireGuard/wireguard-apple directly.
-const WIREGUARD_REPO_URL = "https://github.com/ghostzeronz-coder/wireguard-apple";
+// (.macOS(.v12), .iOS(.v15)), which modern Xcode refuses to resolve at all.
+//
+// On 2 Sep 2026 that fork's owner account moved to an organisation, the URL
+// started 404ing, and EVERY iOS build failed at "Could not resolve package
+// dependencies". Worse, the dependency is compiled into the VPN network
+// extension and this script runs `make` inside its checkout — so whoever
+// controls that namespace controls code entering the binary. During the same
+// incident a placeholder briefly pointed it at github.com/OWNER, which is a
+// real organisation.
+//
+// The package now lives in this repository. The path is relative to the
+// generated ios/ directory, and native/ is a sibling of ios/ deliberately
+// (like vpn-tunnel) so it survives `expo prebuild --clean`.
+const WIREGUARD_LOCAL_PATH = "../native/wireguard-apple";
 const WIREGUARD_PRODUCT_NAME = "WireGuardKit";
 // The targets/network-packet-tunnel directory name gets hyphens stripped
 // when @bacons/apple-targets derives the actual Xcode target name from it.
@@ -144,21 +155,30 @@ function findTarget(project, name) {
 
 function ensurePackageReference(project) {
   let pkgRef = (project.rootObject.props.packageReferences || []).find(
-    (p) => p.props && p.props.repositoryURL === WIREGUARD_REPO_URL,
+    (p) => p.props && p.props.relativePath === WIREGUARD_LOCAL_PATH,
   );
   if (pkgRef) {
-    console.log("[link-wireguard-kit] Package reference already present, reusing it.");
+    console.log("[link-wireguard-kit] Local package reference already present, reusing it.");
     return pkgRef;
   }
-  pkgRef = XCRemoteSwiftPackageReference.create(project, {
-    repositoryURL: WIREGUARD_REPO_URL,
-    // Tracking the official repo's default branch rather than pinning a
-    // semver tag -- wireguard-apple doesn't publish frequent SPM version
-    // tags, its Package.swift is consumed straight from source.
-    requirement: { kind: "branch", branch: "master" },
+  // Drop any stale REMOTE reference left by a project generated before the
+  // package was vendored. Without this, a prebuild over an existing ios/ would
+  // keep the old repositoryURL alongside the new local one and Xcode would
+  // still try to clone a URL that no longer exists.
+  const stale = (project.rootObject.props.packageReferences || []).filter(
+    (p) => p.props && typeof p.props.repositoryURL === "string" && p.props.repositoryURL.includes("wireguard-apple"),
+  );
+  if (stale.length) {
+    project.rootObject.props.packageReferences = (project.rootObject.props.packageReferences || []).filter(
+      (p) => !stale.includes(p),
+    );
+    console.log(`[link-wireguard-kit] Removed ${stale.length} stale remote wireguard-apple reference(s).`);
+  }
+  pkgRef = XCLocalSwiftPackageReference.create(project, {
+    relativePath: WIREGUARD_LOCAL_PATH,
   });
   project.rootObject.props.packageReferences = [...(project.rootObject.props.packageReferences || []), pkgRef];
-  console.log(`[link-wireguard-kit] Added package reference: ${WIREGUARD_REPO_URL}`);
+  console.log(`[link-wireguard-kit] Added LOCAL package reference: ${WIREGUARD_LOCAL_PATH}`);
   return pkgRef;
 }
 
