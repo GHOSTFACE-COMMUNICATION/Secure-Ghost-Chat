@@ -29,8 +29,18 @@ software under Note 3 to Category 5, Part 2 of the Commerce Control List.
 | Advice | MinterEllisonRuddWatts |
 | Authors | Sarah Salmond, Sian Vaughan-Jones |
 | Matter | 1056841 |
-| Dated | 31 August 2026 |
-| Title | *Ghostface Limited — US and NZ Export-Control Classification Queries* |
+| Dated | **2 September 2026 (Version 2 — REVISED, operative)** |
+| Title | *Ghostface Limited — US and NZ Export-Control Classification Queries (Revised)* |
+| Archived | `~/Documents/Ghostface-Legal/1056841-export-control/2026-09-02_Counsel_Memo_REVISED_v2.pdf` |
+| SHA-256 | `1a282e8d24b858e6822e996dc69ccfe064a3be96c9f00115ed91898ebb38bce9` |
+| Supersedes | 31 August 2026 version (`GHOSTFACE_Classification_Memo.pdf`), retained for the record |
+
+**The 2 Sep revision folds both outstanding items into the opinion itself.**
+Argon2id (§4.12–4.14) and the AEAD associated-data correction (§4.15–4.17) are
+now addressed in the memo body rather than in a follow-up email, and neither
+changes the classification. It also reviews the ASC declaration history at §7.6
+and gives an explicit instruction on the `Info.plist` flag at §7.8. **Cite the
+2 September version, not the 31 August one.**
 
 Counsel's qualifications, which travel with the conclusion: MinterEllisonRuddWatts
 is not admitted to practise US law and the EAR analysis rests on their trade
@@ -164,8 +174,17 @@ cosmetic. Memo §3.1(b) conditions the opinion on the description being complete
 and §7.5 recommends revisiting the classification if cryptographic functionality
 materially changes.
 
-**Status: ✅ RESOLVED — 31 August 2026.** Sarah Salmond replied on the memo
-thread (cc Sian Vaughan-Jones, Isabelle Pou):
+**Status: ✅ RESOLVED — and now IN THE OPINION ITSELF, not just an email.**
+The revised memo of **2 September 2026** addresses argon2id at **§4.12–4.14**:
+it is "a published and widely used key-derivation function, standardised in
+RFC 9106", applied "in a conventional manner", performing "no encryption", and
+**"We do not consider the inclusion of Argon2id to affect the classification
+conclusions reached in this memorandum"** (§4.14). It is also now listed in the
+memo's own algorithm table at §4.3(h). That is stronger than the email below,
+which it supersedes; the email is kept for the chain of reasoning.
+
+Originally resolved 31 August 2026 by Sarah Salmond on the memo thread
+(cc Sian Vaughan-Jones, Isabelle Pou):
 
 > "argon2id appears to be a published and widely used key derivation function
 > being applied in a conventional manner. As described, it does not appear to
@@ -200,7 +219,17 @@ a conditional gate:
 
 Consequences currently in force:
 
-- ✅ **The AEAD associated-data fix is CLEARED** (counsel, 31 Aug 2026) —
+- ✅ **The AEAD associated-data fix is CLEARED — and as of 2 Sep 2026 the
+  clearance is IN THE OPINION BODY, not an email.** Revised memo §4.15–4.17:
+  the correction "replaces JSON serialisation of message headers with a fixed
+  binary encoding", the algorithms, Double Ratchet protocol and intended
+  functionality are unchanged, and it is "a routine implementation correction
+  rather than a material change… we do not consider this to require the
+  classification analysis to be revisited" (§4.16). **§4.17 records the timing
+  correction explicitly** — committed 19 Aug 2026, present in the builds
+  uploaded 29–30 Aug, "already in effect before the matter was raised with us".
+  So the disclosure obligation on timing is discharged. Original email
+  clearance (31 Aug 2026), superseded but retained:
   assessed as "a correction to the way existing encryption functionality is
   implemented, rather than a change to the encryption itself… a routine
   implementation correction rather than a material change". Algorithms, protocol
@@ -223,16 +252,70 @@ Consequences currently in force:
   treats as unproblematic at §7.6(f); no third party has ever received a build).
   But counsel's conclusions are expressly conditioned on "the accuracy and
   completeness of the technical information provided by Ghostface", so the
-  timing must be corrected to counsel — fold it into the note accompanying
-  Inventory rev. 2. **The lesson the rule exists for: check `git log` before
-  calling something pending.**
+  timing must be corrected to counsel. ✅ **Discharged — the revised memo of
+  2 Sep 2026 records the correct timing itself at §4.17.** **The lesson the
+  rule exists for: check `git log` before calling something pending.**
+  ⛔ **BUT SEE THE DISTRIBUTION DISCREPANCY IMMEDIATELY BELOW — the "no third
+  party has ever received a build" half of this paragraph is NOT verified and
+  is now known to be incomplete.**
+- ⛔ **OPEN AND BLOCKING A CLEAN RECORD — the distribution representation to
+  counsel is incomplete.** Revised memo **§4.17** states as fact that
+  "Distribution of those builds has been limited to internal TestFlight testing
+  on the director's own Apple IDs, and **no third party has received any
+  build**", and §7.6(f)/§7.7(b) repeat it. This file said the same thing above.
+  **App Store Connect does not support that in full.** Read from the ASC API on
+  1 Sep 2026: beta group **`mb` is `isInternalGroup: false` with a PUBLIC JOIN
+  LINK enabled from 31 July 2026 until it was disabled on 1 Sep 2026**, carrying
+  builds **61, 48 and 47**. A public TestFlight link is by definition available
+  to third parties.
+  **Precisely what is and is not known:**
+  - For **build 63** specifically, §7.6(f) appears accurate — 63 was on the
+    internal `GF` group, not on `mb`.
+  - For **builds 47, 48 and 61** an open external channel existed for ~32 days.
+  - **Whether anyone joined is UNKNOWN.** Zero testers at the time of closure,
+    but a removed tester would not appear in that count and the app-level
+    `betaTesters` endpoint returns 403 at the available API key's scope. **Do
+    not upgrade "zero now" into "nobody ever" — that is the error this record
+    keeps making.**
+  **Why it matters:** memo §3.1(b) conditions the entire opinion on Ghostface's
+  description being accurate and complete, and §7.4(f) requires retention of
+  TestFlight declaration records. **This goes to Sarah as a correction, framed
+  as fact not conclusion.** It may well change nothing — mass-market
+  classification under Note 3 does not turn on tester counts, and §4.7(a)/(d)
+  reason from public availability, which a public link only reinforces. That is
+  counsel's call to make, not ours, and it is better raised now than found
+  later. See TRACKER GF-18.
 - ✅ **The argon2id recovery PIN is RESOLVED** (counsel, 31 Aug 2026) and is now
   part of the reviewed baseline in §2. See §4.
 - Before any public release, the App Store questionnaire answers and the
   compiled `ITSAppUsesNonExemptEncryption` must both say the app **uses
-  encryption**, with the mass-market exemption relied upon (memo §7.8).
-- **Guarded in CI:** `artifacts/ghostface/lib/exportCompliance.test.ts` fails the
-  test suite if `ITSAppUsesNonExemptEncryption` is not `true`, citing this file.
+  encryption**, with the mass-market exemption relied upon — **revised memo
+  §7.8, 2 Sep 2026**, in counsel's own words: Ghostface "should ensure that the
+  App Store export-compliance questionnaire responses and the
+  ITSAppUsesNonExemptEncryption build setting accurately reflect that the
+  Application uses encryption, while noting that an applicable export-control
+  exemption is relied upon". **This is now an explicit instruction from counsel,
+  not an inference**, and it is the citable authority for build 75's `true`.
+- ✅ **Counsel independently reached the same diagnosis of ITMS-90592.** Revised
+  memo §7.7(a): the July upload failures "appear to have arisen from an apparent
+  mismatch between the Application's build configuration and the export
+  compliance documentation previously recorded in Apple's systems, rather than
+  from any substantive assessment by Apple regarding the product's export
+  classification". §7.6(a) records the two June declarations as "both 'Upload
+  Failed', June 18 and 19, 2026". §2.1(c)(ii) instructs Ghostface to "review and
+  update any App Store export-compliance declarations to reflect this opinion's
+  conclusions" — **usable in the Apple Developer Support request** as a
+  counsel-directed reason to clear them.
+- **Guarded by a test — but NOT by CI, because there is no CI.**
+  `artifacts/ghostface/lib/exportCompliance.test.ts` fails the test suite if
+  `ITSAppUsesNonExemptEncryption` is not `true`, citing this file.
+  ⚠️ **Correction of record, 1 Sep 2026: this file previously said "Guarded in
+  CI". That is false — the repo has no `.github/workflows` directory and
+  nothing runs the suite automatically.** The guard fires only when a human
+  types `pnpm test`. The same gap left `check:handshake` — the proof that the
+  E2EE is genuinely end-to-end — silently broken for 13 days across five crypto
+  changes. **Until a CI workflow exists, every guard named in this file is
+  advisory.** Logged under TRACKER Engineering — open.
   The flag's value changed **ten times** between 10 Jun and 30 Aug 2026 (four
   of them since 6 Aug) because it lived in config with no rationale attached;
   it cannot silently flip again. Verified from git history 30 Aug 2026:
@@ -267,6 +350,8 @@ cloud durability under the company's own account.
 | ASC Declaration Exhibits (Annex 3) | ✅ archived |
 | Follow-up to counsel, 30 Aug 2026 | ✅ sent — reply on the memo thread to Sarah Salmond, cc Sian Vaughan-Jones / Isabelle Pou: argon2id omission from Annex 1, and the pending AEAD associated-data encoding fix. Both framed against §7.5's revisit trigger. |
 | **Counsel's response, 31 Aug 2026** | ✅ received — Gmail message `1a05644d32bf7630`. Neither item changes the classification analysis or the memorandum's conclusions. Argon2id: conventional published KDF, no effect on classification; inventory to record it. AEAD: routine implementation correction, no revisit required, **provided the change is limited to the issue described**. ✅ **filed** as `2026-08-31_Counsel_Response_argon2id_AEAD.pdf` in the archive, alongside the memo. |
+| **REVISED MEMO (Version 2), 2 Sep 2026** | ✅ **received and archived** as `2026-09-02_Counsel_Memo_REVISED_v2.pdf` (SHA-256 `1a282e8d…bce9`). **This is now the operative opinion.** It folds argon2id (§4.12–4.14) and the AEAD correction (§4.15–4.17) into the memo body, adds argon2id to the §4.3 algorithm list, records the AEAD timing correctly at §4.17, reviews the ASC declaration history at §7.6, diagnoses ITMS-90592 as a configuration mismatch at §7.7(a), and gives the explicit `ITSAppUsesNonExemptEncryption` instruction at §7.8. Classification unchanged: **ECCN 5D992.c, self-classify under §740.17(b)(1), no CCATS, no MFAT permit, distribution may resume.** |
+| ⛔ **Correction owed to counsel — external TestFlight** | ⬜ **NOT SENT — do this before relying further on §4.17.** The memo states no third party has received any build; ASC shows an external public-link beta group (`mb`) open 31 Jul – 1 Sep 2026 carrying builds 61/48/47. Send as a factual correction, stating plainly that historical tester membership is not visible at our API key's scope so we cannot assert nobody joined. See §5 and TRACKER GF-18. |
 | Cryptographic Inventory rev. 2, 31 Aug 2026 | ✅ updated in `compliance/` (argon2id §2–§3, AEAD correction §5, change record §6), exported to PDF and archived as `GHOSTFACE_Cryptographic_Inventory_rev2_2026-08-31.pdf`. ⬜ **Send to counsel** — Sarah offered to review it and issue "a short addendum recording our consideration of these points, so that the advice package and supporting documents remain fully aligned". Worth taking: it closes the loop in the file counsel holds, not just ours. |
 | BIS/ENC reports + evidence of submission | none yet — see §3 |
 | Release records (versions, build numbers, crypto feature sets) | §4 of this file |

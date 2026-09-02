@@ -4,7 +4,13 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-01 (Claude Code — **ASC submission audit: the 90592 story
+Last updated: 2026-09-01 (Claude Code — **COUNSEL'S REVISED MEMO ARRIVED and is
+now the operative opinion**; read the section directly below it. Both open crypto
+items are closed *inside the opinion body*, the classification is unchanged, and
+counsel has given an explicit instruction confirming `ITSAppUsesNonExemptEncryption`
+must be `true`. ⛔ **One thing goes back to Sarah: the memo's §4.17 states no third
+party has ever received a build, and ASC shows an external public-link TestFlight
+group open 31 Jul – 1 Sep.** Also this session: **ASC submission audit: the 90592 story
 was under-recorded and two figures in this file were wrong.** Read the audit
 section immediately below first — build 75 has EIGHT failed submissions, not
 three, the failure mode CHANGED mid-morning on 31 Aug, ASC holds 66 accepted
@@ -19,6 +25,99 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 2 Sep 2026 — COUNSEL'S REVISED MEMO (Version 2) — the operative opinion
+
+📄 **Archived** to `~/Documents/Ghostface-Legal/1056841-export-control/2026-09-02_Counsel_Memo_REVISED_v2.pdf`
+(SHA-256 `1a282e8d24b858e6822e996dc69ccfe064a3be96c9f00115ed91898ebb38bce9`).
+MinterEllisonRuddWatts, matter 1056841, Salmond / Vaughan-Jones, 2 September 2026.
+**Cite this version, not the 31 August one**, which it supersedes.
+
+### Classification unchanged, and both open items are now closed in the opinion body
+
+**ECCN 5D992.c**, self-classify under §740.17(b)(1), **no CCATS**, **no MFAT
+permit**, **distribution may resume** (§2.1, §6.1, §7.2).
+
+- ✅ **argon2id — §4.12–4.14.** "Published and widely used… standardised in
+  RFC 9106", applied conventionally, "performs no encryption". **"We do not
+  consider the inclusion of Argon2id to affect the classification conclusions."**
+  Now also listed in the memo's own algorithm table at §4.3(h). Stronger than
+  the 31 Aug email, which it replaces.
+- ✅ **AEAD associated-data correction — §4.15–4.17.** "A routine implementation
+  correction rather than a material change… we do not consider this to require
+  the classification analysis to be revisited." **§4.17 records the timing
+  correctly by itself** — committed 19 Aug, present in the 29–30 Aug builds,
+  "already in effect before the matter was raised with us" — so the timing
+  disclosure this file has been carrying as an open obligation is **discharged**.
+- ✅ **kdfRkPQ — §4.10–4.11.** Standard HKDF-SHA256 over X25519 and ML-KEM-768
+  secrets; "does not, in and of itself, require separate classification by BIS."
+
+### It settles the flag argument, with counsel's own words
+
+**§7.8:** Ghostface "should ensure that the App Store export-compliance
+questionnaire responses and the `ITSAppUsesNonExemptEncryption` build setting
+**accurately reflect that the Application uses encryption**, while noting that an
+applicable export-control exemption is relied upon."
+
+**That is now an explicit instruction, not an inference.** Build 75's `true` is
+correct and `lib/exportCompliance.test.ts` has a directly citable authority.
+
+### Counsel independently reached our 90592 diagnosis
+
+**§7.7(a):** the July upload failures "appear to have arisen from an apparent
+mismatch between the Application's build configuration and the export compliance
+documentation previously recorded in Apple's systems, **rather than from any
+substantive assessment by Apple** regarding the product's export classification."
+
+**§7.6(a)** records the two June declarations as **"both 'Upload Failed', June 18
+and 19, 2026"** — matching the ASC UI screenshot and the API read exactly.
+**§2.1(c)(ii)** instructs Ghostface to "review and update any App Store
+export-compliance declarations to reflect this opinion's conclusions" — **usable
+in the Apple Developer Support request** as a counsel-directed reason to clear
+them.
+
+### ⛔ One correction owed to counsel, and it is material
+
+**§4.17 states as fact:** "Distribution of those builds has been limited to
+internal TestFlight testing on the director's own Apple IDs, and **no third party
+has received any build**." §7.6(f) and §7.7(b) repeat it for build 63.
+
+**ASC does not support that in full.** Beta group **`mb` is
+`isInternalGroup: false` with a public join link enabled from 31 Jul 2026 until
+it was disabled on 1 Sep 2026**, carrying builds **61, 48, 47**. A public
+TestFlight link is by definition available to third parties.
+
+- For **build 63** specifically §7.6(f) looks accurate — it was on the internal
+  `GF` group, not on `mb`.
+- For **builds 47, 48, 61** an open external channel existed for ~32 days.
+- ⚠️ **Whether anyone joined is UNKNOWN.** Zero testers at closure, but a removed
+  tester would not appear in that count and app-level `betaTesters` returns 403
+  at this key's scope. **"Zero now" is not "nobody ever" — do not upgrade it.**
+
+**Why it matters:** §3.1(b) conditions the whole opinion on Ghostface's
+description being "accurate and complete", and §7.4(f) requires retaining
+TestFlight declaration records. **Send it as a factual correction, not a
+conclusion.** It may change nothing — Note 3 mass-market treatment does not turn
+on tester counts, and §4.7(a)/(d) reason from *public availability*, which a
+public link only reinforces — but that is Sarah's call, and better raised now.
+
+### Actions this unblocks
+
+- **BIS annual report — concrete at last (§7.3(b)):** to `crypt-supp8@bis.doc.gov`
+  **and** `enc@nsa.gov`, under §740.17(b)(1) and Supplement No. 8 to Part 742.
+  Must state product name, model number, ECCN, encryption authorisation type and
+  a brief description of the encryption functionality. **Received by 1 February**
+  each year, covering the preceding calendar year. Still not started.
+- **Records to retain — §7.4(a)–(f)**, now an explicit checklist including "(f)
+  copies of any App Store, TestFlight or Google Play export-compliance
+  declarations or submissions made in reliance on this classification."
+- **Qualifications that travel with the conclusion:** §3.1(a) MinterEllisonRuddWatts
+  is not admitted in US law — a definitive US opinion needs US counsel, which they
+  did not consider necessary here; §3.1(b) they did not verify the technical
+  materials, including "the completeness of the inventory"; §3.1(c) the position
+  is as at its date and regimes change.
 
 ---
 
