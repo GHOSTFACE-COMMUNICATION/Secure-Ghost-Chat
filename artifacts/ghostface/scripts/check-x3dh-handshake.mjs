@@ -25,8 +25,18 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { register } from "node:module";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+
+// lib/doubleRatchet.ts imports "@/lib/csprng" (added 19 Aug by 3a6d4d8, the
+// audit #5 CSPRNG consolidation), and csprng.ts in turn imports react-native.
+// Node's own resolver understands neither the "@/" tsconfig alias nor a
+// react-native package that only parses under Metro, so the transpiled module
+// below failed to import from that commit onward — and because this repo has
+// no CI, nothing reported it. Reuse the same loader run-tests.mjs registers
+// rather than inventing a second resolution scheme.
+register("./rn-test-loader.mjs", import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ghostDir = path.resolve(__dirname, "..");
@@ -85,18 +95,24 @@ function freshClassicalPair(DR) {
   const ik = DR.generateOneTimePreKeys(1)[0];
   const spk = DR.generateOneTimePreKeys(1)[0];
   const opk = DR.generateOneTimePreKeys(1)[0];
+  // PQ material is mandatory since audit #3's REQUIRE_PQ — a bundle without it
+  // is refused with PqDowngradeError, which is the correct behaviour and which
+  // this fixture predated.
+  const kem = DR.generateKemKeyPair();
   const bundle = {
     ikPublicKey: ik.pub,
     spkPublicKey: spk.pub,
     opkPublicKey: opk.pub,
     spkSignature: DR.signSPK(spk.pub, ikSign.priv),
     ikSignPublicKey: ikSign.pub,
+    pqkemPublicKey: kem.pub,
+    pqkemSignature: DR.signKemPreKey(kem.pub, ikSign.priv),
   };
   const aIK = DR.generateOneTimePreKeys(1)[0];
   const { session: aSess, x3dhHeader: hdr } =
     DR.initSessionAliceWithHeader(bundle, aIK.priv, aIK.pub);
   const bSess = DR.initSessionBobFromHeader(
-    hdr, ik.priv, ik.pub, spk.priv, spk.pub, opk.priv,
+    hdr, ik.priv, ik.pub, spk.priv, spk.pub, opk.priv, kem.priv,
   );
   return { alice: aSess.alice, bob: bSess.alice };
 }
@@ -112,6 +128,11 @@ async function main() {
     const bobSPK = DR.generateOneTimePreKeys(1)[0];
     const bobOPK = DR.generateOneTimePreKeys(1)[0];
     const spkSignature = DR.signSPK(bobSPK.pub, bobIkSign.priv);
+    // ML-KEM pre-key. Required since audit #3 (REQUIRE_PQ): a bundle without
+    // PQ material is refused outright, so a fixture lacking it cannot exercise
+    // the handshake at all.
+    const bobKem = DR.generateKemKeyPair();
+    const pqkemSignature = DR.signKemPreKey(bobKem.pub, bobIkSign.priv);
 
     const bundle = {
       ikPublicKey: bobIK.pub,
@@ -119,10 +140,16 @@ async function main() {
       opkPublicKey: bobOPK.pub,
       spkSignature,
       ikSignPublicKey: bobIkSign.pub,
+      pqkemPublicKey: bobKem.pub,
+      pqkemSignature,
     };
 
     // Bob's private keys — these MUST never appear in anything Alice sees.
-    const bobPrivateKeys = [bobIK.priv, bobSPK.priv, bobOPK.priv, bobIkSign.priv];
+    // The KEM private key is included: it is as disclosive as the classical
+    // ones, and until now sat outside this guard's scope entirely.
+    const bobPrivateKeys = [
+      bobIK.priv, bobSPK.priv, bobOPK.priv, bobIkSign.priv, bobKem.priv,
+    ];
 
     const bundleStrings = collectStrings(bundle);
     assert(
@@ -156,6 +183,7 @@ async function main() {
       bobSPK.priv,
       bobSPK.pub,
       bobOPK.priv,
+      bobKem.priv,
     );
 
     // ── 4. Bidirectional ratchet over several rounds ─────────────────────────
@@ -200,9 +228,36 @@ async function main() {
     }
     assert(eveBlocked, "a third party with a different session cannot decrypt Alice's message");
 
-    // ── 6. Classical fallback: bundle with NO pqkem → sessions are classical ──
-    assert(aliceSession.alice.pq === false, "classical bundle → Alice session pq=false (fallback)");
-    assert(bobSession.alice.pq === false, "classical bundle → Bob session pq=false (fallback)");
+    // ── 6. PQ downgrade is REFUSED, not silently downgraded (audit #3) ───────
+    //
+    // This section previously asserted the opposite — that a bundle with no
+    // ML-KEM material produced a classical session with pq=false. That was a
+    // real behaviour once, and audit #3 deliberately removed it: REQUIRE_PQ is
+    // now a hard `true` constant, so absence of PQ material is rejected before
+    // any key is derived. The old assertions therefore described a path that
+    // can no longer be reached, and asserting a dead path proves nothing.
+    //
+    // What matters now is the refusal itself, so test that instead. A silent
+    // classical downgrade is precisely the attack REQUIRE_PQ exists to stop.
+    assert(aliceSession.alice.pq === true, "PQ-bearing bundle → Alice session is hybrid (pq=true)");
+    assert(bobSession.alice.pq === true, "PQ-bearing bundle → Bob session is hybrid (pq=true)");
+
+    const classicalOnlyBundle = {
+      ikPublicKey: bobIK.pub,
+      spkPublicKey: bobSPK.pub,
+      opkPublicKey: bobOPK.pub,
+      spkSignature,
+      ikSignPublicKey: bobIkSign.pub,
+      // deliberately no pqkemPublicKey / pqkemSignature
+    };
+    let downgradeRefused = false;
+    try {
+      const stripped = DR.generateOneTimePreKeys(1)[0];
+      DR.initSessionAliceWithHeader(classicalOnlyBundle, stripped.priv, stripped.pub);
+    } catch (e) {
+      downgradeRefused = e?.name === "PqDowngradeError" || /post-quantum/i.test(String(e?.message));
+    }
+    assert(downgradeRefused, "bundle stripped of ML-KEM material is REFUSED (no silent classical downgrade)");
 
     // ── 7. Hybrid PQXDH handshake (bundle carries signed ML-KEM prekey) ───────
     const pqBobIkSign = DR.generateSigningKeyPair();
@@ -494,12 +549,17 @@ async function main() {
       const ik = DR.generateOneTimePreKeys(1)[0];
       const spk = DR.generateOneTimePreKeys(1)[0];
       const opk = DR.generateOneTimePreKeys(1)[0];
+      const kem = DR.generateKemKeyPair();
       const bobBundle = {
         ikPublicKey: ik.pub,
         spkPublicKey: spk.pub,
         opkPublicKey: opk.pub,
         spkSignature: DR.signSPK(spk.pub, ikSign.priv),
         ikSignPublicKey: ikSign.pub,
+        // PQ material is incidental to this anti-spoof check, but REQUIRE_PQ
+        // refuses the handshake without it.
+        pqkemPublicKey: kem.pub,
+        pqkemSignature: DR.signKemPreKey(kem.pub, ikSign.priv),
       };
 
       // ALICE's registered identity (what the server would return for "ALICE").
