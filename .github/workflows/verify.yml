@@ -1,0 +1,134 @@
+# GHOSTFACE — continuous verification
+#
+# WHY THIS EXISTS
+#
+# Until 2 Sep 2026 this repository had no CI at all. Every guard in it ran only
+# when a human typed the command, which meant they were advisory rather than
+# enforced. The cost was not hypothetical: `check:handshake` — the proof that
+# the encryption is genuinely end-to-end with no simulated key path — was
+# broken by 3a6d4d8 on 19 Aug 2026 and stayed broken for 13 days across five
+# separate crypto changes (audit #6, #7, #8, #11, #12). Nothing reported it
+# because nothing ran it.
+#
+# A product whose entire claim is its cryptography cannot verify that
+# cryptography by hand and by memory. That is what this file is for.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes an in-flight run redundant.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: tests, typecheck and security guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm before Node: setup-node's pnpm cache needs the store to exist.
+      # Version comes from the root package.json `packageManager` field
+      # (pnpm@11.5.0) so it cannot drift from what developers run locally.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          # Root package.json pins engines.node to 22.x. Note scripts/run-tests.mjs
+          # needs >= 22.6 for --experimental-strip-types, and falls back to tsx
+          # below that — 22.x satisfies the fast path.
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Correctness ──────────────────────────────────────────────────────
+      # Workspace-wide: tsc --build for the shared libs, then each package's
+      # own typecheck script.
+      - name: Typecheck (workspace)
+        run: pnpm typecheck
+
+      - name: Unit tests — mobile app
+        run: pnpm --filter ./artifacts/ghostface test
+
+      - name: Unit tests — api-server
+        run: pnpm --filter ./artifacts/api-server test
+
+      # ── Security guards ──────────────────────────────────────────────────
+      # These are the reason this workflow exists. They are separate steps, not
+      # folded into the test run, so a failure names itself in the job summary
+      # rather than being one line inside a 140-test scroll.
+
+      # Proves a real two-party X3DH + Double Ratchet handshake: Bob publishes a
+      # public-only bundle, Alice derives from it, and no private key material
+      # appears in any wire artefact. Also asserts PQ downgrade is refused
+      # rather than silently falling back to classical (audit #3).
+      - name: Guard — X3DH / Double Ratchet handshake is real
+        run: pnpm --filter ./artifacts/ghostface check:handshake
+
+      # Panic wipe must stay silent and must not gate on low-bandwidth mode.
+      - name: Guard — panic-wipe silence + departure contract
+        run: pnpm --filter ./artifacts/ghostface check:silence
+
+      # ITSAppUsesNonExemptEncryption must be `true`. This runs inside the app
+      # test suite above (lib/exportCompliance.test.ts) — called out here only
+      # so that anyone reading this file knows the export-compliance flag is
+      # covered. Authority: MinterEllisonRuddWatts memo, matter 1056841,
+      # 2 Sep 2026, §7.8. See COMPLIANCE.md before changing that flag.
+
+  # ── Style ──────────────────────────────────────────────────────────────────
+  # SEPARATE and NON-BLOCKING, deliberately and temporarily.
+  #
+  # Lint does not pass today. There are exactly ten known issues, all
+  # pre-existing and all in product source rather than in this workflow:
+  #
+  #   artifacts/ghostface (9 errors)
+  #     app/(tabs)/index.tsx:119   unused  hasWalletPin
+  #     app/(tabs)/wallet.tsx:54   unused  hasWalletPin
+  #     app/lock.tsx:23,37,218,245 unused  BlurView, boxShadow, ScratchSign, SwipeEnter
+  #     context/AppContext.tsx:1653,2313,2325   no-empty
+  #
+  #   artifacts/api-server (1 warning, under --max-warnings=0)
+  #     src/lib/inviteRepository.ts:3:59  no-explicit-any
+  #
+  # continue-on-error is here so the guards above start enforcing TODAY rather
+  # than waiting on a cleanup. It is NOT an amnesty: a red-on-arrival CI gets
+  # ignored, and a permanently-ignored lint job is worse than none.
+  #
+  # >>> DELETE BOTH continue-on-error LINES once those ten are fixed. <<<
+  # Tracked on the board under Engineering — open.
+  lint:
+    name: lint (non-blocking — see comment, 10 known issues)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint — mobile app
+        continue-on-error: true
+        run: pnpm --filter ./artifacts/ghostface lint
+
+      - name: Lint — api-server
+        continue-on-error: true
+        run: pnpm --filter ./artifacts/api-server lint

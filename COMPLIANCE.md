@@ -326,16 +326,19 @@ Consequences currently in force:
   update any App Store export-compliance declarations to reflect this opinion's
   conclusions" — **usable in the Apple Developer Support request** as a
   counsel-directed reason to clear them.
-- **Guarded by a test — but NOT by CI, because there is no CI.**
+- ✅ **Guarded by a test, and as of 2 Sep 2026 that test runs in CI.**
   `artifacts/ghostface/lib/exportCompliance.test.ts` fails the test suite if
-  `ITSAppUsesNonExemptEncryption` is not `true`, citing this file.
-  ⚠️ **Correction of record, 1 Sep 2026: this file previously said "Guarded in
-  CI". That is false — the repo has no `.github/workflows` directory and
-  nothing runs the suite automatically.** The guard fires only when a human
-  types `pnpm test`. The same gap left `check:handshake` — the proof that the
-  E2EE is genuinely end-to-end — silently broken for 13 days across five crypto
-  changes. **Until a CI workflow exists, every guard named in this file is
-  advisory.** Logged under TRACKER Engineering — open.
+  `ITSAppUsesNonExemptEncryption` is not `true`, citing this file, and the suite
+  now runs on every push and pull request via `.github/workflows/verify.yml`
+  alongside `check:handshake` and `check:silence`.
+  ⚠️ **Correction of record: between 30 Aug and 2 Sep this file claimed the flag
+  was "guarded in CI" when no CI existed** — the repo had no `.github/workflows`
+  directory at all, so the guard fired only when a human typed `pnpm test`. That
+  same gap left `check:handshake`, the proof that the E2EE is genuinely
+  end-to-end, silently broken for 13 days across five crypto changes. The claim
+  is true now; it was not true when it was first written. **Note the flag guard
+  rides inside the app test suite rather than being its own CI step, and lint is
+  currently non-blocking** — see TRACKER Engineering — open.
   The flag's value changed **ten times** between 10 Jun and 30 Aug 2026 (four
   of them since 6 Aug) because it lived in config with no rationale attached;
   it cannot silently flip again. Verified from git history 30 Aug 2026:
