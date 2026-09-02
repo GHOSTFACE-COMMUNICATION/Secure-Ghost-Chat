@@ -22,6 +22,15 @@ software under Note 3 to Category 5, Part 2 of the Commerce Control List.
   cryptographic software do not apply. **No MFAT permit is presently required.**
 - **Distribution:** App Store and Google Play distribution may proceed.
 
+> **The authoritative classification record is the pair:** the **revised memo of
+> 2 September 2026 (Version 2, matter 1056841)** together with the
+> **Cryptographic Inventory revision 2 (31 August 2026)**. The memo governs the
+> classification; the Inventory is the description of cryptographic
+> functionality the memo is expressly conditioned on (§3.1(b)). Neither stands
+> alone — an opinion whose underlying description has drifted is not an opinion
+> you can rely on. Earlier versions of both are superseded and retained only for
+> the chain of reasoning.
+
 ### Authority
 
 | | |
@@ -121,7 +130,18 @@ Retain a copy of the report **and evidence of submission** (memo §7.4(d)).
 ## 4. Per-build release record
 
 One row per build that is uploaded or distributed. "Crypto diff" is measured
-against §2.
+against §2. **This table is the record memo §7.4(e) requires** — "release
+records identifying the versions, cryptographic feature sets and build numbers
+covered by this opinion".
+
+⚠️ **Coverage gap, logged 2 Sep 2026: this table has three rows and ASC holds 66
+accepted builds** (1.0.0 ×18, 1.0.1 ×18, 1.0.2 ×30). That is defensible for
+builds never distributed, but **builds 47, 48 and 61 were on the external
+public-link TestFlight group `mb` between 31 Jul and 1 Sep 2026 and have no row
+here** — see §5 and TRACKER GF-18. §7.4(e) asks for the builds *covered by this
+opinion*, and anything that reached an external channel plainly qualifies.
+**Add rows for 47/48/61 as part of the correction to counsel**, and going
+forward add a row at upload time rather than reconstructing later.
 
 | Version | Build | Date | `ITSAppUsesNonExemptEncryption` (compiled) | Crypto diff vs reviewed materials | Distribution |
 |---|---|---|---|---|---|
@@ -344,7 +364,7 @@ cloud durability under the company's own account.
 
 | Record | Status |
 |---|---|
-| This opinion (memo, 31 Aug 2026) | ⬜ **still in Gmail — export the message as PDF (Print → Save as PDF) into the archive folder**, so the transmittal is preserved with the advice |
+| **This opinion — memo §7.4(a)** | ✅ **GOVERNING VERSION: the revised memo of 2 Sep 2026**, archived as `2026-09-02_Counsel_Memo_REVISED_v2.pdf` (SHA-256 `1a282e8d…bce9`). The 31 Aug version is superseded and retained as `GHOSTFACE_Classification_Memo.pdf`. ⬜ **Still outstanding: export the Gmail transmittal messages as PDF into the archive folder**, so the covering emails are preserved alongside both versions of the advice. |
 | Cryptographic Inventory (Annex 1) | ✅ archived |
 | Technical Memorandum (Annex 2) | ✅ archived |
 | ASC Declaration Exhibits (Annex 3) | ✅ archived |
