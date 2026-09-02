@@ -105,10 +105,27 @@ const GO_BRIDGE_BUILD_TOOL_PATH = "/Applications/Xcode.app/Contents/Developer/us
 // DerivedData folders exist for this project (e.g. from prior `expo
 // prebuild --clean` regenerations, which change Xcode's DerivedData hash).
 const GO_BRIDGE_SHELL_SCRIPT = `set -e
-# Locate the SPM checkout. The standard per-project DerivedData path covers
-# local builds; EAS sets a custom derived-data location, so fall back to
-# searching under DERIVED_DATA_DIR/BUILD_DIR when the usual path misses.
+# Locate WireGuardKitGo.
+#
+# The package is now VENDORED in this repository (native/wireguard-apple), so
+# the FIRST place to look is the source tree itself. SPM does not create a
+# checkout for a local package reference — it uses the package in place — so
+# the SourcePackages/checkouts/ paths below only ever match the old REMOTE
+# reference. Looking only there is exactly why the first build after vendoring
+# failed with "could not locate the wireguard-apple SPM checkout".
+#
+# SRCROOT is the generated ios/ directory; native/ is its sibling.
+BRIDGE_DIR=""
+for LOCAL in "\${SRCROOT:-}/../native/wireguard-apple/Sources/WireGuardKitGo" \
+             "\${PROJECT_DIR:-}/../native/wireguard-apple/Sources/WireGuardKitGo"; do
+  if [ -d "$LOCAL" ]; then BRIDGE_DIR="$LOCAL"; break; fi
+done
+# Legacy fallbacks, kept so a tree still carrying the old remote reference
+# (e.g. an ios/ generated before vendoring) keeps building rather than failing
+# confusingly. Safe to delete once no such tree exists.
+if [ -z "$BRIDGE_DIR" ]; then
 BRIDGE_DIR=$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/"$PROJECT_NAME"-*/SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo 2>/dev/null | head -1)
+fi
 if [ -z "$BRIDGE_DIR" ]; then
   for ROOT in "\${DERIVED_DATA_DIR:-}" "\${BUILD_DIR:-}" "\${SRCROOT:-}/.."; do
     [ -n "$ROOT" ] || continue
@@ -117,7 +134,7 @@ if [ -z "$BRIDGE_DIR" ]; then
   done
 fi
 if [ -z "$BRIDGE_DIR" ]; then
-  echo "error: [link-wireguard-kit] could not locate the wireguard-apple SPM checkout for project $PROJECT_NAME -- has the package been resolved yet (xcodebuild -resolvePackageDependencies)?" >&2
+  echo "error: [link-wireguard-kit] could not locate WireGuardKitGo. Expected the VENDORED package at \${SRCROOT}/../native/wireguard-apple/Sources/WireGuardKitGo — is native/wireguard-apple present and fully checked out? (It was once fetched remotely; see native/wireguard-apple/VENDORED.md.)" >&2
   exit 1
 fi
 
