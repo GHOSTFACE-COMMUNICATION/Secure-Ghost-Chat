@@ -17,6 +17,23 @@ name: verify
 on:
   push:
     branches: [main]
+    # Docs-only pushes do not run CI. This repo is a solo working tree that is
+    # pushed to directly and often — of the eleven commits on 1–2 Sep 2026,
+    # seven touched only STATUS.md / TRACKER.md / COMPLIANCE.md. Spinning up a
+    # full Expo monorepo install and ~240 tests to confirm that a markdown file
+    # changed is how a CI job earns a reputation for wasting time, and a job
+    # with that reputation gets muted — which is the failure this workflow
+    # exists to prevent.
+    #
+    # NOTE this is `paths-ignore` (a denylist), NOT `paths` (an allowlist), and
+    # that choice is deliberate: an allowlist silently stops covering any new
+    # directory someone adds, failing open on exactly the code that has never
+    # been verified. A denylist fails closed — anything not named here runs.
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  # Pull requests always run everything, unfiltered. A PR is a deliberate ask
+  # for review and the extra minutes are worth it.
   pull_request:
   workflow_dispatch:
 
