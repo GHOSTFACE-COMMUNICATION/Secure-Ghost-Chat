@@ -15,8 +15,17 @@ work itself. Don't wait to be asked.
 ## Repo layout
 
 - **Canonical repo**: `~/Projects/ghostface-clean` (this directory). It is the
-  one source of truth — the several similarly-named GitHub repos under
-  `ghostzeronz-coder` are empty or abandoned.
+  one source of truth.
+- **The GitHub owner MOVED to an organisation on 2 Sep 2026.** Do not hardcode
+  it here. **`git remote -v` is the authority** — read it rather than trusting
+  any name written in a doc. (This file previously named `ghostzeronz-coder` as
+  the GitHub *org*; it is a **user account**, verified via the API as
+  `type: User`, and `Secure-Ghost-Chat` no longer exists under it — the path
+  404s with no redirect. A duplicated fact that rots is the same trap as
+  `artifacts/api-server/CLAUDE.md` still claiming Railway watches
+  `feat/push-notifications` when it watches `main`.)
+- The several similarly-named repos that were under the old `ghostzeronz-coder`
+  account are empty or abandoned.
 - **The real Expo app lives in `artifacts/ghostface/`**, not the repo root.
   Run `expo`/`pnpm` app commands from there. The root is a pnpm workspace;
   `pnpm-workspace.yaml` lists packages **explicitly**, not by glob — add new
