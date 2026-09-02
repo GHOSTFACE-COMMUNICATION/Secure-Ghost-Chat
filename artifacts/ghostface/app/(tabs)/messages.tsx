@@ -71,6 +71,8 @@ function addConvErrorMessage(alias: string, error?: string): string {
       return `${alias}'s encryption keys are missing required post-quantum material. GHOSTFACE refuses to start a classical-only session — ask them to reopen GHOSTFACE to refresh their keys, then try again.`;
     case "x3dh_failed":
       return "The secure key exchange failed. Please try again.";
+    case "bad_identity_key":
+      return `${alias}'s identity key could not be read, so it cannot be pinned. GHOSTFACE refuses to open a conversation it would be unable to protect against a later key substitution. Ask them to reopen GHOSTFACE to refresh their keys, then try again.`;
     default:
       return "The encrypted channel could not be established. Please try again.";
   }

@@ -261,6 +261,7 @@ export default function ChatScreen() {
     setConversationBgImage,
     markMessagesViewed,
     verifyConversation,
+    acceptIdentityKeyChange,
     deleteConversation,
     markConversationRead,
     lowBandwidthActive,
@@ -1621,8 +1622,73 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {/* Input bar — replaced with a sealed banner when the peer has self-destructed */}
-      {conv.destroyedAt ? (
+      {/* Audit #12 — identity key changed: the composer is replaced with a
+          block, not a warning. Accepting is deliberate and destructive-styled
+          because the honest reading of an unexpected key change is an attempted
+          interception, and the safe default is to assume that until the user
+          has confirmed otherwise out of band. */}
+      {!conv.destroyedAt && conv.identityKeyChanged ? (
+        <View
+          style={{
+            paddingHorizontal: 18,
+            paddingTop: 14,
+            paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 14),
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            backgroundColor: `${colors.destructive}10`,
+            alignItems: "center",
+            gap: 8,
+          }}
+          testID="conv-identity-changed-banner"
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Ionicons name="warning-outline" size={14} color={colors.destructive} />
+            <Text style={{ ...type.labelStrong, color: colors.destructive }}>
+              IDENTITY KEY CHANGED
+            </Text>
+          </View>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11, textAlign: "center" }}>
+            {conv.alias}&apos;s encryption identity is not the one you first connected to.
+            This happens if they reinstalled GHOSTFACE or changed device — and it is also
+            what an attempted interception looks like. Messages are blocked until you decide.
+          </Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11, textAlign: "center" }}>
+            Contact them another way and confirm they re-installed before accepting.
+          </Text>
+          <Pressable
+            testID="conv-identity-accept-btn"
+            accessibilityLabel="Accept changed identity key"
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              const doAccept = () => acceptIdentityKeyChange(conv.id);
+              if (Platform.OS !== "web") {
+                Alert.alert(
+                  "Accept New Identity Key?",
+                  `Only do this if ${conv.alias} has confirmed — through some other channel — that they reinstalled GHOSTFACE or changed device.\n\nAccepting trusts the new key and removes their verified status. You will need to compare a new safety number with them.`,
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Accept", style: "destructive", onPress: doAccept },
+                  ]
+                );
+              } else {
+                doAccept();
+              }
+            }}
+            style={{
+              marginTop: 4,
+              paddingVertical: 8,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: colors.destructive,
+            }}
+          >
+            <Text style={{ ...type.labelStrong, color: colors.destructive }}>
+              ACCEPT NEW KEY
+            </Text>
+          </Pressable>
+        </View>
+      ) : conv.destroyedAt ? (
         <View
           style={{
             paddingHorizontal: 18,
@@ -2123,10 +2189,20 @@ export default function ChatScreen() {
                     ))}
                   </View>
                 </View>
-                {/* Verify / Unverify */}
+                {/* Verify / Unverify — audit #12: unavailable while an
+                    identity-key change is unresolved. Marking a conversation
+                    verified while its key is disputed would paint a trusted
+                    badge onto exactly the state the block exists to flag. */}
                 <Pressable
-                  style={({ pressed }) => [styles.verifyBtn, pressed && { opacity: 0.7 }]}
+                  disabled={!!conv.identityKeyChanged}
+                  accessibilityState={{ disabled: !!conv.identityKeyChanged }}
+                  style={({ pressed }) => [
+                    styles.verifyBtn,
+                    pressed && { opacity: 0.7 },
+                    !!conv.identityKeyChanged && { opacity: 0.4 },
+                  ]}
                   onPress={() => {
+                    if (conv.identityKeyChanged) return;
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     verifyConversation(conv.id);
                   }}

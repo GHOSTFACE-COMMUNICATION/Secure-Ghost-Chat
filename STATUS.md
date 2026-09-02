@@ -441,8 +441,17 @@ was described to counsel as "pending"). No France/ANSSI question has been raised
 The **BIS/ENC report due 1 Feb 2027** remains open and is not closed by GF-01.
 
 🔵 **Crypto review complete — 14 findings**, fix order #7 → #11 → #12 → #13 → #9 →
-#10 → #6 then the dead-code batch. **#7 and #11 are done** (`137b8b4`, `ae81b63`);
-#12 is next. All implementation corrections, none touching algorithms or the
+#10 → #6 then the dead-code batch. **#7, #11 and #12 are done** (`137b8b4`,
+`ae81b63`, and #12 on 1 Sep); **#13 is next.** #12 added identity-key pinning
+(TOFU + hard block on change) in new `lib/identityPin.ts`: the receive path's
+alias→key binding asked the server for both halves of its own comparison, so a
+server substituting bundle *and* `/users/exists` together was never caught, and
+`safetyNumber` was overwritten on every rebuild — silently repainting the only
+evidence of substitution. Recovery is an explicit user accept, because WIPE
+DEVICE + re-onboard is supported and a block with no exit would teach users to
+delete-and-recreate, discarding the pin. Suite 135 → 142, typecheck clean, lint
+delta zero. **Earns one Cryptographic Inventory line when the inventory is next
+revised; no algorithm change, so no counsel gate.** All implementation corrections, none touching algorithms or the
 classification. See TRACKER GF-16.
 
 ⏳ **Outstanding and only yours:** the **cellular call** — 12 Pro → 14, both off

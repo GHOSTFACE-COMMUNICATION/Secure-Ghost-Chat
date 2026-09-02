@@ -1,4 +1,5 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
+import { checkIdentityPin } from "@/lib/identityPin";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
 import {
@@ -555,6 +556,37 @@ export interface Conversation {
    * disables the composer, and renders a system message in chat.
    */
   destroyedAt?: number;
+  /**
+   * Audit #12 — trust-on-first-use pin of the contact's long-term X25519
+   * identity key (X3DH `ikA`), lowercase hex. Recorded the first time we
+   * establish a session with them and compared on every later handshake.
+   *
+   * The receive path's existing alias->key binding asks the SERVER what key
+   * an alias has, then checks the wire header against that answer; both halves
+   * come from the server, so a server that substitutes both is never caught.
+   * This pin is the anchor that check lacks: it is a value the server has
+   * never had access to. Lives inside the encrypted conversation blob and is
+   * never serialized onto the wire.
+   */
+  pinnedIdentityKey?: string;
+  /** When `pinnedIdentityKey` was first recorded. Display/forensics only. */
+  pinnedAt?: number;
+  /**
+   * Audit #12 — set when a handshake presented an identity key that does not
+   * match `pinnedIdentityKey`. Its presence LOCKS the conversation: sends are
+   * refused and inbound sessions are not adopted, until the user explicitly
+   * accepts the new key (`acceptIdentityKeyChange`) or deletes the chat.
+   *
+   * Neither `pinnedIdentityKey` nor `safetyNumber` may be overwritten while
+   * this is set — the stored safety number is the evidence of what the user
+   * previously verified, and repainting it is precisely the failure this
+   * finding exists to close.
+   */
+  identityKeyChanged?: {
+    /** The key that was offered and rejected, lowercase hex. */
+    presentedKey: string;
+    detectedAt: number;
+  };
 }
 
 // Pure expiry predicate lives in lib/expiry.ts so it can be unit-tested
@@ -776,6 +808,10 @@ interface AppContextType extends AppState {
   setConversationBgImage: (conversationId: string, uri: string | undefined) => void;
   markMessagesViewed: (conversationId: string, messageIds: string[]) => void;
   verifyConversation: (conversationId: string) => void;
+  /** Audit #12 — accept a changed peer identity key, re-pin, and drop
+   *  any prior verification. The only way out of an identity-key lock
+   *  short of deleting the conversation. */
+  acceptIdentityKeyChange: (conversationId: string) => void;
   panicWipe: () => Promise<void>;
   connectWallet: (address: string) => Promise<{ error?: string }>;
   disconnectWallet: () => Promise<void>;
@@ -2802,8 +2838,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const verifyConversation = useCallback((conversationId: string) => {
     setState((prev) => {
       const updated = prev.conversations.map((c) =>
-        c.id === conversationId ? { ...c, verified: !c.verified } : c
+        // Audit #12: refuse to mark verified while an identity-key change is
+        // unresolved. The chat UI already disables the control; this is the
+        // enforcement, so the invariant does not depend on a disabled prop.
+        // Un-verifying stays allowed — removing trust is never the unsafe
+        // direction.
+        c.id === conversationId && !(c.identityKeyChanged && !c.verified)
+          ? { ...c, verified: !c.verified }
+          : c
       );
+      persistConversations(updated);
+      return { ...prev, conversations: updated };
+    });
+  }, [persistConversations]);
+
+  /**
+   * Audit #12 — the deliberate, user-driven recovery path from a blocked
+   * identity-key change.
+   *
+   * A legitimate key change is a real event: WIPE DEVICE and re-onboard is
+   * supported and aliases are reusable afterwards, so a block with no exit
+   * would make the first contact who reinstalls permanently unreachable and
+   * teach users to delete and recreate conversations — discarding the pin and
+   * defeating the control entirely.
+   *
+   * Accepting re-pins to the key that was presented and CLEARS `verified`: any
+   * prior out-of-band verification was performed against a key that is no
+   * longer in use, so carrying the tick over would relabel an unverified key
+   * as verified. `safetyNumber` is cleared rather than recomputed — the next
+   * handshake derives the real one, and until then the UI must say "not yet
+   * verifiable" instead of showing a number for a session that does not exist.
+   */
+  const acceptIdentityKeyChange = useCallback((conversationId: string) => {
+    setState((prev) => {
+      const updated = prev.conversations.map((c) => {
+        if (c.id !== conversationId || !c.identityKeyChanged) return c;
+        const { identityKeyChanged: _dropped, ...rest } = c;
+        return {
+          ...rest,
+          pinnedIdentityKey: c.identityKeyChanged.presentedKey,
+          pinnedAt: Date.now(),
+          verified: false,
+          safetyNumber: undefined,
+          messages: [
+            ...c.messages,
+            buildSystemMessage(
+              "New identity key accepted. This contact is no longer verified — " +
+                "compare the new safety number with them before trusting this chat again.",
+            ),
+          ],
+        };
+      });
       persistConversations(updated);
       return { ...prev, conversations: updated };
     });
@@ -2813,6 +2898,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (conversationId: string, text: string, attachment?: Attachment): { queued: boolean } => {
       const conv = latestStateRef.current.conversations.find((c) => c.id === conversationId);
       if (!conv) return { queued: false };
+      // Audit #12: the peer's identity key changed and the user has not
+      // accepted it. Refuse rather than queue — a queued message would be sent
+      // the moment the lock cleared, which is not what "blocked" means, and
+      // could deliver plaintext-equivalent content to a substituted key.
+      if (conv.identityKeyChanged) return { queued: false };
       if (!text.trim() && !attachment) return { queued: false };
 
       // Low-bandwidth refusal — defensive guard. The chat composer also
@@ -3223,6 +3313,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Audit #11 — stays undefined if it cannot be derived from real key
       // material; the UI renders "not yet verifiable" rather than substituting.
       let safetyNumber: string | undefined;
+      // Audit #12 — the peer identity key pinned for this conversation.
+      let pinnedIdentityKey: string;
 
       try {
         const [myIKPriv, myIKPub, mySpkPriv, mySpkPub] = await Promise.all([
@@ -3288,6 +3380,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } catch (snErr) {
           console.error("[safetyNumber] could not derive for", aliasUpper, snErr);
         }
+
+        // Audit #12: pin the identity key this handshake actually used. Unlike
+        // the safety number above, a pin that cannot be derived is fatal — a
+        // conversation with no pin has nothing to detect substitution against,
+        // and silently creating one would reintroduce the gap this closes.
+        try {
+          pinnedIdentityKey = checkIdentityPin(undefined, bundle.ikPublicKey).normalized;
+        } catch (pinErr) {
+          console.error("[identityPin] refusing session with unpinnable key for", aliasUpper, pinErr);
+          return { ok: false, error: "bad_identity_key" };
+        }
       } catch (e) {
         if (e instanceof PqDowngradeError) {
           console.error("[X3DH] Refusing classical-only session for", aliasUpper, e);
@@ -3306,6 +3409,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           timestamp: Date.now(),
           unread: 0,
           safetyNumber,
+          pinnedIdentityKey,
+          pinnedAt: Date.now(),
           drSession,
           isRealContact: true,
           disappearAfterSec: DEFAULT_DISAPPEAR_SEC,
@@ -4520,6 +4625,96 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // ── Audit #12: identity-key pin.
+      //
+      // The check above binds the claimed alias to the key THE SERVER SAYS the
+      // alias has. Both halves of that comparison come from the server in the
+      // same breath, so a server that substitutes the bundle and the
+      // /users/exists answer together satisfies it with the substituted key.
+      // It is self-consistent, not anchored. The pin is the anchor: a value
+      // this device recorded on first contact that the server never held.
+      const pinConv = latestStateRef.current.conversations.find(
+        (c) => c.alias === senderAlias,
+      );
+      if (pinConv) {
+        // Already locked by an earlier mismatch — stay locked. Re-running the
+        // check would compare against the untouched pin and lock again, but
+        // returning here also stops a second detection overwriting the
+        // originally-presented key recorded for the user to inspect.
+        if (pinConv.identityKeyChanged) {
+          console.warn(
+            "[identityPin] conversation is locked pending user review of a changed identity key —",
+            "dropping inbound session for", senderAlias,
+          );
+          return;
+        }
+
+        let pinCheck;
+        try {
+          pinCheck = checkIdentityPin(pinConv.pinnedIdentityKey, x3dhHeader.ikA);
+        } catch (pinErr) {
+          console.warn("[identityPin] unparseable identity key on inbound header for", senderAlias, pinErr);
+          return;
+        }
+
+        if (pinCheck.verdict === "mismatch") {
+          // HARD BLOCK. Do not adopt the session, do not touch the pin, and do
+          // not touch safetyNumber — the stored number is the record of what
+          // the user verified out of band, and overwriting it is exactly the
+          // failure this finding exists to close. Drop `verified` because the
+          // verification was performed against a key that is no longer the one
+          // being presented.
+          console.warn(
+            "[identityPin] IDENTITY KEY CHANGED for", senderAlias,
+            "— refusing session and locking conversation pending explicit user acceptance",
+          );
+          setState((prev) => {
+            const updated = prev.conversations.map((c) =>
+              c.alias === senderAlias && !c.identityKeyChanged
+                ? {
+                    ...c,
+                    verified: false,
+                    identityKeyChanged: {
+                      presentedKey: pinCheck.normalized,
+                      detectedAt: Date.now(),
+                    },
+                    messages: [
+                      ...c.messages,
+                      buildSystemMessage(
+                        "SECURITY: this contact's identity key has changed. Messages are " +
+                          "blocked until you verify a new safety number with them in person " +
+                          "or by voice. If they did not reinstall GHOSTFACE or change device, " +
+                          "do not accept.",
+                      ),
+                    ],
+                  }
+                : c,
+            );
+            persistConversations(updated);
+            return { ...prev, conversations: updated };
+          });
+          return;
+        }
+
+        if (pinCheck.verdict === "first-use") {
+          // Conversation predates this finding and carries no pin. Adopt the
+          // key we have already bound to the alias above as the pin, rather
+          // than leaving legacy conversations permanently unprotected. This is
+          // trust-on-first-use at its honest boundary: we cannot retroactively
+          // verify a key we did not record, only start anchoring from now.
+          const adopted = pinCheck.normalized;
+          setState((prev) => {
+            const updated = prev.conversations.map((c) =>
+              c.alias === senderAlias && !c.pinnedIdentityKey
+                ? { ...c, pinnedIdentityKey: adopted, pinnedAt: Date.now() }
+                : c,
+            );
+            persistConversations(updated);
+            return { ...prev, conversations: updated };
+          });
+        }
+      }
+
       // Glare: we already hold a live session with this sender (both sides re-ran
       // X3DH at once). Apply the same deterministic tiebreaker on both ends — the
       // lexicographically smaller alias's session wins — so we converge without
@@ -4545,6 +4740,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         safetyNumber = generateSafetyNumberFromKeys(myIKPub, x3dhHeader.ikA);
       } catch (e) {
         console.error("[safetyNumber] could not derive for", senderAlias, e);
+      }
+      // Audit #12: normalised form of the key this session is being built on,
+      // for pinning a conversation created below by this inbound path. Any
+      // pre-existing conversation was already checked against its pin above.
+      // Unpinnable key material is fatal here for the same reason as on the
+      // initiator side: a conversation with no pin has nothing to detect a
+      // later substitution against.
+      let inboundPinnedKey: string;
+      try {
+        inboundPinnedKey = checkIdentityPin(undefined, x3dhHeader.ikA).normalized;
+      } catch (pinErr) {
+        console.warn("[identityPin] refusing session with unpinnable key from", senderAlias, pinErr);
+        return;
       }
 
       // ── Reaction arriving via first-message bootstrap (session re-init,
@@ -4668,6 +4876,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           timestamp: Date.now(),
           unread: 1,
           safetyNumber,
+          pinnedIdentityKey: inboundPinnedKey,
+          pinnedAt: Date.now(),
           isRealContact: true,
           disappearAfterSec: DEFAULT_DISAPPEAR_SEC,
           drSession: updatedSession,
@@ -5095,6 +5305,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setConversationBgImage,
         markMessagesViewed,
         verifyConversation,
+        acceptIdentityKeyChange,
         sendCallSignal,
         registerCallListener,
         logCall,
