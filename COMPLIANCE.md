@@ -42,7 +42,7 @@ software under Note 3 to Category 5, Part 2 of the Commerce Control List.
 | Title | *Ghostface Limited — US and NZ Export-Control Classification Queries (Revised)* |
 | Archived | `~/Documents/Ghostface-Legal/1056841-export-control/2026-09-02_Counsel_Memo_REVISED_v2.pdf` |
 | SHA-256 | `1a282e8d24b858e6822e996dc69ccfe064a3be96c9f00115ed91898ebb38bce9` |
-| Supersedes | 31 August 2026 version (`GHOSTFACE_Classification_Memo.pdf`), retained for the record |
+| Supersedes | 31 August 2026 version — archived as `2026-08-31_Counsel_Memo_v1_SUPERSEDED.pdf` (SHA-256 `d7630466…8107`) |
 
 **The 2 Sep revision folds both outstanding items into the opinion itself.**
 Argon2id (§4.12–4.14) and the AEAD associated-data correction (§4.15–4.17) are
@@ -367,9 +367,9 @@ cloud durability under the company's own account.
 
 | Record | Status |
 |---|---|
-| **This opinion — memo §7.4(a)** | ✅ **GOVERNING VERSION: the revised memo of 2 Sep 2026**, archived as `2026-09-02_Counsel_Memo_REVISED_v2.pdf` (SHA-256 `1a282e8d…bce9`). The 31 Aug version is superseded and retained as `GHOSTFACE_Classification_Memo.pdf`. ⬜ **Still outstanding: export the Gmail transmittal messages as PDF into the archive folder**, so the covering emails are preserved alongside both versions of the advice. |
+| **This opinion — memo §7.4(a)** | ✅ **GOVERNING: the revised memo of 2 Sep 2026**, archived as `2026-09-02_Counsel_Memo_REVISED_v2.pdf` (SHA-256 `1a282e8d…bce9`). ✅ **Superseded 31 Aug version now archived too** as `2026-08-31_Counsel_Memo_v1_SUPERSEDED.pdf` (SHA-256 `d7630466…8107`). ⚠️ **Correction of record, 2 Sep 2026: this row previously claimed the 31 Aug opinion was "retained as `GHOSTFACE_Classification_Memo.pdf`". That was WRONG.** `GHOSTFACE_Classification_Memo.pdf` is **Ghostface's own Technical Memorandum for Counsel** (Benjamin Henderson, 19 Aug 2026, headed "Company's technical understanding… **Not legal advice**") — it is memo **Annex 2**, not counsel's advice. Counsel's 31 Aug memo was sitting unarchived in `~/Downloads` until 2 Sep. **Verified by reading page 1 of each file, not by inferring from filenames** — the names are genuinely misleading here. ⬜ **Still outstanding: export the Gmail transmittal messages as PDF** into the archive, so the covering emails sit with both versions of the advice. |
 | Cryptographic Inventory (Annex 1) | ✅ archived |
-| Technical Memorandum (Annex 2) | ✅ archived |
+| Technical Memorandum (Annex 2) | ✅ archived — **the file is `GHOSTFACE_Classification_Memo.pdf`**, whose name is misleading: it is Ghostface's own technical memo of 19 Aug 2026 ("Not legal advice and not a self-classification decision"), *not* counsel's classification memo. Named before the counsel memos existed. **Do not mistake it for the opinion.** |
 | ASC Declaration Exhibits (Annex 3) | ✅ archived |
 | Follow-up to counsel, 30 Aug 2026 | ✅ sent — reply on the memo thread to Sarah Salmond, cc Sian Vaughan-Jones / Isabelle Pou: argon2id omission from Annex 1, and the pending AEAD associated-data encoding fix. Both framed against §7.5's revisit trigger. |
 | **Counsel's response, 31 Aug 2026** | ✅ received — Gmail message `1a05644d32bf7630`. Neither item changes the classification analysis or the memorandum's conclusions. Argon2id: conventional published KDF, no effect on classification; inventory to record it. AEAD: routine implementation correction, no revisit required, **provided the change is limited to the issue described**. ✅ **filed** as `2026-08-31_Counsel_Response_argon2id_AEAD.pdf` in the archive, alongside the memo. |
