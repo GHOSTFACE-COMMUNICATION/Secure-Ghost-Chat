@@ -145,6 +145,100 @@ and `[]` even on a failure that plainly produced a log. Fetch that URL and
 `zlib.brotliDecompressSync` it; the payload is newline-delimited JSON and the
 Apple error is the `level >= 40` line in phase `CUSTOM`.
 
+### ⚠️ CORRECTION 1 Sep — EAS build numbers do NOT map to ASC build numbers
+
+**A claim made earlier this session was wrong and is retracted here.** It was
+asserted that EAS build `459fe23c` (1.0.0, EAS `appBuildVersion: 9`, 18 Jun)
+"was built fine and never got in", inferred from its absence from ASC's 1.0.0
+build list. **That inference was invalid.**
+
+Read at build level, `459fe23c` has **six submissions and every one is
+`FINISHED`** — 18 Jun 22:14, 19 Jun 03:35 / 07:39 / 09:36 / 11:31, and
+21 Jun 11:47. It uploaded successfully six times.
+
+🪤 **The trap: EAS's `appBuildVersion` and ASC's build `version` are different
+numbering spaces.** ASC's 1.0.0 record has no build 9 at all — its earliest is
+**build 15, uploaded 21 Jun**, the same day `459fe23c`'s last submission
+finished. Matching the two systems by build number produces false conclusions.
+**Match by upload date and artifact, never by number.**
+
+🪤 **Second trap, same family:** the app-level GraphQL
+`app.byId.submissions(filter: {platform: IOS})` returns **nothing before
+3 Aug 2026** — it does not reach back through the June/July history. The
+**build-level** `builds.byId.submissions` field does. Re-verified build 75 the
+build-level way: exactly **10** submissions, matching the 8 recorded plus the
+2 run on 1 Sep, so the earlier "eight, not three" correction stands. **The
+under-reporting only bites on pre-August history — but it is why the June story
+was got wrong.** Absence from a query is not evidence of rejection.
+
+⚠️ **Consequence for `lib/exportCompliance.test.ts`:** its header comment states
+as fact that *"every upload carrying `true` was rejected by Apple with error
+90592"*. Build `459fe23c`'s six uploads **succeeded** on 18–21 Jun, straddling
+the 17 Jun flip to `true` and the 18–19 Jun declarations. **That sentence may be
+wrong.** It cannot be settled from here: build `459fe23c`'s commit `1e0e9999` is
+**not in this repo at all** (Replit-era, or the EAS project that was deleted and
+relinked — there are four "relink EAS project" commits, 16 Jun / 17 Jun /
+30 Jul / 2 Aug, and the account holds seven EAS projects), so what flag its
+binary carried is unknowable. ⛔ **This does NOT touch the test's assertion** —
+the flag must be `true` on the authority of memo §7.8, not on upload history.
+Only the explanatory comment is unreliable, and that comment is what the next
+person reads before deciding whether to flip the flag. **Leave the assertion;
+the comment needs Benji's call, and arguably counsel's.**
+
+### Three binaries are INVALID — a third failure mode, distinct from 90592
+
+| Version | Build | Uploaded | State | nonExempt |
+|---|---|---|---|---|
+| 1.0.0 | 28 | 3 Jul 2026 | **INVALID** | `false` |
+| 1.0.1 | 25 | 13 Jul 2026 | **INVALID** | `false` |
+| 1.0.1 | 27 | 16 Jul 2026 | **INVALID** | `false` |
+
+1.0.0/28 is the **3 Jul upload GF-02 records as the third attempt** — its ASC
+page reads `Binary State: Invalid Binary`, `App Uses Non-Exempt Encryption: No`,
+41.6 MB, original file `499bf204-…ipa`.
+
+**All three are `expired: false` while nearly every other build of that era is
+`expired: true`** — their siblings were distributed and aged out; these were
+never usable, and invalid binaries do not expire.
+
+**Three gates, not one, and they fail differently:**
+1. **Upload validation** — 90592 lives here. No build record is ever created.
+   This is where build 75 is stuck.
+2. **Processing** — `INVALID` lives here. Upload succeeded, ASC made a record,
+   processing rejected it. These three.
+3. **VALID** — the other 63.
+
+**Two ASC build pages compared side by side, and note they are BOTH "build 28"** —
+a live example of why matching by number fails:
+
+| | 1.0.0 / 28 | 1.0.1 / 28 |
+|---|---|---|
+| Uploaded | 3 Jul 2026 08:50 | 16 Jul 2026 16:52 |
+| Binary State | **Invalid Binary** | **Validated** |
+| Size | 41.6 MB | 50.4 MB |
+| Artifact | `499bf204-…ipa` | `36b6a4d4-…ipa` |
+| Non-exempt encryption | **No** | **No** |
+| Entitlements | app-id, `get-task-allow:false`, `beta-reports-active`, team-id | same **plus `aps-environment: production`** |
+
+🔍 **The only visible difference is `aps-environment`.** The INVALID 3 Jul build
+lacks it; the Validated 16 Jul build has it. Push notifications were added
+9–13 Jul (`d225a613` message/incoming-call push, `57a2bb87` VoIP PushKit
+plugin), so the entitlement appears right after. ⚠️ **This is correlation, not a
+diagnosed cause** — ASC's actual invalid-reason is not exposed on the API, and a
+missing `aps-environment` only invalidates a binary if the app actually
+registers for remote notifications. **Do not record this as the reason those
+three failed; it is a lead, and a low-priority one, since none of them blocks
+anything.**
+
+✅ **What the Validated page does prove:** a build can clear both gates while
+declaring non-exempt encryption `No`. That is the untrue answer passing
+end-to-end, unchallenged, on 16 Jul — the same answer sitting in all 66 records.
+
+⚠️ **Clearing the declarations gets build 75 past gate 1. It does not guarantee
+gate 2.** Build 74 processed `VALID` on 29 Aug carrying the embedded Network
+Extension, which is good evidence the appex is not a processing hazard — but
+build 75 has passed neither gate yet, and "accepted" is not "valid".
+
 ### The EAS credential store is intact — the key is configured
 
 Read from EAS GraphQL. `com.ghostface.app` (and `com.ghostface.app.tunnel`)
