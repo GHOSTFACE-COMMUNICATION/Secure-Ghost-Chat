@@ -23,6 +23,13 @@ const BLUR_FULL_DEG_S = 3200;
 const HAPTIC_START_DEG_S = 700;
 const HAPTIC_SLOW_INTERVAL_MS = 220;
 const HAPTIC_FAST_INTERVAL_MS = 60;
+// A press held longer than this counts as a HOLD (brake the coin) rather than
+// a TAP, and `onTap` is suppressed on release. Matches the home screen's
+// previous `delayLongPress={220}` exactly, because that screen's onTap toggles
+// the radial menu: without this, every attempt to grab the spinning coin and
+// stop it would also fling the menu open. Callers whose onTap is harmless
+// (onboarding's reward reveal) are unaffected — they simply never hold.
+const HOLD_THRESHOLD_MS = 220;
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
@@ -42,6 +49,14 @@ interface GhostLogoProps {
    *  haptic buzz that ramps with velocity. Off by default so the small logo
    *  usages elsewhere stay static and cheap. */
   live?: boolean;
+  /** Coin mode only. Multiplier on the warm-white halo behind the coin.
+   *  1 is the onboarding hero's value and the default. The home screen runs
+   *  hotter because the coin sits inside the radial menu, where the halo also
+   *  has to lift the surrounding glass buttons off the black — on the
+   *  onboarding hero the coin is alone on an empty field and the same
+   *  intensity reads as a blown-out bloom. One definition, one number, rather
+   *  than two halos that drift apart. */
+  glow?: number;
 }
 
 /**
@@ -176,7 +191,7 @@ function CoinFacetRing({ size, rim }: { size: number; rim: number }) {
   );
 }
 
-export function GhostLogo({ size = 64, coin = false, onTap, live = false }: GhostLogoProps) {
+export function GhostLogo({ size = 64, coin = false, onTap, live = false, glow = 1 }: GhostLogoProps) {
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const spin = useRef(new Animated.Value(0)).current;
@@ -193,6 +208,8 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
   const lastFrameMs = useRef(0);
   const lastHapticMs = useRef(0);
   const rafRef = useRef<number>(0);
+  // When the current press began, for the tap-vs-hold decision on release.
+  const pressStartMs = useRef(0);
 
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -263,13 +280,17 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
 
       onPanResponderGrant: () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        pressStartMs.current = Date.now();
         if (coin) {
           // In live mode the press brakes the coin and the tap adds a velocity
           // kick, exactly as on the home screen. The fixed three-turn flip is
           // only for the static coin.
           if (liveRef.current) { holding.current = true; kick(); }
           else { flip(); }
-          onTap?.();
+          // NOTE: onTap deliberately does NOT fire here. It fires on RELEASE,
+          // and only if the press was short enough to be a tap — see
+          // HOLD_THRESHOLD_MS. Firing on press-down made it impossible to hold
+          // the coin without also triggering the tap action.
         }
         Animated.spring(scale, {
           toValue: 1.06,
@@ -280,7 +301,12 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
       },
 
       onPanResponderRelease: () => {
+        const heldMs = Date.now() - pressStartMs.current;
         holding.current = false;
+        // A tap acts; a hold only brakes. The kick and the brake already
+        // happened on press-down, so a hold still feels immediate — it just
+        // doesn't fire the caller's action on the way out.
+        if (coin && heldMs < HOLD_THRESHOLD_MS) onTap?.();
         Animated.spring(scale, {
           toValue: 1,
           useNativeDriver: true,
@@ -290,6 +316,9 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
       },
 
       onPanResponderTerminate: () => {
+        // Terminated, not released — the gesture was taken over (a scroll, a
+        // navigation). Never fire onTap on this path: the user did not
+        // complete the tap.
         holding.current = false;
         Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 0 }).start();
       },
@@ -336,7 +365,7 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
             width: size * 0.92,
             height: size * 0.92,
             borderRadius: size,
-            backgroundColor: "rgba(255,246,232,0.035)",
+            backgroundColor: `rgba(255,246,232,${Math.min(0.035 * glow, 1)})`,
             // Fade the halo as the coin turns edge-on. A constant full-circle
             // glow around a coin that collapses to a sliver twice per
             // revolution reads as a strobe, not as light — the silhouette
@@ -353,9 +382,12 @@ export function GhostLogo({ size = 64, coin = false, onTap, live = false }: Ghos
               // Three stacked layers: a wide soft bloom, a mid falloff, and a
               // tight bright core. Stacking beats a single huge blur, which
               // just goes evenly grey — the layers give the falloff a shape.
-              boxShadow(COIN_GLOW_WARM_WHITE, 0.13, size * 0.42),
-              boxShadow(COIN_GLOW_WARM_WHITE, 0.16, size * 0.20),
-              boxShadow(COIN_GLOW_WARM_WHITE, 0.14, size * 0.08),
+              // `glow` scales all three together so the falloff keeps its
+              // shape; scaling only the core would just add a hard disc.
+              // Clamped at 1 — an alpha above 1 is invalid, not brighter.
+              boxShadow(COIN_GLOW_WARM_WHITE, Math.min(0.13 * glow, 1), size * 0.42),
+              boxShadow(COIN_GLOW_WARM_WHITE, Math.min(0.16 * glow, 1), size * 0.20),
+              boxShadow(COIN_GLOW_WARM_WHITE, Math.min(0.14 * glow, 1), size * 0.08),
             ].join(", "),
           }}
         />

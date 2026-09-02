@@ -15,16 +15,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Canvas } from "@shopify/react-native-skia";
-import ReAnimated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import {
   GLASS_METALLIC_BLACK,
   GLASS_REFERENCE_SPECULAR,
   GLASS_TINT_BLACK,
-  GoldGradient,
   SpecularHighlight,
 } from "@/components/GoldGradient";
-import { CoinEdge, GlobeCoinMark, GlobeShade } from "@/components/CoinGlobe";
+import { GhostLogo } from "@/components/GhostLogo";
 import { PanicButton } from "@/components/PanicButton";
 import { TabScreenWrapper } from "@/components/TabScreenWrapper";
 import { useApp } from "@/context/AppContext";
@@ -80,31 +77,11 @@ const ORBIT_RADIUS = 134;
 const NODE = 60;
 
 // ── Coin physics ──────────────────────────────────────────────────────────────
-// Velocity model: the coin spins upright forever at BASE_SPIN_DEG_S (it never
-// tilts or falls). Taps add capped velocity kicks that decay back to the base
-// rate; holding the coin brakes it to a stop, and releasing spins it back up.
-const BASE_SPIN_DEG_S = 130; // idle spin rate
-// Tap-spin impulse tuning: one tap ≈ a quick flick; 4–5 fast taps hit the cap
-// for a fast whirl; the 0.18^dt decay in the frame loop winds it down within
-// ~2 s (half-life ≈ 0.4 s).
-const TAP_KICK_DEG_S = 900; // deg/s added per tap
-const MAX_BOOST_DEG_S = 4000; // cap on stacked velocity
-// Motion blur ramps in between these boost velocities (deg/s). Below the
-// start the face stays crisp; at the end the pre-blurred face fully covers
-// the crisp one so top-speed spins read as a whirl, not a strobing logo.
-const BLUR_START_DEG_S = 1400;
-const BLUR_FULL_DEG_S = 3200;
-// Haptic spin buzz: light ticks whose rate ramps with boost velocity so fast
-// tap-spins feel physical. Below the start threshold there are no ticks, so
-// the idle spin cycle stays silent. Interval shrinks from SLOW→FAST as the
-// boost approaches the cap. No-op on web (expo-haptics has no web impl).
-const HAPTIC_START_DEG_S = 700;
-const HAPTIC_SLOW_INTERVAL_MS = 220;
-const HAPTIC_FAST_INTERVAL_MS = 60;
-
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}
+// The velocity model, tap-kick, blur and haptic-ramp constants used to be
+// duplicated here and in components/GhostLogo.tsx, with a comment in each file
+// warning that the two had to be kept in step by hand. They are now defined
+// once, in GhostLogo, which owns the coin on both screens. Deleting them here
+// is the point of the change: there is no longer a second copy to drift.
 
 type NavNode = {
   icon: IconName;
@@ -121,42 +98,13 @@ export default function HomeScreen() {
 
   // Decorative ring spin
   const spin = useRef(new Animated.Value(0)).current;
-  // Coin physics values — driven by rAF, not Animated.timing.
-  //
-  // coinRotY and coinEdge used to live here too. Both became write-only when
-  // the coin became a sphere: coinRotY's only reader was the flat rotateY
-  // (the mark now reads globePhase on the UI thread), and coinEdge drove the
-  // fake edge band and the halo, neither of which exists any more. They were
-  // still being computed and set 60 times a second on the JS thread, which is
-  // the same thread the physics loop and Metro share.
-  // 0..1 — motion-blur mix; crossfades a pre-blurred face over the crisp one
-  const coinBlur = useRef(new Animated.Value(0)).current;
-  // Spin angle for the globe mesh. Deliberately a reanimated shared value and
-  // not the Animated.Value above: the mesh is rebuilt inside a Skia worklet on
-  // the UI thread, and an Animated.Value cannot be read from there.
-  const globePhase = useSharedValue(0);
-  // The disc's own foreshortening. A coin's FACE narrows to D*|cos| as it
-  // turns — without this only the mark flipped and the glass stayed a full
-  // circle, which reads as a picture spinning inside a window. Reanimated, not
-  // RN Animated, so it runs on the UI thread alongside the Skia faces and
-  // cannot drift from them.
-  const coinFaceStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleX: Math.abs(Math.cos((globePhase.value * Math.PI) / 180)) }],
-  }));
-  // Spin velocity (deg/s) + accumulated angle; taps kick the velocity up,
-  // holding brakes it to zero, release spins it back up to the base rate.
-  const spinVel = useRef(BASE_SPIN_DEG_S);
-  const spinAngle = useRef(0);
-  const holdingCoin = useRef(false);
-  // Set on long-press so the release doesn't also fire onPress (menu toggle)
-  const didHoldCoin = useRef(false);
-  const lastFrameMs = useRef(0);
-  // Timestamp of the last spin-haptic tick (performance.now() ms)
-  const lastHapticMs = useRef(0);
+  // The coin's own animated values (blur mix, globe phase, spin velocity and
+  // angle, hold/hold-consumed flags, frame and haptic timestamps, rAF handle)
+  // all lived here. Every one of them belonged to the sphere and its loop, and
+  // both are gone — GhostLogo holds the equivalents internally now.
 
   const fade = useRef(new Animated.Value(0)).current;
   const reveal = useRef(new Animated.Value(0)).current;
-  const rafRef = useRef<number>(0);
 
   // Decorative ring + breathing fade — gated on screen focus so nothing
   // churns battery while this tab is off-screen.
@@ -195,82 +143,14 @@ export default function HomeScreen() {
     }, [spin, fade]),
   );
 
-  // Coin physics loop — runs on JS thread, drives Animated.Values via setValue.
-  // Gated on screen focus, same as the ring/fade loop above, so it doesn't
-  // keep ticking at 60fps (and firing haptics) while another tab is open.
-  useFocusEffect(
-    useCallback(() => {
-      function frame(now: number) {
-        const dt = lastFrameMs.current
-          ? Math.min((now - lastFrameMs.current) / 1000, 0.05)
-          : 0;
-        lastFrameMs.current = now;
-        const v = spinVel.current;
-        if (holdingCoin.current) {
-          // Braking: hard exponential decay toward a full stop
-          spinVel.current = v < 2 ? 0 : v * Math.pow(0.015, dt);
-        } else if (v > BASE_SPIN_DEG_S) {
-          // Tap boost decays back down to the idle rate
-          spinVel.current =
-            BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.18, dt);
-        } else {
-          // Released after a hold: ease back up to the idle rate
-          spinVel.current =
-            BASE_SPIN_DEG_S + (v - BASE_SPIN_DEG_S) * Math.pow(0.08, dt);
-        }
-        // Direction is applied HERE, not by negating spinVel: the velocity is
-        // compared against positive thresholds all through this loop (haptic
-        // start, blur ramp, brake floor), and a negative value would silently
-        // disable every one of them. The extra +360 keeps the angle in 0..360
-        // — JS % returns a negative for a negative left operand, and the
-        // cos/sin the coin faces are built from would then jump at the wrap.
-        spinAngle.current =
-          ((spinAngle.current - spinVel.current * dt) % 360 + 360) % 360;
-        const totalRotY = spinAngle.current;
-        globePhase.value = totalRotY;
-        // Motion blur: ramp with spin velocity, smoothstep-shaped so it eases
-        // in near top speed and fades out smoothly as the boost decays.
-        const blurT = Math.max(
-          0,
-          Math.min(
-            1,
-            (spinVel.current - BLUR_START_DEG_S) /
-              (BLUR_FULL_DEG_S - BLUR_START_DEG_S),
-          ),
-        );
-        coinBlur.setValue(blurT * blurT * (3 - 2 * blurT));
-        // Haptic buzz: tick rate ramps with spin velocity. Only fires while a
-        // tap boost is active (never during the idle spin rate) and no-ops on
-        // web where expo-haptics has no implementation.
-        if (Platform.OS !== "web" && spinVel.current > HAPTIC_START_DEG_S) {
-          const speedT = Math.min(
-            (spinVel.current - HAPTIC_START_DEG_S) /
-              (MAX_BOOST_DEG_S - HAPTIC_START_DEG_S),
-            1,
-          );
-          const interval = lerp(
-            HAPTIC_SLOW_INTERVAL_MS,
-            HAPTIC_FAST_INTERVAL_MS,
-            speedT,
-          );
-          if (now - lastHapticMs.current >= interval) {
-            lastHapticMs.current = now;
-            Haptics.impactAsync(
-              speedT > 0.6
-                ? Haptics.ImpactFeedbackStyle.Medium
-                : Haptics.ImpactFeedbackStyle.Light,
-            ).catch(() => {});
-          }
-        }
-        rafRef.current = requestAnimationFrame(frame);
-      }
-      rafRef.current = requestAnimationFrame(frame);
-      return () => {
-        cancelAnimationFrame(rafRef.current);
-        lastFrameMs.current = 0;
-      };
-    }, []),
-  );
+  // The coin's physics rAF loop used to live here. It is GONE, not disabled:
+  // the coin is now components/GhostLogo in `live` mode, which runs its own
+  // loop with the same constants. Leaving this one would have ticked at 60fps
+  // on the JS thread — the thread the app and Metro share — writing values
+  // nothing reads and firing haptics for a coin that no longer exists here.
+  // That is the exact write-only waste the comments on the removed refs
+  // describe. GhostLogo gates its loop on `live && coin`; this screen gates
+  // it by not having one.
 
   // Reveal/hide the orbiting menu when the central circle is long-pressed.
   useEffect(() => {
@@ -294,12 +174,9 @@ export default function HomeScreen() {
 
   const toggleMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Tap-spin kick: stacks across rapid taps, capped so mashing can't
-    // spin the coin absurdly fast or break edge-band/glow visuals.
-    spinVel.current = Math.min(
-      spinVel.current + TAP_KICK_DEG_S,
-      MAX_BOOST_DEG_S,
-    );
+    // The tap-spin kick used to be applied here. It now lives inside
+    // GhostLogo, which owns the coin's velocity — applying it from both sides
+    // would double every kick.
     setMenuOpen((open) => !open);
   };
 
@@ -413,100 +290,33 @@ export default function HomeScreen() {
             {/* Coin centerpiece — tap to reveal/hide menu */}
             <View pointerEvents="box-none" style={styles.centerWrap}>
               <View style={styles.centerCol}>
-                <Pressable
-                  onPress={() => {
-                    // A hold that stopped the coin shouldn't also toggle the menu
-                    if (didHoldCoin.current) return;
-                    toggleMenu();
-                  }}
-                  onLongPress={() => {
-                    didHoldCoin.current = true;
-                    holdingCoin.current = true;
-                  }}
-                  delayLongPress={220}
-                  onPressOut={() => {
-                    holdingCoin.current = false;
-                    // Reset after this tap cycle fully settles (onPress fires
-                    // after onPressOut on release of a long press)
-                    setTimeout(() => {
-                      didHoldCoin.current = false;
-                    }, 0);
-                  }}
-                  hitSlop={24}
+                {/* The centrepiece is now the SHARED coin from
+                    components/GhostLogo — the same metallic disc, milled edge
+                    and warm halo the user meets on the onboarding hero.
+                    Previously this was a glass sphere built from Skia
+                    (CoinEdge / GlobeCoinMark / GlobeShade over a GoldGradient
+                    face) which matched the radial buttons but shared nothing
+                    with onboarding, so the first object a user ever taps and
+                    the object they tap every day afterwards were different
+                    things. One coin, two screens.
+
+                    GhostLogo owns the gestures and the physics: press brakes
+                    and kicks, release taps. This screen no longer runs its own
+                    rAF loop — see the physics block removed above. The tap/hold
+                    split that used to live in this Pressable now lives in
+                    GhostLogo's HOLD_THRESHOLD_MS, so holding to stop the coin
+                    still does not open the menu. */}
+                <View
                   style={styles.centerHit}
                   accessibilityRole="button"
                   accessibilityLabel={
                     menuOpen ? "Hide menu" : "Tap to reveal menu"
                   }
                 >
-                  {/* The coin's fake edge band is gone with the disc. A sphere
-                      has no edge-on state — its outline is a circle from every
-                      angle — so a flashing thickness band was the one thing
-                      that would have given the globe away as a flat plate.
-                      coinEdge went with it — see the physics values. */}
-
-                  {/* Physics-driven spinning coin. The face is the SAME
-                      GoldGradient glass as every radial button around it —
-                      same tint, same reference specular, same rim — so the
-                      coin reads as the centre of one set rather than a metal
-                      object dropped into a glass menu. The trademark is the
-                      subject; the disc is just its surface. */}
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[styles.coinBall, { opacity: circleOpacity }]}
-                  >
-                    {/* The glass body. Same GoldGradient as every button, and
-                        it does NOT rotate — a sphere's outline never changes,
-                        so the silhouette stays a circle while the surface
-                        turns inside it. */}
-                    {/* Same specular as every button — the globe's override is
-                        gone and the shared constant carries the brighter value
-                        instead, so one number drives the whole set. */}
-                    <ReAnimated.View style={[styles.coinFace, coinFaceStyle]}>
-                      <GoldGradient
-                        specularIntensity={GLASS_REFERENCE_SPECULAR}
-                        style={styles.coinFace}
-                      />
-                    </ReAnimated.View>
-                    {/* The wireframe. Static: the grid is drawn as a full
-                        globe already, so turning it with a flat rotateY would
-                        squash the whole cage rather than move meridians across
-                        the surface. The rotation you read is the mark
-                        travelling over it. */}
-                    {/* Glass body + the flipping trademark. The wireframe,
-                        mark field, scanlines and chromatic fringe are gone —
-                        they stacked up busier than the coin itself. */}
-                    <View style={styles.coinSurface} pointerEvents="none">
-                      <Canvas style={styles.coinFace}>
-                        <CoinEdge size={COIN_SIZE} phase={globePhase} />
-                        <GlobeCoinMark size={COIN_SIZE} phase={globePhase} />
-                      </Canvas>
-                    </View>
-
-                    {/* Faint horizontal streaks sell the spin direction */}
-                    <Animated.View
-                      pointerEvents="none"
-                      style={[
-                        styles.coinBlurStreaks,
-                        { opacity: Animated.multiply(coinBlur, 0.55) },
-                      ]}
-                    >
-                      <View style={[styles.coinStreak, { top: "28%" }]} />
-                      <View style={[styles.coinStreak, { top: "50%" }]} />
-                      <View style={[styles.coinStreak, { top: "72%" }]} />
-                    </Animated.View>
-
-                    {/* Light, LAST and un-rotated. A ball lit from the upper
-                        left keeps its highlight in the upper left however fast
-                        it turns; rotating the shading is exactly what makes a
-                        sphere look like a painted plate. Limb darkening here is
-                        what gives the outline its roundness. */}
-                    <ReAnimated.View style={[styles.coinShade, coinFaceStyle]} pointerEvents="none">
-                      <GlobeShade size={COIN_SIZE} />
-                    </ReAnimated.View>
-
+                  <Animated.View style={{ opacity: circleOpacity }}>
+                    <GhostLogo size={COIN_SIZE} coin live glow={1.55} onTap={toggleMenu} />
                   </Animated.View>
-                </Pressable>
+                </View>
 
                 <Animated.Text
                   pointerEvents="none"
@@ -683,6 +493,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  // Only the coin is laid out here. The "TAP TO REVEAL" hint is absolutely
+  // positioned below (see centerHint) rather than being a second row in this
+  // column: as a flow child its height was included in the centring, so the
+  // column centred (coin + gap + hint) and pushed the coin about 13px ABOVE
+  // the orbit's true centre. The coin is the thing the ring is drawn around,
+  // so the coin is what has to be centred.
   centerCol: {
     alignItems: "center",
     justifyContent: "center",
@@ -693,56 +509,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  // The globe. Static and circular: a sphere's silhouette never changes, so
-  // this does NOT carry the rotation — the surface inside it does. overflow
-  // hidden is what keeps the turning surface inside the limb.
-  coinBall: {
-    width: COIN_SIZE,
-    height: COIN_SIZE,
-    borderRadius: COIN_SIZE / 2,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  // The rotating surface: grid + mark. Carries coinTransform.
-  coinSurface: {
-    position: "absolute",
-    width: COIN_SIZE,
-    height: COIN_SIZE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  // View-space lighting, drawn over everything and never rotated.
-  coinShade: {
-    position: "absolute",
-    width: COIN_SIZE,
-    height: COIN_SIZE,
-  },
-  // Fake coin thickness — the band shown when the coin turns edge-on.
-  coinFace: {
-    width: COIN_SIZE,
-    height: COIN_SIZE,
-    borderRadius: COIN_SIZE / 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  coinBlurStreaks: {
-    position: "absolute",
-    width: COIN_SIZE,
-    height: COIN_SIZE,
-    borderRadius: COIN_SIZE / 2,
-    overflow: "hidden",
-  },
-  coinStreak: {
-    position: "absolute",
-    left: "6%",
-    right: "6%",
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: "rgba(255,230,150,0.35)",
-  },
   centerHint: {
-    marginTop: 16,
+    // Absolute, so it hangs below the coin without affecting where the coin
+    // lands. `top` reproduces the old 16px gap measured from the bottom of the
+    // hit area; left/right + textAlign keep it centred since alignItems does
+    // not apply to absolutely-positioned children.
+    position: "absolute",
+    top: COIN_SIZE + 6 + 16,
+    left: 0,
+    right: 0,
+    textAlign: "center",
     fontFamily: FONT_MONO,
     fontSize: 9,
     letterSpacing: 4,
