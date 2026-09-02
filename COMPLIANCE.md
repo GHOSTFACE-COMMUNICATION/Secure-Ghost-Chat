@@ -365,6 +365,24 @@ correspondence.
 Mirror this folder to the Ghostface M365 / OneDrive tenancy — local working copy,
 cloud durability under the company's own account.
 
+**Integrity: `MANIFEST.sha256` lives in that folder.** Verify any copy with
+`shasum -a 256 -c MANIFEST.sha256` from inside it; a mirror that passes is
+byte-identical to the original. Regenerate it whenever a document is added
+(`shasum -a 256 *.pdf`). This matters because §7.4 requires these records to be
+*retained*, and a retained document nobody can prove is unaltered is weaker
+evidence than one that carries its own checksum.
+
+⏳ **Mirror status, 2 Sep 2026: NOT DONE — no OneDrive account is signed in on
+this machine.** `OneDrive.app` is installed but `~/Library/CloudStorage/` is
+empty, so no sync target exists. Sign in with the **Ghostface M365 account**
+(not a personal one) and the folder appears at
+`~/Library/CloudStorage/OneDrive-<Tenant>/`; copy the archive there and re-run
+the manifest check on the copy. ⚠️ **Prefer the OneDrive desktop sync over any
+API/connector route** — the desktop client moves the files from this disk to the
+company tenancy directly, whereas a connector would route privileged
+correspondence through a third-party proxy. **The archive is currently
+single-copy on one laptop**, which is the risk the mirror exists to remove.
+
 | Record | Status |
 |---|---|
 | **This opinion — memo §7.4(a)** | ✅ **GOVERNING: the revised memo of 2 Sep 2026**, archived as `2026-09-02_Counsel_Memo_REVISED_v2.pdf` (SHA-256 `1a282e8d…bce9`). ✅ **Superseded 31 Aug version now archived too** as `2026-08-31_Counsel_Memo_v1_SUPERSEDED.pdf` (SHA-256 `d7630466…8107`). ⚠️ **Correction of record, 2 Sep 2026: this row previously claimed the 31 Aug opinion was "retained as `GHOSTFACE_Classification_Memo.pdf`". That was WRONG.** `GHOSTFACE_Classification_Memo.pdf` is **Ghostface's own Technical Memorandum for Counsel** (Benjamin Henderson, 19 Aug 2026, headed "Company's technical understanding… **Not legal advice**") — it is memo **Annex 2**, not counsel's advice. Counsel's 31 Aug memo was sitting unarchived in `~/Downloads` until 2 Sep. **Verified by reading page 1 of each file, not by inferring from filenames** — the names are genuinely misleading here. ⬜ **Still outstanding: export the Gmail transmittal messages as PDF** into the archive, so the covering emails sit with both versions of the advice. |
