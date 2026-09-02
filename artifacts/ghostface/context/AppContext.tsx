@@ -1,4 +1,5 @@
 import { evaluateExpiredHandshake } from "@/lib/expiry";
+import { callWakeLog } from "@/lib/callWakeLog";
 import { checkIdentityPin } from "@/lib/identityPin";
 import { readEncryptedString, writeEncryptedString } from "@/lib/secureStorage";
 import { getApiBase } from "@/lib/apiBase";
@@ -4358,6 +4359,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // what clears this ref). Clear the incoming-call banner if it's still
         // showing this call, and tell CallKit — it may have a CXCall pending
         // from a VoIP push for the same callId.
+        // [CALLWAKE] the teardown message finally landed. If every other
+        // [CALLWAKE] line is present in a locked repro but this one is not,
+        // the socket came up and the server still did not flush the hangup —
+        // which moves the fault server-side, to the queue in ws/manager.ts.
+        callWakeLog("hangup-received", { callId: wsMsg.callId, hadListener: false });
         markCallEnded(wsMsg.callId);
         const pendingIncoming =
           latestStateRef.current.incomingCall?.callId === wsMsg.callId
@@ -4999,6 +5005,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
 
         ws.onopen = () => {
+          // [CALLWAKE] link 4 of 4 — the socket opened. `hasToken` is the
+          // decisive field: an open socket that authenticates with an empty
+          // token is rejected, and the queued call-hangup never flushes.
+          callWakeLog("ws-open", { alias: !!alias, hasToken: !!deviceToken });
           ws.send(JSON.stringify({ type: "auth", alias, token: deviceToken }));
           schedulePing();
           // One-time avatar re-broadcast so contacts who were offline when we
@@ -5221,6 +5231,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // won. Without this, two triggers close together (e.g. two VoIP pushes
     // a beat apart) would each kick off their own connect().
     const readyState = wsRef.current?.readyState;
+    // [CALLWAKE] a reconnect asked for while readyState is 0/1 is SKIPPED by
+    // design (see above). On a locked wake that would mean the client believes
+    // it already has a socket that is in fact dead — worth telling apart from
+    // a reconnect that was attempted and failed.
+    callWakeLog("force-reconnect-outcome", {
+      readyState: readyState ?? null,
+      attempted: readyState !== 0 && readyState !== 1,
+    });
     if (readyState !== 0 && readyState !== 1) {
       reconnectNowRef.current?.();
     }

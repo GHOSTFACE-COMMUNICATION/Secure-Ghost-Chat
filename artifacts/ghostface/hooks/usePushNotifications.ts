@@ -1,5 +1,7 @@
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
+
+import { callWakeLog } from "@/lib/callWakeLog";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
@@ -363,6 +365,10 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
           // generate a real UUID in app/call.tsx — this is a last-resort
           // fallback only.)
           const callId = payload.callId ?? Crypto.randomUUID();
+          // [CALLWAKE] link 1 of 4 — PushKit woke us. If this line is absent
+          // from a locked repro, the push never arrived and nothing below is
+          // relevant.
+          callWakeLog("voip-push", { callId, hasCallKeep: !!CallKeep });
           pendingCalls.set(normalizeCallId(callId), payload);
           if (CallKeep) {
             // Must not fire before CallKit's native side has finished setup
@@ -376,6 +382,10 @@ export function usePushNotifications(enabled: boolean, onForceReconnect?: () => 
             // sends while this banner is up has nowhere to land: the socket
             // isn't there to receive it until the human acts. Reconnect the
             // instant CallKit is told to ring, not just once answered.
+            // [CALLWAKE] link 2 of 4 — we asked for a socket. Present means
+            // the client did its part; whether a socket actually came up is
+            // links 3 and 4.
+            callWakeLog("force-reconnect", { callId, wired: !!onForceReconnect });
             onForceReconnect?.();
             CallKeep.displayIncomingCall(
               callId,
