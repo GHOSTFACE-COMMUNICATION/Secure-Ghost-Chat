@@ -4,7 +4,7 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-03 (Claude Code — **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
+Last updated: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
 was recreated**; read the 3 Sep section directly below first — the 2 Sep
 "transfer to an organisation" never happened, 11 commits including CI were
 unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
@@ -29,6 +29,42 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 3 Sep 2026 — 90592 FIRED AGAIN after Apple Support said "unblocked"
+
+🔴 **Support's fix has not landed.** Submission
+`03acac86-e75b-430c-b474-801bc21a867e` (build 75, `22413bd1`) ran 3 Sep
+22:57:27→22:58:15 — **48 seconds** — and failed with **90592 again**.
+
+⚠️ **Provenance:** the 90592 identification is **Benji's read of the submission
+log**, reported verbatim as "same error". It was **not** read off the API by this
+session — EAS exposes no `submit:logs`, `submit:view` carries no error text, and
+the log URL needs a session token. Recorded as reported, not as independently
+verified.
+
+**This closes the question the call opened.** Support said by phone that builds
+were unblocked and that the build number had to increase. Neither held:
+
+- **The declarations never changed.** Re-read live before and after the call —
+  `e4bdc6a7` and `2cb25cc0`, both still `CREATED`, `codeValue: null`,
+  `availableOnFrenchStore: true`, `documentUrl: null`.
+- **The build-number instruction was a red herring.** ASC's highest 1.0.2 build
+  is **74** and build 75 was never in ASC, so 75 was already higher *and* unused.
+  Build 76 was attempted anyway and died for an unrelated reason (the missing
+  `wireguard-apple` repo, see the section below).
+
+✅ **One blocker can now be closed: `prepare_asc_api_key`.** Credentials
+resolved cleanly on this run and on the 1 Sep re-run — *"Using Api Key ID:
+2JQFNUQ274"*, `Key Source: EAS servers`. **Two consecutive non-reproductions.**
+
+⛔ **The cause is unchanged and unchanged-able by us:** the two June declarations
+sit on the app record, the API refuses `DELETE` (403; allowed operations are
+`CREATE, GET_COLLECTION, GET_INSTANCE`, no `UPDATE`), and the ASC UI shows them
+as **"Upload Failed"** with no removal control. **Back to Apple Support, naming
+the two UUIDs and citing this failed submission as evidence the first fix did
+not take.** ⏳ 26 days of artifact life left.
 
 ---
 
