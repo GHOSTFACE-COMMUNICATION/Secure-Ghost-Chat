@@ -4,7 +4,7 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-03 (Claude Code — **the GitHub remote was DEAD and the repo
+Last updated: 2026-09-03 (Claude Code — **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
 was recreated**; read the 3 Sep section directly below first — the 2 Sep
 "transfer to an organisation" never happened, 11 commits including CI were
 unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
@@ -29,6 +29,48 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 3 Sep 2026 — build 76 failed: a SECOND missing repo broke the iOS build
+
+🔴 **`ghostzeronz-coder/wireguard-apple` returns 404.** Build 75's tree resolved
+WireGuard as a Swift Package from that fork URL during prebuild, so **no tree at
+or before `1e3cec1` can ever be built again.** Same account and same shape as the
+`Secure-Ghost-Chat` loss; **whether one event caused both is not established.**
+
+**How it surfaced.** Apple Support told Benji by phone that builds are unblocked
+and that the build number must increase, so build 76 was run from `1e3cec1` —
+byte-identical to build 75, so the only difference would be the number. It
+**errored in 2m29s** (`704b67d7-ebea-4422-9eb3-435165639710`, buildNumber 76)
+where build 75 took 8m14s from that same tree on 30 Aug. From the Xcode logs:
+
+> Fetching from https://github.com/ghostzeronz-coder/wireguard-apple
+> Failed to clone repository … fatal: could not read Username for
+> 'https://github.com': terminal prompts disabled
+> xcodebuild: error: Could not resolve package dependencies — exit status 74
+
+✅ **`main` already carries the fix, and it was mis-assessed here first.**
+`c246fc8` vendored the source to `artifacts/ghostface/native/wireguard-apple/`
+and `94b3f0e` pointed `scripts/link-wireguard-kit.mjs` at it. Those two commits
+were argued in this session as *risk* when picking a build tree; they are the
+repair. The isolation argument for building off `1e3cec1` was wrong.
+
+⏳ **Consequence:** build 75's `.ipa` (expires 30 Sep) is the only shippable copy
+of that code and cannot be regenerated.
+
+### On 90592 itself — unverified
+
+Support say unblocked. **The API disagrees, or at least does not show it:** both
+declarations re-read live on 3 Sep are still `CREATED`, `codeValue: null`,
+`availableOnFrenchStore: true`, `documentUrl: null`. And the "higher build
+number" instruction is not supported by the record — ASC's highest 1.0.2 build
+is **74** and **build 75 is not in ASC at all**, so 75 was already higher and
+unused. Whether 90592 still fires is now the only open test.
+
+**NEXT: build 77 from `main`** (76 consumed). It will test the vendored
+WireGuard and 90592 at once — unavoidable now. Ships `b6a3113` (peer identity
+keys pinned), a wire-compat change against builds 74/75: release note needed.
 
 ---
 
