@@ -65,3 +65,14 @@ Thumbs.db
 .env.*
 !.env.example
 *.certSigningRequest
+
+# Build logs
+# Local EAS / Xcode / simulator build transcripts. Five families accumulated
+# across the dev-client push (GF-14): devbuild*, simbuild*, xcbuild*,
+# androidbuild*, and the devbuild-air* variants. Transient by nature — each is
+# one run of a build that is already recorded on the board by EAS id — and
+# they are never worth committing, but 61 of them buried `git status`.
+devbuild*.log
+simbuild*.log
+xcbuild*.log
+androidbuild*.log
