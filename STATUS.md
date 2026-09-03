@@ -73,6 +73,40 @@ gone is the review history: PR descriptions, review comments and issue threads.
 ⚠️ TRACKER's 29 Aug header line still calls those four "unmerged"; the row
 itself (correctly) records all four merged and deployed.
 
+### Restore attempted 3 Sep 2026 and FAILED — do not retry
+
+⛔ **PRs #1–#11 are unrecoverable. This was tried properly; the answer is no.**
+
+GitHub allows self-serve restore within 90 days (Settings → Repositories →
+Deleted repositories) and deletion was 2 Sep, so the window was wide open.
+**The real repo was not in that list.** What the list held was the pile of
+abandoned same-name shells CLAUDE.md warns about. Six were restored while
+looking: `GF`, `Secure-Ghost-Chat2`, `Secure-Ghost-Chat1`,
+`Secure-Ghost-Chat1111`, `Secure-Ghost-Chat-1`, `Secure-Ghost-Chat-`.
+**Every one is empty** — five have zero branches, none contains `d0916a7`, and
+their `pushed_at` values (4 Jun – 8 Aug) survived the restore, which is the
+proof none ever received the 1 Sep push. A seventh, a 7 Jun stub whose entire
+content was a 20-byte `README.md`, was restored into the
+`Secure-Ghost-Chat` name itself, then renamed and deleted to free it.
+
+⚠️ **Renaming does not free a name.** Each rename leaves a redirect that
+answers HTTP 200 and belongs to the repo, so the name is only released when the
+repo is deleted. `ghostzeronz-coder/Secure-Ghost-Chat` is now a clean 404 with
+no redirect.
+
+⚠️ **A second machine was checked and does not hold the repo either.**
+
+**Most probable explanation, not established:** the repo was transferred to an
+organisation on 2 Sep and that organisation was then deleted. A repo dies with
+its org, leaves no redirect, and never enters the personal deleted list — which
+matches every symptom, including the absent redirect on the very first check.
+
+🧹 **Cleanup owed:** those six restored shells are still on the account and
+**`GF` and `Secure-Ghost-Chat-1` are PUBLIC**. Delete them.
+
+**No code was ever at risk** — every commit is on the org remote, CI green.
+What is gone is PR descriptions, review comments and issue threads.
+
 ⚠️ **`feat/push-notifications` was deliberately not recreated** — it is fully
 contained in `main`, and `main` has been the trunk since the 29 Aug collapse.
 
