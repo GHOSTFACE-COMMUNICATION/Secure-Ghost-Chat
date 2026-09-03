@@ -4,7 +4,11 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-01 (Claude Code — **COUNSEL'S REVISED MEMO ARRIVED and is
+Last updated: 2026-09-03 (Claude Code — **the GitHub remote was DEAD and the repo
+was recreated**; read the 3 Sep section directly below first — the 2 Sep
+"transfer to an organisation" never happened, 11 commits including CI were
+unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
+2026-09-01 (Claude Code — **COUNSEL'S REVISED MEMO ARRIVED and is
 now the operative opinion**; read the section directly below it. Both open crypto
 items are closed *inside the opinion body*, the classification is unchanged, and
 counsel has given an explicit instruction confirming `ITSAppUsesNonExemptEncryption`
@@ -25,6 +29,50 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 3 Sep 2026 — the GitHub remote: the 2 Sep transfer never happened
+
+⛔ **`4b2a919` recorded the repo as "moved to an organisation on 2 Sep 2026". It
+had not moved.** `ghostzeronz-coder/Secure-Ghost-Chat` returned a hard 404 with
+**no `Location` redirect** — GitHub preserves redirects across both renames and
+transfers, so nothing was forwarding. Read as an org **admin**,
+`/orgs/GHOSTFACE-COMMUNICATION` reported `public_repos: 0`,
+`total_private_repos: 0`, `owned_private_repos: 0`. Those are the org's own
+counts, not a listing an OAuth restriction could have filtered — so this was
+deletion, not a permissions artefact. The org (created 24 Aug 2026) was empty.
+
+**For ~28 hours the canonical repo had no reachable remote and 11 unpushed
+commits existed only on this disk**, including `1c588d9` (the CI verify
+workflow) and the WireGuard vendoring fixes `c246fc8` / `94b3f0e`.
+
+### Recreated and pushed, 3 Sep 2026
+
+`GHOSTFACE-COMMUNICATION/Secure-Ghost-Chat`, **private**, on Benji's explicit
+instruction. Before pushing, the ref graph was checked: `origin/feat/push-notifications`
+was an ancestor of `main`, `devtest` held 1 unique commit, and
+`git log --all --not main devtest <all tags>` was **empty** — so `main` +
+`devtest` + the 12 tags preserve every commit in the repository. All three
+pushed; `main...origin/main` now shows no divergence.
+
+✅ **CI verified live, not just present:** the push fired one `verify` run on
+`94b3f0e` — **completed, success**. Repo Actions permissions are
+`enabled: true`. This matters because a file existing is exactly the check that
+missed `check:handshake` sitting dead for 13 days.
+
+🔴 **PRs #1–#11 are gone permanently — records only, no code lost.** Every
+commit survives on `main` and the `archive/*` tags, and the four Railway-agent
+PRs (#8/#9/#10/#11) were **merged 29 Aug**, so nothing is stranded. What is
+gone is the review history: PR descriptions, review comments and issue threads.
+⚠️ TRACKER's 29 Aug header line still calls those four "unmerged"; the row
+itself (correctly) records all four merged and deployed.
+
+⚠️ **`feat/push-notifications` was deliberately not recreated** — it is fully
+contained in `main`, and `main` has been the trunk since the 29 Aug collapse.
+
+⚠️ **The `gh` token holds `delete_repo` scope.** How the old repo came to be
+deleted is not established; this is noted, not concluded.
 
 ---
 
