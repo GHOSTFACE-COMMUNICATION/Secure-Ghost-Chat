@@ -16,20 +16,31 @@ work itself. Don't wait to be asked.
 
 - **Canonical repo**: `~/Projects/ghostface-clean` (this directory). It is the
   one source of truth.
-- **The GitHub owner MOVED to an organisation on 2 Sep 2026.** Do not hardcode
-  it here. **`git remote -v` is the authority** — read it rather than trusting
-  any name written in a doc. (This file previously named `ghostzeronz-coder` as
-  the GitHub *org*; it is a **user account**, verified via the API as
-  `type: User`, and `Secure-Ghost-Chat` no longer exists under it — the path
-  404s with no redirect. A duplicated fact that rots is the same trap as
+- **Never hardcode the GitHub owner here. `git remote -v` is the authority.**
+  The history, so it is not re-derived wrong: the repo did **not** move to an
+  organisation on 2 Sep 2026, although a commit that day recorded it as done.
+  It was **deleted** from `ghostzeronz-coder` — a *user* account, `type: User`,
+  not an org — and **recreated private under an organisation on 3 Sep 2026**
+  with every commit and all 12 tags pushed. The old path 404s with no redirect.
+  Restore was attempted inside the 90-day window: the real repo was not in the
+  deleted list, so **PRs #1–#11 are gone permanently** (records only — no code
+  was lost). A duplicated fact that rots is the same trap as
   `artifacts/api-server/CLAUDE.md` still claiming Railway watches
-  `feat/push-notifications` when it watches `main`.)
+  `feat/push-notifications` when it watches `main`.
 - The several similarly-named repos that were under the old `ghostzeronz-coder`
   account are empty or abandoned.
 - **The real Expo app lives in `artifacts/ghostface/`**, not the repo root.
   Run `expo`/`pnpm` app commands from there. The root is a pnpm workspace;
   `pnpm-workspace.yaml` lists packages **explicitly**, not by glob — add new
   ones by hand.
+- ⛔ **WireGuard is VENDORED at `artifacts/ghostface/native/wireguard-apple/` —
+  never turn it back into a Swift Package URL.** The VPN extension used to
+  resolve it from `github.com/ghostzeronz-coder/wireguard-apple`, and **that
+  repo is 404**. Any tree predating `c246fc8` (2 Sep 2026) therefore dies at
+  `xcodebuild -resolvePackageDependencies` and **cannot be built at all** — this
+  is what killed build 76. `scripts/link-wireguard-kit.mjs` rewrites any SPM
+  package whose `repositoryURL` contains `wireguard-apple` to the vendored copy.
+
 - `artifacts/api-server/` is the backend (Express + TypeScript, deployed to
   Railway).
 - **vault2fa is not part of this repo.** It is a separate project at
