@@ -43,9 +43,14 @@ transfers, so nothing was forwarding. Read as an org **admin**,
 counts, not a listing an OAuth restriction could have filtered — so this was
 deletion, not a permissions artefact. The org (created 24 Aug 2026) was empty.
 
-**For ~28 hours the canonical repo had no reachable remote and 11 unpushed
-commits existed only on this disk**, including `1c588d9` (the CI verify
-workflow) and the WireGuard vendoring fixes `c246fc8` / `94b3f0e`.
+**The canonical repo had no reachable remote, with 11 unpushed commits
+existing only on this disk** — including `1c588d9` (the CI verify workflow) and
+the WireGuard vendoring fixes `c246fc8` / `94b3f0e`. **Bounded by the
+`refs/remotes/origin/main` reflog:** last successful push to the old repo was
+`d0916a7` at **1 Sep 22:02:22 -0700**; the new remote received `main` at
+**2 Sep 19:40:10 -0700**. So the deletion happened inside that 21h38m window and
+the exposure was **at most 21h38m**. The exact deletion time is not recoverable
+from here — GitHub exposes no API for it.
 
 ### Recreated and pushed, 3 Sep 2026
 
