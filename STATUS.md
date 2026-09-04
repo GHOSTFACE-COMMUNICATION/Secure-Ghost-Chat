@@ -4,7 +4,7 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
+Last updated: 2026-09-04 (Claude Code — **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged — `main` untouched, build 77 unaffected; see the 4 Sep section.** ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
 was recreated**; read the 3 Sep section directly below first — the 2 Sep
 "transfer to an organisation" never happened, 11 commits including CI were
 unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
@@ -29,6 +29,36 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 4 Sep 2026 — AppContext.tsx split (phase 1), and a drifted Replit-era copy in ~/Downloads
+
+✅ **`context/AppContext.tsx` went 5,370 → 4,808 lines** on branch
+`refactor/split-appcontext` (NOT on `main` — deliberately, while build 77 is
+pending). Three new modules, all verbatim extractions with `AppContext` still
+re-exporting every previously-exported name, so none of the ~29 importing
+files changed: `lib/envelope.ts` (sealed-sender envelope v4 machinery —
+pure, no RN imports, now directly unit-testable), `context/types.ts` (domain
+types), `context/defaults.ts` (disappear policy, `VPN_SERVERS`, signal sets,
+default factories). **Crypto text untouched** — key-generation/registration
+helpers stayed in AppContext so the COMPLIANCE.md §5 "crypto diff zero"
+gate holds; `lib/doubleRatchet.ts` was not split for the same reason. The
+`AppProvider` body (~3,800 lines) is phase 2 — splitting it into domain
+contexts changes re-render behaviour and wants its own review. Verified:
+typecheck exit 0, **142/142 tests**, lint delta zero (the three pre-existing
+`no-empty` errors moved to lines 1092/1752/1764 — TRACKER's lint row notes it).
+
+⚠️ **A Replit-era duplicate exists at `~/Downloads/Ghostface-Mobile`** (all
+git remotes point at `ssh.riker.replit.dev`; `.replit` config present — same
+family as the deleted `Secure-Ghost-Chat` copy). **The drift is
+bidirectional**: it carries 3–4 Sep commits ("health check tests and push
+notification logic", "multiline signing keys guide") and files this repo
+lacks (`components/QRCode.tsx`, `GhostRevealMark.web.tsx`), while this repo
+is newer elsewhere (e.g. `tokens.ts`). Nothing was taken from it and nothing
+deleted. **If it holds wanted work it must be MANUALLY ported** — Replit
+lines share no git ancestor with `main` (see repo CLAUDE.md); never `git
+merge`. Whether to port or discard is Benji's call.
 
 ---
 

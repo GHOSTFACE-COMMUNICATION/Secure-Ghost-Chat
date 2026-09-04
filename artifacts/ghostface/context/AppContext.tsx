@@ -86,6 +86,63 @@ import {
   isValidWalletPhrase,
 } from "@/lib/solanaWallet";
 
+import {
+  MAX_PROFILE_PHOTO_CHARS,
+  applyReaction,
+  previewForMessage,
+  unwrapPayload,
+  wrapPayload,
+} from "@/lib/envelope";
+import {
+  CALL_SIGNAL_TYPES,
+  DEFAULT_DISAPPEAR_SEC,
+  DEFAULT_TRANSACTIONS,
+  GHOSTPAD_SIGNAL_TYPES,
+  VPN_SERVERS,
+  buildSystemMessage,
+  clampDisappearSec,
+  createDefaultConversations,
+} from "./defaults";
+import type {
+  AppToken,
+  Attachment,
+  CallLogEntry,
+  CallSignal,
+  Conversation,
+  GhostpadSession,
+  GhostpadSignal,
+  IncomingCall,
+  Message,
+  OutboxItem,
+  Transaction,
+  VPNServer,
+} from "./types";
+
+// The extracted modules keep AppContext as the canonical import surface:
+// everything consumers previously imported from here is re-exported below.
+export { MAX_ATTACHMENT_B64_CHARS, MAX_PROFILE_PHOTO_CHARS } from "@/lib/envelope";
+export type { Attachment } from "@/lib/envelope";
+export type {
+  AppToken,
+  CallLogEntry,
+  CallSignal,
+  Conversation,
+  GhostpadSession,
+  GhostpadSignal,
+  IncomingCall,
+  Message,
+  OutboxItem,
+  Transaction,
+  VPNServer,
+} from "./types";
+export {
+  DEFAULT_DISAPPEAR_SEC,
+  DISAPPEAR_MAX_SEC,
+  DISAPPEAR_MIN_SEC,
+  VPN_SERVERS,
+  clampDisappearSec,
+} from "./defaults";
+
 const toHex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, "0")).join("");
 const fromHex = (h: string) => Uint8Array.from(h.match(/.{2}/g)!.map(b => parseInt(b, 16)));
 
@@ -107,351 +164,6 @@ function signSPKLocal(spkPubHex: string, ikSignPrivHex: string): string {
   return toHex(sig);
 }
 
-export type Attachment =
-  | {
-      kind: "image";
-      uri: string;
-      width?: number;
-      height?: number;
-      mimeType?: string;
-    }
-  | {
-      // Photo stored as an encrypted blob on the server. The wire envelope
-      // carries only `blobId` + per-blob symmetric `key`; the receiver
-      // fetches and decrypts the bytes locally before rendering. `uri` is
-      // local-only (sender's preview before send, or receiver's decrypted
-      // cache) and is stripped by `wrapPayload`.
-      kind: "image-ref";
-      blobId: string;
-      key: string;
-      mimeType?: string;
-      width?: number;
-      height?: number;
-      uri?: string;
-    }
-  | {
-      kind: "file";
-      uri: string;
-      name: string;
-      size?: number;
-      mimeType?: string;
-    }
-  | {
-      kind: "audio";
-      uri: string;
-      durationMs?: number;
-      mimeType?: string;
-    };
-
-export interface Message {
-  id: string;
-  text: string;
-  fromMe: boolean;
-  timestamp: number;
-  encrypted: boolean;
-  sealed: boolean;
-  ciphertext?: string;
-  fingerprint?: string;
-  /**
-   * Disappearing-message duration in ms, sender-authoritative — travels
-   * inside the encrypted envelope (`SealedEnvelope.x`). Present on both
-   * sender's and receiver's copies once a disappear timer applies. Absent
-   * `expiresAt` alongside a present `ttlMs` means "not yet viewed" on the
-   * receiver's side — the timer hasn't started.
-   */
-  ttlMs?: number;
-  /** Local receipt of the first view. Stamped once, on first render. */
-  viewedAt?: number;
-  expiresAt?: number;
-  pending?: boolean;
-  failed?: boolean;
-  attachment?: Attachment;
-  /**
-   * Non-user system event injected into the timeline (e.g. peer self-
-   * destructed, invite/key material expired). Rendered as a centered,
-   * muted notice — never long-pressable, never editable, never re-sent.
-   */
-  system?: boolean;
-  /**
-   * emoji -> reactor aliases. Applying/removing a reaction never touches
-   * this message's `viewedAt`/`expiresAt` — a reaction on an unviewed
-   * disappearing message must not start its timer (see the reaction
-   * branches in the WS receive handlers and `sendReaction`).
-   */
-  reactions?: Record<string, string[]>;
-}
-
-export interface OutboxItem {
-  id: string;
-  conversationId: string;
-  text: string;
-  attempts?: number;
-  attachment?: Attachment;
-  /**
-   * Original compose timestamp (ms since epoch). Drives the ordering
-   * invariant — drainOutbox always processes oldest-composed first,
-   * regardless of how many times any individual item has been retried.
-   * Set when the item is first pushed onto the outbox; never mutated.
-   */
-  createdAt: number;
-  /**
-   * Earliest moment (ms since epoch) at which this item should next be
-   * attempted. Set after a delivery failure to the exponential-backoff
-   * computed time. The drain loop skips items whose nextAttemptAt is in
-   * the future and reschedules the timer accordingly. Absent → "drain
-   * immediately when the loop reaches this item."
-   */
-  nextAttemptAt?: number;
-  /**
-   * Present only for a queued reaction send — mutually exclusive with real
-   * message content (`text` is "" alongside this). Lets drainOutbox build a
-   * reaction envelope instead of a text envelope at actual send time, while
-   * reusing all the same backoff/retry/ordering machinery as text messages.
-   */
-  reaction?: { m: string; e: string; o: boolean };
-}
-
-// Legacy attachment envelope (v1) — carried no sender. Still parsed on receive
-// for backward compatibility, but never emitted anymore.
-const ATTACHMENT_ENVELOPE_VERSION = 1;
-const ATTACHMENT_ENVELOPE_PREFIX = `{"_gfa":${ATTACHMENT_ENVELOPE_VERSION}`;
-
-// Sealed-sender envelope (v4). Every outgoing message is now wrapped in this
-// envelope BEFORE encryption so the sender's alias travels only inside the
-// ciphertext — never as a plaintext wire field or stored column. The receiver
-// recovers the sender after a successful decrypt (`f`). `t` is the text body,
-// `a` an optional attachment.
-//
-// v3 added `x` — the disappearing-message TTL in ms, sender-authoritative.
-// It's a DURATION, never an absolute timestamp: absolute timestamps would
-// leak/rely on clock-skew between the two devices. The receiver starts its
-// own local expiry countdown from `x` only once the message is actually
-// viewed (see `markMessagesViewed`); the sender starts its own copy's
-// countdown at send time.
-//
-// v4 adds:
-//   `i` — sender-generated stable message id, REQUIRED. Sender and receiver
-//   previously minted independent ids for the same logical message; the
-//   receiver now adopts `i` verbatim instead of minting its own, so both
-//   sides agree on one id (needed for reactions to target a message, and for
-//   read/delete state to mean the same thing on both devices).
-//
-//   `r` — a reaction: `{ m: target message id, e: emoji, o: true=add /
-//   false=remove }`. Explicit intent, not a toggle: the receiver SETS
-//   membership from `o` and must never flip/toggle on receipt, or a
-//   duplicate delivery (retry, outbox replay) would silently reverse the
-//   reaction. `t` is forced to "" whenever `r` is present, and a reaction
-//   envelope carries no `a`/`x` — it isn't rendered as a message at all (see
-//   the reaction branch in the WS receive handlers).
-//
-// Hard version bump, no v3 compat shim: `unwrapPayload` gates on an exact
-// `_gf === SEALED_ENVELOPE_VERSION` match (via the version-stamped prefix
-// below), so a v3-only build receiving a v4 envelope fails the prefix check
-// and falls through to the plain-text branch rather than partially trusting
-// a v4 envelope it doesn't understand — it never silently drops just the
-// id-agreement/reaction semantics while rendering the rest normally.
-const SEALED_ENVELOPE_VERSION = 4;
-const SEALED_ENVELOPE_PREFIX = `{"_gf":${SEALED_ENVELOPE_VERSION}`;
-
-interface SealedEnvelope {
-  _gf: number;
-  f: string;
-  /** Sender-generated stable message id. Meaningless/unused for a reaction envelope. */
-  i: string;
-  t: string;
-  a?: Attachment;
-  /** Disappearing-message TTL in ms. Omitted entirely when no timer applies. */
-  x?: number;
-  /** Reaction: target message id, emoji, and explicit add(true)/remove(false) intent. */
-  r?: { m: string; e: string; o: boolean };
-  /** Profile photo control message: a small `data:image/jpeg;base64,...` avatar
-   *  (or "" to clear). When present this is a silent control message — never
-   *  rendered as a Message; the recipient stores it as this contact's avatar. */
-  p?: string;
-}
-
-function wrapPayload(
-  from: string,
-  id: string,
-  text: string,
-  attachment?: Attachment,
-  ttlMs?: number,
-  reaction?: { m: string; e: string; o: boolean },
-  profilePhoto?: string,
-): string {
-  // A reaction OR a profile-photo update is a control message: no text body,
-  // no attachment, no disappear timer.
-  const isControl = !!reaction || profilePhoto !== undefined;
-  // image-ref carries a local-only `uri` for the sender's own preview that
-  // must NOT be sent over the wire — strip it so the recipient only ever
-  // sees the blob reference + key. Not applicable to a reaction, which
-  // carries no attachment.
-  let wireAttachment: Attachment | undefined;
-  if (!isControl && attachment) {
-    if (attachment.kind === "image-ref") {
-      const { kind, blobId, key, mimeType, width, height } = attachment;
-      wireAttachment = { kind, blobId, key, mimeType, width, height };
-    } else {
-      wireAttachment = attachment;
-    }
-  }
-  const env: SealedEnvelope = { _gf: SEALED_ENVELOPE_VERSION, f: from, i: id, t: isControl ? "" : text };
-  if (wireAttachment) env.a = wireAttachment;
-  if (!isControl && ttlMs) env.x = ttlMs;
-  if (reaction) env.r = reaction;
-  if (profilePhoto !== undefined) env.p = profilePhoto;
-  return JSON.stringify(env);
-}
-
-// Only allow inline base64 data URIs as attachment payloads. This is the
-// only transport we control end-to-end through E2EE — any other URI scheme
-// (http(s), file, content) would either leak the recipient's IP via a silent
-// network fetch when rendered or reference attacker-controlled local
-// content. Reject anything else as plain text rather than render it.
-const DATA_IMAGE_URI_RE = /^data:image\/(png|jpe?g|gif|webp|heic|heif);base64,[A-Za-z0-9+/=]+$/i;
-const DATA_AUDIO_URI_RE = /^data:audio\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i;
-const DATA_FILE_URI_RE  = /^data:[a-zA-Z0-9.+/-]+;base64,[A-Za-z0-9+/=]+$/i;
-const MAX_ATTACHMENT_NAME_LEN = 200;
-// Hard cap on the base64-encoded payload of any attachment. 5 MiB decoded is
-// ~6.99 MiB encoded; we round up to 7.5 MiB of base64 chars to leave a small
-// margin and still bound memory/decode work. Anything larger is rejected at
-// validation time (both on send and on receive) so a malicious peer cannot
-// force the client to decode an arbitrarily large blob.
-export const MAX_ATTACHMENT_B64_CHARS = 7 * 1024 * 1024 + 512 * 1024;
-
-// Profile-photo avatars are resized to ~128px JPEG (a few KB); cap the E2E
-// data URI generously at 400 KB of base64 so a peer cannot ship a huge image.
-export const MAX_PROFILE_PHOTO_CHARS = 400 * 1024;
-
-// Validates a blob reference for the image-ref attachment kind.
-const BLOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const BLOB_KEY_RE = /^[0-9a-f]{64}$/i;
-const IMAGE_MIME_RE = /^image\/(png|jpe?g|gif|webp|heic|heif)$/i;
-
-function isValidAttachment(a: unknown): a is Attachment {
-  if (!a || typeof a !== "object") return false;
-  const att = a as Record<string, unknown>;
-
-  // image-ref carries blob references instead of an inline data URI.
-  if (att.kind === "image-ref") {
-    if (typeof att.blobId !== "string" || !BLOB_ID_RE.test(att.blobId)) return false;
-    if (typeof att.key !== "string" || !BLOB_KEY_RE.test(att.key)) return false;
-    if (att.mimeType !== undefined) {
-      if (typeof att.mimeType !== "string" || !IMAGE_MIME_RE.test(att.mimeType)) return false;
-    }
-    if (att.width !== undefined && typeof att.width !== "number") return false;
-    if (att.height !== undefined && typeof att.height !== "number") return false;
-    // `uri` is local-only for the sender's preview. A wire payload that
-    // contains it is malformed — and if we silently accepted it, a peer
-    // could inject any URL (e.g. https://attacker.example/track.png) and
-    // force <Image> to fetch it on the receiver, leaking IP/metadata. So
-    // any incoming `uri` field is a hard reject; the sender's own copy
-    // already passed through `wrapPayload`, which strips it on its way
-    // out and never re-runs validation.
-    if (att.uri !== undefined) return false;
-    return true;
-  }
-
-  if (typeof att.uri !== "string") return false;
-  if (att.uri.length > MAX_ATTACHMENT_B64_CHARS) return false;
-  if (att.mimeType !== undefined && typeof att.mimeType !== "string") return false;
-
-  if (att.kind === "image") {
-    if (!DATA_IMAGE_URI_RE.test(att.uri)) return false;
-    if (att.width !== undefined && typeof att.width !== "number") return false;
-    if (att.height !== undefined && typeof att.height !== "number") return false;
-    return true;
-  }
-  if (att.kind === "audio") {
-    if (!DATA_AUDIO_URI_RE.test(att.uri)) return false;
-    if (att.durationMs !== undefined && typeof att.durationMs !== "number") return false;
-    return true;
-  }
-  if (att.kind === "file") {
-    if (!DATA_FILE_URI_RE.test(att.uri)) return false;
-    if (typeof att.name !== "string" || att.name.length === 0 || att.name.length > MAX_ATTACHMENT_NAME_LEN) return false;
-    if (att.size !== undefined && typeof att.size !== "number") return false;
-    return true;
-  }
-  return false;
-}
-
-function unwrapPayload(plaintext: string): {
-  text: string;
-  attachment?: Attachment;
-  from?: string;
-  ttlMs?: number;
-  /** Sender-generated stable message id. Absent only for a non-v4/malformed
-   *  payload falling through to the plain-text branch — there's nothing to
-   *  recover an id from in that case. */
-  id?: string;
-  reaction?: { m: string; e: string; o: boolean };
-  /** Present for a profile-photo control message: a data:image/jpeg URI, or ""
-   *  to clear. Distinct from `undefined` (no profile-photo field at all). */
-  profilePhoto?: string;
-} {
-  // v4 sealed-sender envelope — recovers the sender alias (`f`), stable
-  // message id (`i`), body, optional attachment, optional disappearing TTL
-  // (`x`), and optional reaction (`r`). This is the only format emitted now.
-  if (plaintext.startsWith(SEALED_ENVELOPE_PREFIX)) {
-    try {
-      const parsed = JSON.parse(plaintext) as {
-        _gf?: unknown; f?: unknown; i?: unknown; t?: unknown; a?: unknown; x?: unknown;
-        r?: { m?: unknown; e?: unknown; o?: unknown }; p?: unknown;
-      };
-      const reactionOk =
-        parsed.r === undefined ||
-        (typeof parsed.r.m === "string" && typeof parsed.r.e === "string" && typeof parsed.r.o === "boolean");
-      const photoOk =
-        parsed.p === undefined ||
-        (typeof parsed.p === "string" &&
-          (parsed.p === "" ||
-            (parsed.p.length <= MAX_PROFILE_PHOTO_CHARS && DATA_IMAGE_URI_RE.test(parsed.p))));
-      if (
-        parsed._gf === SEALED_ENVELOPE_VERSION &&
-        typeof parsed.f === "string" &&
-        typeof parsed.i === "string" &&
-        typeof parsed.t === "string" &&
-        (parsed.a === undefined || isValidAttachment(parsed.a)) &&
-        (parsed.x === undefined || (typeof parsed.x === "number" && parsed.x > 0)) &&
-        reactionOk &&
-        photoOk
-      ) {
-        return {
-          text: parsed.t,
-          from: parsed.f,
-          id: parsed.i,
-          ...(parsed.a !== undefined ? { attachment: parsed.a as Attachment } : {}),
-          ...(parsed.x !== undefined ? { ttlMs: parsed.x as number } : {}),
-          ...(parsed.r !== undefined ? { reaction: parsed.r as { m: string; e: string; o: boolean } } : {}),
-          ...(parsed.p !== undefined ? { profilePhoto: parsed.p as string } : {}),
-        };
-      }
-    } catch {
-      // fall through — treat as plain text
-    }
-    return { text: plaintext };
-  }
-  // v1 legacy attachment envelope (no sender). Retained for back-compat.
-  if (plaintext.startsWith(ATTACHMENT_ENVELOPE_PREFIX)) {
-    try {
-      const parsed = JSON.parse(plaintext) as { _gfa?: unknown; t?: unknown; a?: unknown };
-      // Strict schema: any deviation falls back to plain text so legitimate
-      // user-typed JSON cannot be reinterpreted as an attachment envelope.
-      if (
-        parsed._gfa === ATTACHMENT_ENVELOPE_VERSION &&
-        typeof parsed.t === "string" &&
-        isValidAttachment(parsed.a)
-      ) {
-        return { text: parsed.t, attachment: parsed.a };
-      }
-    } catch {
-      // fall through — treat as plain text
-    }
-  }
-  return { text: plaintext };
-}
-
 /** Resize a picked profile photo down to a ~128px JPEG data URI for E2E
  *  transport. Returns null on failure or if the result exceeds the cap. */
 async function compressAvatar(uri: string): Promise<string | null> {
@@ -470,213 +182,10 @@ async function compressAvatar(uri: string): Promise<string | null> {
   }
 }
 
-/**
- * Pure: set or clear `alias` in `reactions[emoji]`. Never a toggle — the
- * caller decides add vs remove. On receive, `add` comes directly from the
- * envelope's `o` (explicit intent); toggling here based on prior presence
- * would let a duplicate/retried delivery silently reverse the reaction. The
- * sender's UI computes `add` itself (by checking its own current state)
- * before calling this for its local optimistic update.
- */
-function applyReaction(
-  reactions: Record<string, string[]> | undefined,
-  emoji: string,
-  alias: string,
-  add: boolean,
-): Record<string, string[]> | undefined {
-  const current = reactions?.[emoji] ?? [];
-  const has = current.includes(alias);
-  if (add === has) return reactions;
-  const nextList = add ? [...current, alias] : current.filter((a) => a !== alias);
-  const next = { ...(reactions ?? {}) };
-  if (nextList.length === 0) delete next[emoji];
-  else next[emoji] = nextList;
-  return Object.keys(next).length > 0 ? next : undefined;
-}
-
-function previewForMessage(text: string, attachment?: Attachment): string {
-  if (text && text.trim()) return text;
-  if (!attachment) return text;
-  if (attachment.kind === "image" || attachment.kind === "image-ref") return "📷 Photo";
-  if (attachment.kind === "audio") return "🎙 Voice note";
-  if (attachment.kind === "file") return `📎 ${attachment.name}`;
-  return text;
-}
-
-export interface Conversation {
-  id: string;
-  alias: string;
-  lastMessage: string;
-  timestamp: number;
-  unread: number;
-  messages: Message[];
-  /**
-   * This device's own default disappear-timer for messages it SENDS in this
-   * conversation — travels to the peer inside each envelope as `ttlMs`, not
-   * as a standing setting. Purely local and one-directional: it has no
-   * effect on incoming messages, whose TTL comes from their own envelope.
-   */
-  disappearAfterSec?: number;
-  /**
-   * Local chat wallpaper choice, from CHAT_COLOR_PALETTE (lib/chatColors.ts).
-   * `undefined` renders as the app default. Purely device-local — never
-   * enters wrapPayload/unwrapPayload or any envelope; a Conversation object
-   * is never serialized onto the wire anywhere in this codebase.
-   */
-  bgColor?: string;
-  /**
-   * Custom chat wallpaper photo — a file:// URI under the app's own
-   * documentDirectory (chat-bg/), copied there at pick time so the image
-   * picker's cache URI can't dangle. Mutually exclusive with bgColor.
-   * Device-local like bgColor and never transmitted — but note: the image
-   * FILE itself lives app-sandboxed yet UNENCRYPTED, unlike the
-   * conversation blob. Acceptable for a wallpaper; never reuse this
-   * pattern for message content.
-   */
-  bgImageUri?: string;
-  safetyNumber?: string;
-  drSession?: DRSession;
-  pendingX3DHHeader?: string;
-  isRealContact?: boolean;
-  verified?: boolean;
-  /** The contact's profile photo (data:image/jpeg;base64), received E2E via a
-   *  profile-photo control message. Rendered as the avatar with a letter
-   *  fallback. Small; lives inside the encrypted conversation blob. */
-  contactPhoto?: string;
-  /**
-   * Opaque per-recipient routing token (task #128). Messages are addressed to
-   * this instead of the human alias so the server never sees who is talking to
-   * whom. Captured from the prekey bundle when we initiate, or lazily resolved
-   * via /users/exists when we're the replying side of an inbound session.
-   */
-  recipientDeliveryId?: string;
-  /**
-   * Set when the peer self-destructed (broadcast a "departed" notice via the
-   * server before wiping locally) or their invite/key material has expired
-   * with no successful exchange. UI shows a "SELF-DESTRUCTED" badge,
-   * disables the composer, and renders a system message in chat.
-   */
-  destroyedAt?: number;
-  /**
-   * Audit #12 — trust-on-first-use pin of the contact's long-term X25519
-   * identity key (X3DH `ikA`), lowercase hex. Recorded the first time we
-   * establish a session with them and compared on every later handshake.
-   *
-   * The receive path's existing alias->key binding asks the SERVER what key
-   * an alias has, then checks the wire header against that answer; both halves
-   * come from the server, so a server that substitutes both is never caught.
-   * This pin is the anchor that check lacks: it is a value the server has
-   * never had access to. Lives inside the encrypted conversation blob and is
-   * never serialized onto the wire.
-   */
-  pinnedIdentityKey?: string;
-  /** When `pinnedIdentityKey` was first recorded. Display/forensics only. */
-  pinnedAt?: number;
-  /**
-   * Audit #12 — set when a handshake presented an identity key that does not
-   * match `pinnedIdentityKey`. Its presence LOCKS the conversation: sends are
-   * refused and inbound sessions are not adopted, until the user explicitly
-   * accepts the new key (`acceptIdentityKeyChange`) or deletes the chat.
-   *
-   * Neither `pinnedIdentityKey` nor `safetyNumber` may be overwritten while
-   * this is set — the stored safety number is the evidence of what the user
-   * previously verified, and repainting it is precisely the failure this
-   * finding exists to close.
-   */
-  identityKeyChanged?: {
-    /** The key that was offered and rejected, lowercase hex. */
-    presentedKey: string;
-    detectedAt: number;
-  };
-}
-
 // Pure expiry predicate lives in lib/expiry.ts so it can be unit-tested
 // without React Native or AsyncStorage in scope. Re-exported here to keep
 // AppContext as the canonical import surface for consumers.
 export { evaluateExpiredHandshake };
-
-export interface Transaction {
-  id: string;
-  type: "send" | "receive";
-  token: "FANTASMA" | "GFC";
-  amount: number;
-  address: string;
-  timestamp: number;
-}
-
-// Mirrors the shape of GET /api/tokens on the api-server — the mint address
-// and network are only present once a token has actually been deployed
-// on-chain (see routes/tokens.ts). Fetched live rather than hardcoded so
-// the wallet screen tracks whatever's actually deployed without a client
-// release every time a mint address changes.
-export interface AppToken {
-  id: number;
-  name: string;
-  symbol: string;
-  decimals: number;
-  mintAddress: string | null;
-  network: string | null;
-}
-
-export interface VPNServer {
-  id: string;
-  name: string;
-  country: string;
-  region: string;
-  shortRegion: string;
-  flag: string;
-}
-
-export interface CallSignal {
-  type: string;
-  from: string;
-  payload?: string;
-  callId?: string;
-  callMode?: string;
-}
-
-export interface GhostpadSignal {
-  type: "ghostpad-created" | "ghostpad-paired" | "ghostpad-text" | "ghostpad-wipe" | "ghostpad-ended" | "ghostpad-error";
-  code?: string;
-  text?: string;
-}
-
-/**
- * Session identity only — code + pairing mode. Deliberately excludes the
- * live pad text (that stays per-screen and ephemeral, matching the "nothing
- * lingers" design). Lives in AppState rather than a screen-local useState so
- * a lock/unmount (share sheet, navigation away and back) doesn't strand the
- * user with a fresh idle screen after they've already shared the code.
- */
-export interface GhostpadSession {
-  mode: "idle" | "creating" | "joining" | "paired";
-  code: string | null;
-}
-
-export interface IncomingCall {
-  callId: string;
-  from: string;
-  mode: "voice" | "video";
-}
-
-/**
- * Local call-history record. Purely device-side, like Conversation — this
- * app is metadata-blind (the server never learns who called whom), so each
- * device builds its own log from the WebRTC signals it directly observed.
- * A caller and callee therefore each get their own independent entry for
- * the same call, not a shared/synced one.
- */
-export interface CallLogEntry {
-  id: string;
-  alias: string;
-  direction: "incoming" | "outgoing";
-  mode: "voice" | "video";
-  outcome: "answered" | "missed" | "declined";
-  timestamp: number;
-  durationSec?: number;
-  /** Cleared when the user views the Calls tab; drives the missed-call badge. */
-  seen: boolean;
-}
 
 interface AppState {
   alias: string | null;
@@ -862,77 +371,6 @@ interface AppContextType extends AppState {
   loaded: boolean;
   vpnAutoReconnecting: boolean;
 }
-
-/**
- * Build a local, non-transported system/status Message (e.g. the
- * "secure channel established" banner). These messages never cross the
- * wire and carry no ciphertext — they are purely informational UI rows.
- */
-function buildSystemMessage(
-  text: string,
-  disappearAfterSec?: number,
-): Message {
-  const expiresAt = disappearAfterSec
-    ? Date.now() + disappearAfterSec * 1000
-    : undefined;
-
-  return {
-    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-    text,
-    fromMe: false,
-    timestamp: Date.now(),
-    encrypted: true,
-    sealed: true,
-    expiresAt,
-  };
-}
-
-/**
- * Build the default conversations with fresh DR sessions each call.
- * Called on first launch and after panic wipe — ensures all default
- * conversations are always DR-enabled from the first render.
- */
-function createDefaultConversations(): Conversation[] {
-  return [];
-}
-
-// ── Disappearing messages: always on ────────────────────────────────────────
-// Policy (Benji, 19 Aug 2026): every conversation has a disappear timer,
-// no OFF setting. Range 5s–7d, default 1h. clampDisappearSec is the single
-// place that enforces it — applied to loads (migration of pre-policy
-// conversations), local setting changes, and peer-synced "disappear-timer"
-// signals (whose sender may be an older build that still knows about OFF /
-// undefined).
-export const DISAPPEAR_MIN_SEC = 5;
-export const DISAPPEAR_MAX_SEC = 7 * 24 * 3600;
-export const DEFAULT_DISAPPEAR_SEC = 3600;
-
-export function clampDisappearSec(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_DISAPPEAR_SEC;
-  return Math.min(DISAPPEAR_MAX_SEC, Math.max(DISAPPEAR_MIN_SEC, Math.round(value)));
-}
-
-const CALL_SIGNAL_TYPES = new Set([
-  "call-ring", "call-accept", "call-hangup",
-  "call-offer", "call-answer", "call-ice",
-]);
-
-const GHOSTPAD_SIGNAL_TYPES = new Set([
-  "ghostpad-created", "ghostpad-paired", "ghostpad-text", "ghostpad-wipe", "ghostpad-ended", "ghostpad-error",
-]);
-
-const DEFAULT_TRANSACTIONS: Transaction[] = [];
-
-const VPN_SERVERS: VPNServer[] = [
-  { id: "1", name: "US East", country: "United States", region: "New York", shortRegion: "NYC", flag: "🇺🇸" },
-  { id: "2", name: "EU West", country: "Germany", region: "Frankfurt", shortRegion: "FRA", flag: "🇩🇪" },
-  { id: "3", name: "Asia Pacific", country: "Japan", region: "Tokyo", shortRegion: "TYO", flag: "🇯🇵" },
-  { id: "4", name: "Nordic", country: "Sweden", region: "Stockholm", shortRegion: "ARN", flag: "🇸🇪" },
-  { id: "5", name: "Offshore", country: "Iceland", region: "Reykjavik", shortRegion: "KEF", flag: "🇮🇸" },
-  { id: "6", name: "SE Asia", country: "Singapore", region: "Singapore", shortRegion: "SIN", flag: "🇸🇬" },
-];
-
-export { VPN_SERVERS };
 
 const SECURE_PIN_KEY = "ghostface_pin";
 const SECURE_DURESS_PIN_KEY = "ghostface_duress_pin";
