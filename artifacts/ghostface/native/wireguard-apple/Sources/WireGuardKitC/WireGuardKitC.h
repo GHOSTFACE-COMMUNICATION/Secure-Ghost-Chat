@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
+// The ctl_info/sockaddr_ctl redeclarations below use the BSD u_* typedefs.
+// Upstream relies on them arriving implicitly; under explicit Clang modules
+// they must be imported from a named module or the header fails to compile.
+#include <sys/types.h>
+
 #include "key.h"
 #include "x25519.h"
 
