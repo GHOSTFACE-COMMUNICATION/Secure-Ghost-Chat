@@ -4,7 +4,7 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-04 (Claude Code — **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged — `main` untouched, build 77 unaffected; see the 4 Sep section.** ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
+Last updated: 2026-09-04 (Claude Code — 🔴 **TWO NEW BLOCKERS, both above 90592, found by running the app on a simulator: (A) the app HARD-CRASHES at launch on iOS 27 — no `UIApplicationSceneManifest` and no scene lifecycle, so UIKit traps; verified iOS-27-only, it runs fine on 26.5. So a build 78 uploaded today would crash on launch for every iOS 27 tester — DO NOT upload until the scene fix lands. (B) the vendored WireGuard did not compile at all; fixed with one `#include <sys/types.h>` in `WireGuardKitC.h`, and that is the best candidate yet for build 77's failure. Needs a COMPLIANCE §4 row. Read the top section.** Also: 90592 re-checked a third time after the latest Support call — unchanged, and a version/build bump cannot clear it. Previously, same day: ⛔ **CORRECTION: build 77 already ran, it ERRORED, and its tree was `main` PLUS the unmerged split — so the split is NOT excluded from the failure, and the "build 77 unaffected" claim previously in this header was backwards. No artifact was produced, so 90592 was never reached; 77 is consumed and the next production build is 78. The two June declarations were re-read live today and are still stuck — do NOT run `eas submit`, it would be attempt 11 and would fail the same way. Read the top section first.** ⚠️ Also: the Replit-era duplicate now has a SECOND copy, inside an Xcode scratch project. Previously, same day: **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged** (~~`main` untouched, build 77 unaffected~~ — retracted above). ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
 was recreated**; read the 3 Sep section directly below first — the 2 Sep
 "transfer to an organisation" never happened, 11 commits including CI were
 unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
@@ -32,11 +32,266 @@ the stale-ring drops.
 
 ---
 
+## 4 Sep 2026 — 🔴 TWO NEW BLOCKERS found by building locally for the simulator
+
+Ran the app on a simulator for the first time in this record, via
+`ios:sim:build`. It produced **two findings that both outrank 90592**, and one
+of them means **build 78 must not be uploaded as-is**.
+
+### 🔴 BLOCKER A — the app HARD-CRASHES at launch on iOS 27
+
+`com.ghostface.app` **traps 2.4s after launch on iOS 27.0**, before any JS runs.
+Crash `~/Library/Logs/DiagnosticReports/GHOSTFACE-2026-09-04-102218.ips`:
+
+- **`EXC_BREAKPOINT` / `SIGTRAP`**, faulting thread 0, top frame
+  **`__UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke`**
+  (UIKitCore), reached from `-[UIApplication workspace:didCreateScene:…]`.
+
+**Cause — confirmed against Apple's own docs, not guessed.**
+*Transitioning to the UIKit scene-based life cycle → "Determine if your app
+needs to migrate"* says migration is required if **either** the
+`UIApplicationSceneManifest` key is missing **or** the app delegate doesn't
+implement `application(_:configurationForConnecting:options:)`. **GHOSTFACE
+fails both:** `UIApplicationSceneManifest` is absent from the built
+`Info.plist`, from `ios/GHOSTFACE/Info.plist` **and** from `app.json`, and
+`ios/GHOSTFACE/AppDelegate.swift` has no scene methods at all. **iOS 27 turned
+that runtime issue into a fatal trap.**
+
+✅ **It is iOS-27-specific — verified by bisecting simulators.** The same binary
+**launches and stays up on iOS 26.5** (pid survived >60s, JS bundle loaded, lock
+screen rendered). So this is new OS enforcement, not a regression in our code,
+and it is **why builds 74/75 were fine in TestFlight** on older iOS.
+
+⛔ **Consequence for the upload plan: a build 78 shipped today would crash on
+launch for every iOS 27 tester.** That is worse than shipping nothing. **The
+scene-lifecycle fix has to land before any resubmission.**
+
+#### 🔬 The manifest-only fix was TESTED and it is NOT sufficient
+
+Added `UIApplicationSceneManifest` (single-scene,
+`UIApplicationSupportsMultipleScenes: false`, one
+`UIWindowSceneSessionRoleApplication` configuration named "Default
+Configuration") straight into the built app's `Info.plist` and reinstalled —
+**verified present in the installed container before testing.** Result:
+
+- ✅ **The trap is gone.** The app no longer crashes; the process survives
+  indefinitely (checked across two launches, one warm and one cold).
+- 🔴 **But the app renders NOTHING.** On a cold launch the framebuffer below the
+  status bar is **pure black — mean brightness 0.00, exactly 1 distinct colour**,
+  and the accessibility hierarchy contains **no `Window` node at all**: the dump
+  is just `Application, pid: …, label: 'GHOSTFACE'` with zero children. No red
+  box, no error overlay — React Native never mounts anything.
+
+**Cause.** `ios/GHOSTFACE/AppDelegate.swift` builds its own window with
+**`window = UIWindow(frame: UIScreen.main.bounds)`** (line 26) in
+`didFinishLaunchingWithOptions`. In a scene-adopting app that window is never
+associated with the `UIWindowScene`, so it is never presented. **Declaring
+scenes without moving window creation into the scene is a swap of one bug for a
+worse one: a crash becomes a silent blank app.**
+
+⛔ **So the real fix is the delegate side, not the plist.** Window creation has to
+move to `scene(_:willConnectTo:options:)` on a `UIWindowSceneDelegate`. ⚠️ **And
+that file is generated** — `ios/` is gitignored and Expo CNG rewrites
+`AppDelegate.swift`, so this **cannot** be fixed by editing it directly. It
+needs either an Expo/React Native version that adopts scenes upstream, or a
+config plugin that patches the delegate. **Neither is scoped yet, and `expo`
+54.0.35 / RN 0.81.5 show no `UIWindowSceneDelegate` or
+`configurationForConnecting` anywhere in their AppDelegate sources.** This is
+bigger than a config tweak — treat it as real work, and note the
+`xcode-integration:uikit-app-modernization` skill targets exactly this
+(`UIScreen.main` and scene lifecycle).
+
+✅ **Nothing was committed from this experiment** — the manifest went only into
+the throwaway built `.app`; `app.json` is untouched.
+
+### ✅ BLOCKER B — the vendored WireGuard did not compile, and it is now fixed
+
+`native/wireguard-apple/Sources/WireGuardKitC/WireGuardKitC.h` **failed to
+build** under explicit Clang modules:
+
+> error: declaration of `u_int32_t` must be imported from module
+> `_DarwinFoundation1.unsigned_types.u_int32_t` before it is required
+> … `could not build Objective-C module 'WireGuardKitC'`
+
+The header redeclares `struct ctl_info` / `struct sockaddr_ctl` from
+`<sys/kern_control.h>` using the BSD `u_int32_t` / `u_char` / `u_int16_t`
+typedefs, and **upstream relies on those arriving implicitly**. Fixed by adding
+**`#include <sys/types.h>`** — 5 lines, comment included. **BUILD SUCCEEDED**
+after it, WireGuardKit / WireGuardKitC / WireGuardKitGo / WireGuardGoBridge all
+compiling from the vendored copy.
+
+⚠️ **COMPLIANCE.md §5 note — this is a nonzero diff against vendored crypto
+source and needs a §4 row before a build ships.** It is **not** a material
+change to cryptographic functionality: no algorithm, protocol or behaviour
+changes, only type visibility at compile time. Same character as the AEAD
+correction counsel cleared in memo §4.15–4.17 as "a routine implementation
+correction". **Recording it is required; counsel almost certainly is not, but
+that call is Benji's.**
+
+🔍 **This is the best candidate yet for why build 77 errored** — it is a
+compile-time failure in the exact code build 77 was meant to be testing, and
+77's 4m30s is consistent with dying in compilation rather than at package
+resolution (build 76's 2m29s). ⚠️ **Still not confirmed:** build 77's Xcode
+logs were **not** read, and whether EAS's Xcode enforces explicit modules the
+way local Xcode-beta 27 does is **unverified**. Do not write this up as the
+cause without reading the log.
+
+### The working simulator loop, for next time
+
+```
+cd artifacts/ghostface
+xcodebuild -workspace ios/GHOSTFACE.xcworkspace -scheme GHOSTFACE \
+  -sdk iphonesimulator -configuration Debug ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+  IPHONEOS_DEPLOYMENT_TARGET=16.0 CLANG_ENABLE_EXPLICIT_MODULES=NO \
+  SWIFT_ENABLE_EXPLICIT_MODULES=NO CODE_SIGNING_ALLOWED=NO build
+xcrun simctl install <udid> <DerivedData>/Debug-iphonesimulator/GHOSTFACE.app
+pnpm exec expo start --port 8081        # dev client needs Metro
+xcrun simctl openurl <udid> "ghostface://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"
+```
+
+🪤 **`IPHONEOS_DEPLOYMENT_TARGET=16.0` on the command line is required**, and the
+committed `ios:sim:build` script omits it. Without it five *resource-bundle* pod
+targets fail the iOS 27 SDK's 15.0 floor — `SDWebImage` (9.0),
+`RNSVG-RNSVGFilters` (12.4), `RevenueCat` and `PurchasesHybridCommon` (13.0),
+`RNCAsyncStorage_resources` (13.4). The app's own target is 16.0, so raising the
+floor lowers nothing. ⚠️ `ios/` is **gitignored** (Expo CNG regenerates it), so
+this cannot be fixed by editing `ios/Podfile` — it needs a `post_install` hook
+in the Expo config plugin, or the flag on the command line.
+
+⚠️ **Expected noise in an unsigned local build:** `expo-secure-store` throws
+*"A required entitlement isn't present"* for keychain reads
+(`getValueWithKeyAsync`), surfacing as `[AppContext] Failed to load persisted
+state`. That is `CODE_SIGNING_ALLOWED=NO` with no embedded entitlements — **not
+an app defect.** The lock screen still renders.
+
+### 90592, checked a third time today — still unchanged
+
+Both June declarations re-read live again after the latest Apple Support call:
+`e4bdc6a7…` and `2cb25cc0…`, still `CREATED`, `codeValue: null`, France `true`,
+no document. ⛔ **A version or build-number bump CANNOT clear this** — the
+declarations are attached to the **app**, not to a version or a build, which
+this file has recorded since 1 Sep and the API confirms again. Support has now
+given the "raise the build number" instruction twice; build 76 already tested it
+and it was a red herring. **The ASC UI / Developer Support route is still the
+only one.**
+
+---
+
+## 4 Sep 2026 — CORRECTION: build 77 already ran, it ERRORED, and it carried the unmerged split
+
+⛔ **Two claims made earlier today in this file are wrong and are retracted
+here:** the header's "**`main` untouched, build 77 unaffected**", and
+"**NEXT: build 77 from `main`**" in the 3 Sep build-76 section. Build 77 **has
+already been run**, it **errored**, and its tree was **not `main`** — it was
+`main` plus the unmerged phase-1 split.
+
+**Read live off the EAS API, 4 Sep** (`eas build:list -p ios --limit 6`):
+
+| | Build 77 |
+|---|---|
+| EAS id | `a49a79ed-7314-4940-bcba-c414231fdcbc` |
+| Build number / version | **77** / 1.0.2 |
+| Profile / distribution | `production` / `store` |
+| Commit | **`3f1ef9ce1b75330acf56d65e750f2d3c5e4fdd43`** |
+| Status | 🔴 **errored** |
+| Ran | 4 Sep 04:35:09 → 04:39:39 local (**4m30s**) |
+| Artifact | **none** — `Application Archive URL: null` |
+
+🔴 **The build tree was `main` + the split commit.** `3f1ef9ce` is the tip of
+`refactor/split-appcontext`, and `git branch -a --contains` puts it on **that
+branch only** — not on `main`, whose tip is
+`eee449b68da2307fa125c1e399ee761c425e0f52`. But the containment runs the other
+way too: **`git log 3f1ef9ce..main` is EMPTY and `main..3f1ef9ce` is exactly
+ONE commit.** So the build carried everything on `main` *plus* the split.
+
+⛔ **Consequence — the split is NOT excluded from build 77's failure.** The
+retracted header line had it backwards: the split commit **is the build's own
+tip**. Everything `main` was supposed to be testing did ship in it — the
+vendored WireGuard (`c246fc8`, `94b3f0e`) and `b6a3113` (peer identity pinning)
+are all ancestors of `3f1ef9ce`, and `artifacts/ghostface/native/wireguard-apple/`
+is present in that tree — but so is a refactor that was deliberately supposed
+to stay out of the build. **Whoever reads build 77's logs must treat the split
+as a live suspect, not as absent.**
+
+⚠️ **The failure reason is NOT established.** `eas build:view` carries no error
+text for this build, and the Xcode logs were **not read** this session. The only
+signal is duration: **4m30s**, against build 76's **2m29s** (which died at
+`-resolvePackageDependencies`) and build 75's **8m14s** success. Running longer
+than 76 is *consistent with* clearing package resolution, i.e. with the
+vendoring having worked — **but that is an inference from a clock, not a
+diagnosis. Read the logs before believing it.**
+Logs: `https://expo.dev/accounts/ghost_face/projects/mayybachh/builds/a49a79ed-7314-4940-bcba-c414231fdcbc`
+
+**What is still unrun, precisely:**
+
+- **Vendored WireGuard in a production build — ATTEMPTED, INCONCLUSIVE.** Not
+  "never attempted" as the 3 Sep section says; attempted in 77, result unread.
+- **90592 — UNTOUCHED by build 77.** No artifact means no submission was
+  possible and Apple was never reached. The 3 Sep expectation that 77 would
+  "test the vendored WireGuard and 90592 at once" **did not happen.**
+
+⏳ **77 is consumed. The next production build is 78.**
+
+### 90592 re-verified live, 4 Sep — both declarations still stuck
+
+Re-read off the ASC API (key `WD424K32M4`,
+`/v1/appEncryptionDeclarations?filter[app]=6781518828`, HTTP 200) —
+**unchanged from 1 and 3 Sep**:
+
+| Declaration | Created | State | Code | Exempt | France | Doc |
+|---|---|---|---|---|---|---|
+| `e4bdc6a7-7013-4a0c-b91c-21fb7766af56` | 19 Jun 2026 | `CREATED` | `null` | `false` | `true` | `null` |
+| `2cb25cc0-c76e-429f-9d10-260946eda9af` | 18 Jun 2026 | `CREATED` | `null` | `false` | `true` | `null` |
+
+**Apple Support's fix still has not landed**, now a day after the 3 Sep
+re-confirmation and four days after the call. Nothing on the record has moved
+since 18/19 June. GF-15's escalation is still the whole path, and it is still
+**ASC UI or Developer Support only**.
+
+⛔ **Do NOT run `eas submit` while these stand.** A submit today would be
+**attempt 11** against build 75 and would fail with 90592 in about a minute,
+exactly as the previous ten did. **There is nothing newer to submit** — builds
+76 and 77 both errored and produced no artifact.
+
+✅ **Build 75 is still the only shippable artifact.** Re-read 4 Sep:
+`22413bd1-7944-4338-aeb1-77efb86233fb`, status `finished`, commit `1e3cec1`,
+fingerprint `a8c7e75a1d2dc2d72bb81689e310c412279960b5`, and
+`Application Archive URL` **non-null**
+(`sOwNGmCLEey2RB62CcBOZEKIUdOGntf8hnQy_Tq0sHs.ipa`). ⚠️ **A non-null URL is a
+weaker check than 1 Sep's HTTP 206** — a range request was **not** re-run.
+Expiry unchanged: **30 Sep**.
+
+⚠️ **`1e3cec1` IS an ancestor of `main`, 48 commits behind its tip.** So build
+75 is not off-trunk, it is simply *old* — and it predates the WireGuard
+vendoring, which is exactly why its tree cannot be rebuilt.
+
+### A SECOND copy of the Replit-era duplicate
+
+⚠️ The duplicate recorded below at `~/Downloads/Ghostface-Mobile` **still
+exists, and a second copy of it now sits inside an Xcode scratch project**:
+`~/Library/Developer/Xcode/UntitledProjects/Untitled Project/Ghostface-Mobile`.
+**Both are at the same tip, `4aa531d42bdc68d3f5be63b38e1f78fb86d066ef`**, both
+carry only `ssh.riker.replit.dev` and `gitsafe-backup` remotes, and **neither
+has a GitHub origin**. Same rule as below: no shared ancestor with `main`,
+**never `git merge`** — port by hand or discard, and that is Benji's call. The
+Xcode project holding it is unrelated scratch work; its `MyApp` target is the
+stock SwiftUI "Hello, world!" template and builds and runs fine.
+
+🪤 **Tooling note:** `eas build:view` **rejects `--non-interactive`**
+("Nonexistent flag") although `eas build:list` accepts it.
+
+---
+
 ## 4 Sep 2026 — AppContext.tsx split (phase 1), and a drifted Replit-era copy in ~/Downloads
 
+⛔ **Correction, see the section above: the claim in this section that the split
+was kept out of the pending build is WRONG — build 77 was built from
+`3f1ef9ce`, this branch's tip, so the split WAS in it.**
+
 ✅ **`context/AppContext.tsx` went 5,370 → 4,808 lines** on branch
-`refactor/split-appcontext` (NOT on `main` — deliberately, while build 77 is
-pending). Three new modules, all verbatim extractions with `AppContext` still
+`refactor/split-appcontext` (not merged to `main` — ~~deliberately, while build
+77 is pending~~ **but build 77 was nonetheless built FROM this branch; see the
+correction above**). Three new modules, all verbatim extractions with `AppContext` still
 re-exporting every previously-exported name, so none of the ~29 importing
 files changed: `lib/envelope.ts` (sealed-sender envelope v4 machinery —
 pure, no RN imports, now directly unit-testable), `context/types.ts` (domain
@@ -134,9 +389,16 @@ number" instruction is not supported by the record — ASC's highest 1.0.2 build
 is **74** and **build 75 is not in ASC at all**, so 75 was already higher and
 unused. Whether 90592 still fires is now the only open test.
 
-**NEXT: build 77 from `main`** (76 consumed). It will test the vendored
-WireGuard and 90592 at once — unavoidable now. Ships `b6a3113` (peer identity
-keys pinned), a wire-compat change against builds 74/75: release note needed.
+⛔ **SUPERSEDED 4 Sep — see the correction section at the top of this file.**
+~~**NEXT: build 77 from `main`** (76 consumed). It will test the vendored
+WireGuard and 90592 at once — unavoidable now.~~ **What actually happened:**
+build 77 was run from `3f1ef9ce`, the tip of the unmerged
+`refactor/split-appcontext` (= `main` + the phase-1 split), and it **errored**
+with no artifact. So it tested neither cleanly: the WireGuard result is unread,
+90592 was never reached, and the split is an extra uncontrolled variable.
+**77 is consumed; the next production build is 78.** Still ships `b6a3113`
+(peer identity keys pinned), a wire-compat change against builds 74/75:
+release note needed.
 
 ---
 
