@@ -1,21 +1,25 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, ghostNumbersTable, ghostSmsTable } from "@workspace/db";
-import { eq, and, desc, or, sql } from "drizzle-orm";
+import {
+  db,
+  ghostNumbersTable,
+  ghostSmsTable,
+  numberLeasesTable,
+  deadEndRepliesTable,
+} from "@workspace/db";
+import { eq, and, desc, isNull, sql } from "drizzle-orm";
 import { getAuthedAlias } from "../lib/auth";
 import { vonageClient } from "../lib/vonage";
-import { pool } from "@workspace/db";
 import { RateLimiter, getIpKey } from "../lib/rateLimiter";
 import { broadcastToAlias } from "../ws/manager";
 import { logger } from "../lib/logger";
 import { toErrorMessage } from "../utils/error";
-import { performRotation, MS_PER_DAY } from "../lib/rotationScheduler";
 
 const router: IRouter = Router();
 
-// 3 number provisions per hour per IP — prevents abuse of paid Vonage API
+// 3 lease acquisitions per hour per alias — a lease consumes pool inventory.
 const provisionLimiter = new RateLimiter({ windowMs: 60 * 60_000, max: 3, prefix: "provision" });
 
-// 30 SMS inbox fetches per minute per IP
+// 30 SMS inbox fetches per minute per alias
 const smsInboxLimiter = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "smsInbox" });
 
 // Failed-auth gate, per IP. A coarse per-IP request ceiling sized to survive
@@ -25,13 +29,11 @@ const smsInboxLimiter = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "sm
 // lookup. The quotas above are charged to the authenticated alias instead.
 const authFailureGate = new RateLimiter({ windowMs: 60_000, max: 30, prefix: "authFail" });
 
-
-// The ghost_numbers, ghost_sms and user_rotation_limits tables are provisioned
-// through the standard Drizzle schema (lib/db/src/schema/ghostNumbers.ts) and
-// applied via `pnpm --filter db push` (see scripts/post-merge.sh) — the single
-// source of truth for the database schema.
-
-const ALLOWED_ROTATION_DAYS = new Set([0, 7, 30, 90]);
+// GF-20: ghost_numbers is POOL INVENTORY owned by GHOSTFACE as sole subscriber,
+// and number_leases binds one pool number to one external counterparty for one
+// owner. Numbers are never assigned to users. Tables are provisioned through the
+// Drizzle schema (lib/db/src/schema/ghostNumbers.ts); the destructive step is
+// written out explicitly at lib/db/migrations/0001_gf20_number_leases.sql.
 
 const COUNTRY_NAMES: Record<string, string> = {
   NZ: "New Zealand",
@@ -42,32 +44,51 @@ const COUNTRY_NAMES: Record<string, string> = {
   DE: "Germany",
 };
 
-const PLAN_PRICES: Record<string, number> = {
-  basic: 4.99,
-  private: 9.99,
-  phantom: 19.99,
-};
+/**
+ * Sent once, ever, to a counterparty who texts a pool number with no active
+ * lease for them. Deliberately says nothing about who the number belongs to,
+ * whether it was ever in use, or that GHOSTFACE exists as a product — a
+ * dead-end reply that leaked "this number belongs to someone" would be worse
+ * than silence.
+ */
+const DEAD_END_REPLY = "This number is not accepting messages.";
 
-// GET /api/numbers — list user's ghost numbers
+/** Max leases per alias. Pool-side ceiling, not a billing tier. */
+const MAX_ACTIVE_LEASES = 5;
+
+// GET /api/numbers — list the caller's ACTIVE leases (not numbers they own;
+// nobody owns a number). Joined to the pool row so the client can show the
+// number the counterparty sees.
 router.get("/numbers", async (req: Request, res: Response) => {
   try {
     const alias = await getAuthedAlias(req, "query");
     if (!alias) return res.status(401).json({ error: "Unauthorized" });
 
-    const numbers = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(and(eq(ghostNumbersTable.userId, alias), eq(ghostNumbersTable.status, "active")))
-      .orderBy(desc(ghostNumbersTable.createdAt));
+    const leases = await db
+      .select({
+        id: numberLeasesTable.id,
+        externalNumber: numberLeasesTable.externalNumber,
+        createdAt: numberLeasesTable.createdAt,
+        expiresAt: numberLeasesTable.expiresAt,
+        poolNumberId: ghostNumbersTable.id,
+        phoneNumber: ghostNumbersTable.phoneNumber,
+        msisdn: ghostNumbersTable.msisdn,
+        country: ghostNumbersTable.country,
+        capabilities: ghostNumbersTable.capabilities,
+      })
+      .from(numberLeasesTable)
+      .innerJoin(ghostNumbersTable, eq(numberLeasesTable.poolNumberId, ghostNumbersTable.id))
+      .where(and(eq(numberLeasesTable.ownerAlias, alias), isNull(numberLeasesTable.releasedAt)))
+      .orderBy(desc(numberLeasesTable.createdAt));
 
-    return res.json({ data: numbers });
+    return res.json({ data: leases });
   } catch (err) {
     return res.status(500).json({ error: toErrorMessage(err) });
   }
 });
 
-// GET /api/numbers/:id/sms — inbox for a ghost number
-router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
+// GET /api/numbers/leases/:id/sms — inbox for one lease (one conversation)
+router.get("/numbers/leases/:id/sms", async (req: Request, res: Response) => {
   const ipKey = getIpKey(req);
   if (!(await authFailureGate.allowed(ipKey))) {
     return res.status(429).json({ error: "Too many requests" });
@@ -82,17 +103,21 @@ router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
       return res.status(429).json({ error: "Too many requests" });
     }
 
-    const numberId = req.params.id as string;
-    const [number] = await db
+    const leaseId = Number(req.params.id);
+    if (!Number.isInteger(leaseId)) return res.status(400).json({ error: "Invalid lease" });
+
+    // Ownership is checked on the lease, not the number — the same pool number
+    // serves other people's conversations and must never leak across leases.
+    const [lease] = await db
       .select()
-      .from(ghostNumbersTable)
-      .where(and(eq(ghostNumbersTable.id, Number(numberId)), eq(ghostNumbersTable.userId, alias)));
-    if (!number) return res.status(404).json({ error: "Number not found" });
+      .from(numberLeasesTable)
+      .where(and(eq(numberLeasesTable.id, leaseId), eq(numberLeasesTable.ownerAlias, alias)));
+    if (!lease) return res.status(404).json({ error: "Lease not found" });
 
     const sms = await db
       .select()
       .from(ghostSmsTable)
-      .where(eq(ghostSmsTable.numberId, numberId))
+      .where(eq(ghostSmsTable.leaseId, leaseId))
       .orderBy(desc(ghostSmsTable.createdAt));
 
     return res.json({ data: sms });
@@ -101,8 +126,10 @@ router.get("/numbers/:id/sms", async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/numbers/provision — rent a ghost number
-router.post("/numbers/provision", async (req: Request, res: Response) => {
+// POST /api/numbers/lease — acquire a lease for one counterparty.
+// Replaces the old per-user /numbers/provision: no carrier call happens here,
+// because GHOSTFACE already holds the inventory as sole subscriber.
+router.post("/numbers/lease", async (req: Request, res: Response) => {
   const ipKey = getIpKey(req);
   if (!(await authFailureGate.allowed(ipKey))) {
     return res.status(429).json({ error: "Too many requests" });
@@ -113,111 +140,119 @@ router.post("/numbers/provision", async (req: Request, res: Response) => {
       await authFailureGate.record(ipKey);
       return res.status(401).json({ error: "Unauthorized" });
     }
-    // Per alias, not per IP: this one spends real money on Vonage, and an IP
-    // key meant every subscriber behind a carrier NAT shared one 3/hour budget.
     if (!(await provisionLimiter.check(alias))) {
+      return res.status(429).json({ error: "Too many requests. Leases are limited to 3 per hour." });
+    }
+
+    const { country = "NZ", externalNumber } = req.body ?? {};
+    if (typeof externalNumber !== "string" || !/^\+?[1-9]\d{6,14}$/.test(externalNumber)) {
+      return res.status(400).json({ error: "A valid E.164 external number is required" });
+    }
+    if (!COUNTRY_NAMES[country]) {
+      return res.status(400).json({ error: "Unsupported country" });
+    }
+
+    const active = await db
+      .select({ id: numberLeasesTable.id })
+      .from(numberLeasesTable)
+      .where(and(eq(numberLeasesTable.ownerAlias, alias), isNull(numberLeasesTable.releasedAt)));
+    if (active.length >= MAX_ACTIVE_LEASES) {
       return res
-        .status(429)
-        .json({ error: "Too many requests. Ghost number provisioning is limited to 3 per hour." });
+        .status(400)
+        .json({ error: `Lease limit reached (${MAX_ACTIVE_LEASES}). Release one first.` });
     }
 
-    const { country = "NZ", plan = "basic" } = req.body;
-
-    if (!PLAN_PRICES[plan]) {
-      return res.status(400).json({ error: "Invalid plan. Choose: basic, private, phantom" });
-    }
-
-    const existing = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(and(eq(ghostNumbersTable.userId, alias), eq(ghostNumbersTable.status, "active")));
-
-    const maxNumbers = plan === "phantom" ? 2 : 1;
-    if (existing.length >= maxNumbers) {
-      return res.status(400).json({
-        error: `Your ${plan} plan allows ${maxNumbers} ghost number(s). Release one first.`,
-      });
-    }
-
-    let phoneNumber: string;
-    let msisdn: string;
-
-    if (!vonageClient.configured()) {
-      // Demo mode — generate a realistic-looking ghost number
-      const areaCode =
-        country === "NZ"
-          ? "+64"
-          : country === "AU"
-            ? "+61"
-            : country === "US"
-              ? "+1"
-              : country === "GB"
-                ? "+44"
-                : "+1";
-      const suffix = Math.floor(Math.random() * 9000000) + 1000000;
-      phoneNumber = `${areaCode} ${suffix}`;
-      msisdn = `${suffix}`;
-    } else {
-      const available = await vonageClient.searchNumbers(country);
-      if (!available.length) {
-        return res
-          .status(404)
-          .json({ error: `No numbers available in ${COUNTRY_NAMES[country] ?? country}` });
-      }
-      const chosen = available[0];
-      await vonageClient.rentNumber(country, chosen.msisdn);
-      phoneNumber = `+${chosen.msisdn}`;
-      msisdn = chosen.msisdn;
-    }
-
-    const capabilities = plan === "basic" ? ["SMS"] : ["SMS", "VOICE"];
-
-    const [number] = await db
-      .insert(ghostNumbersTable)
+    // Pick free inventory and bind it in one statement. The partial unique index
+    // on (pool_number_id, external_number) WHERE released_at IS NULL is what
+    // makes a concurrent duplicate impossible rather than merely unlikely.
+    const [lease] = await db
+      .insert(numberLeasesTable)
       .values({
-        userId: alias,
-        provider: vonageClient.configured() ? "vonage" : "demo",
-        phoneNumber,
-        country,
-        capabilities,
-        status: "active",
-        plan,
-        msisdn,
+        poolNumberId: sql`(
+          SELECT id FROM ghost_numbers
+          WHERE status = 'available' AND country = ${country}
+          ORDER BY id
+          LIMIT 1
+        )`,
+        externalNumber,
+        ownerAlias: alias,
       })
+      .onConflictDoNothing()
       .returning();
 
-    return res.status(201).json({ data: number });
-  } catch (err) {
-    return res.status(500).json({ error: toErrorMessage(err) });
-  }
-});
-
-// DELETE /api/numbers/:id — release a ghost number
-router.delete("/numbers/:id", async (req: Request, res: Response) => {
-  try {
-    const alias = await getAuthedAlias(req, "query");
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
-
-    const numberId = Number(req.params.id);
-    const [number] = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(and(eq(ghostNumbersTable.id, numberId), eq(ghostNumbersTable.userId, alias)));
-
-    if (!number) return res.status(404).json({ error: "Number not found" });
-
-    if (vonageClient.configured()) {
-      try {
-        await vonageClient.releaseNumber(number.country, number.msisdn);
-      } catch {
-        // Continue even if Vonage release fails — still mark inactive locally
-      }
+    if (!lease) {
+      // Either the pair is already leased, or the pool is dry. Distinguish them
+      // so "no inventory" is not reported as a client error.
+      const [existing] = await db
+        .select()
+        .from(numberLeasesTable)
+        .where(
+          and(
+            eq(numberLeasesTable.externalNumber, externalNumber),
+            eq(numberLeasesTable.ownerAlias, alias),
+            isNull(numberLeasesTable.releasedAt),
+          ),
+        );
+      if (existing) return res.status(200).json({ data: existing });
+      logger.warn({ country }, "lease acquisition found no available pool number");
+      return res.status(503).json({ error: "No numbers available. Try again shortly." });
     }
 
     await db
       .update(ghostNumbersTable)
-      .set({ status: "released" })
-      .where(eq(ghostNumbersTable.id, numberId));
+      .set({ status: "leased" })
+      .where(eq(ghostNumbersTable.id, lease.poolNumberId));
+
+    return res.status(201).json({ data: lease });
+  } catch (err) {
+    return res.status(500).json({ error: toErrorMessage(err) });
+  }
+});
+
+// DELETE /api/numbers/leases/:id — release a lease back to the pool.
+// No carrier release: the number stays ours, which is exactly what removes the
+// 90-day ageing problem that made per-user rotation unaffordable (GF-20).
+router.delete("/numbers/leases/:id", async (req: Request, res: Response) => {
+  try {
+    const alias = await getAuthedAlias(req, "query");
+    if (!alias) return res.status(401).json({ error: "Unauthorized" });
+
+    const leaseId = Number(req.params.id);
+    if (!Number.isInteger(leaseId)) return res.status(400).json({ error: "Invalid lease" });
+
+    const [lease] = await db
+      .select()
+      .from(numberLeasesTable)
+      .where(
+        and(
+          eq(numberLeasesTable.id, leaseId),
+          eq(numberLeasesTable.ownerAlias, alias),
+          isNull(numberLeasesTable.releasedAt),
+        ),
+      );
+    if (!lease) return res.status(404).json({ error: "Lease not found" });
+
+    await db
+      .update(numberLeasesTable)
+      .set({ releasedAt: new Date() })
+      .where(eq(numberLeasesTable.id, leaseId));
+
+    // Only free the pool number if no other live lease still uses it.
+    const remaining = await db
+      .select({ id: numberLeasesTable.id })
+      .from(numberLeasesTable)
+      .where(
+        and(
+          eq(numberLeasesTable.poolNumberId, lease.poolNumberId),
+          isNull(numberLeasesTable.releasedAt),
+        ),
+      );
+    if (remaining.length === 0) {
+      await db
+        .update(ghostNumbersTable)
+        .set({ status: "available" })
+        .where(eq(ghostNumbersTable.id, lease.poolNumberId));
+    }
 
     return res.json({ ok: true });
   } catch (err) {
@@ -225,175 +260,112 @@ router.delete("/numbers/:id", async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/numbers/:id/rotation — set or clear auto-rotation schedule
-router.patch("/numbers/:id/rotation", async (req: Request, res: Response) => {
-  try {
-    const alias = await getAuthedAlias(req, "query");
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
+/**
+ * Inbound SMS routing, GF-20.
+ *
+ * Routing key is the PAIR (to, from), not `to` alone: one pool number serves
+ * many counterparties at once, so `to` by itself identifies nothing.
+ *
+ * Unknown inbound — a pair with no active lease — is DROPPED. Not stored, not
+ * routed, never auto-leased, never held. Auto-leasing would let any stranger
+ * consume inventory and bind themselves to a user; holding would accumulate
+ * unattributable message content, which is precisely what this product exists
+ * not to do. The sender gets exactly one dead-end reply so the number is not a
+ * silent black hole, and nothing after that.
+ */
+export async function handleInboundSms(body: Record<string, unknown>): Promise<void> {
+  const from = typeof body.msisdn === "string" ? body.msisdn : "";
+  const to = typeof body.to === "string" ? body.to : "";
+  const text = typeof body.text === "string" ? body.text : "";
+  if (!to || !from) return;
 
-    const numberId = Number(req.params.id);
-    if (!Number.isInteger(numberId) || numberId <= 0) {
-      return res.status(400).json({ error: "Invalid number id" });
-    }
+  const [poolNumber] = await db
+    .select()
+    .from(ghostNumbersTable)
+    .where(eq(ghostNumbersTable.msisdn, to));
 
-    const rotateEveryDays = Number(req.body?.rotateEveryDays);
-    if (!ALLOWED_ROTATION_DAYS.has(rotateEveryDays)) {
-      return res.status(400).json({ error: "rotateEveryDays must be one of: 0, 7, 30, 90" });
-    }
-
-    const [number] = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(
-        and(
-          eq(ghostNumbersTable.id, numberId),
-          eq(ghostNumbersTable.userId, alias),
-          eq(ghostNumbersTable.status, "active"),
-        ),
-      );
-    if (!number) return res.status(404).json({ error: "Number not found" });
-
-    const nextRotationAt =
-      rotateEveryDays === 0 ? null : new Date(Date.now() + rotateEveryDays * MS_PER_DAY);
-
-    const [updated] = await db
-      .update(ghostNumbersTable)
-      .set({
-        rotateEveryDays: rotateEveryDays === 0 ? null : rotateEveryDays,
-        nextRotationAt,
-      })
-      .where(eq(ghostNumbersTable.id, numberId))
-      .returning();
-
-    return res.json({ data: updated });
-  } catch (err) {
-    return res.status(500).json({ error: toErrorMessage(err) });
+  // Not our number at all. Drop silently and send nothing — replying "from" a
+  // number we do not hold would be sending on someone else's behalf.
+  if (!poolNumber) {
+    logger.warn({ to }, "inbound SMS for an MSISDN not in the pool");
+    return;
   }
-});
 
-// POST /api/numbers/:id/rotate-now — immediately rotate a ghost number
-// Rate limit: 1 per USER per 24 hours (enforced atomically via user_rotation_limits table).
-router.post("/numbers/:id/rotate-now", async (req: Request, res: Response) => {
-  try {
-    const alias = await getAuthedAlias(req, "query");
-    if (!alias) return res.status(401).json({ error: "Unauthorized" });
-
-    const numberId = Number(req.params.id);
-    if (!Number.isInteger(numberId) || numberId <= 0) {
-      return res.status(400).json({ error: "Invalid number id" });
-    }
-
-    const [number] = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(
-        and(
-          eq(ghostNumbersTable.id, numberId),
-          eq(ghostNumbersTable.userId, alias),
-          eq(ghostNumbersTable.status, "active"),
-        ),
-      );
-    if (!number) return res.status(404).json({ error: "Number not found" });
-
-    // Atomically claim the per-user rate-limit slot.
-    // The conditional DO UPDATE only fires when the existing row is older than 24 hours,
-    // so two concurrent requests cannot both succeed — only the first UPSERT wins.
-    const claimResult = await pool.query<{ last_rotate_at: Date }>(
-      `INSERT INTO user_rotation_limits (user_id, last_rotate_at)
-       VALUES ($1, NOW())
-       ON CONFLICT (user_id)
-       DO UPDATE SET last_rotate_at = NOW()
-         WHERE user_rotation_limits.last_rotate_at < NOW() - INTERVAL '24 hours'
-       RETURNING last_rotate_at`,
-      [alias],
+  const [lease] = await db
+    .select()
+    .from(numberLeasesTable)
+    .where(
+      and(
+        eq(numberLeasesTable.poolNumberId, poolNumber.id),
+        eq(numberLeasesTable.externalNumber, from),
+        isNull(numberLeasesTable.releasedAt),
+      ),
     );
 
-    if ((claimResult.rowCount ?? 0) === 0) {
-      // Slot is taken — fetch the existing timestamp to compute nextAllowedAt
-      const limRow = await pool.query<{ last_rotate_at: Date }>(
-        "SELECT last_rotate_at FROM user_rotation_limits WHERE user_id = $1",
-        [alias],
-      );
-      const nextAllowedAt = new Date(
-        (limRow.rows[0]?.last_rotate_at.getTime() ?? Date.now()) + MS_PER_DAY,
-      );
-      return res.status(429).json({
-        error: "You can only rotate a number once every 24 hours.",
-        nextAllowedAt: nextAllowedAt.toISOString(),
-      });
-    }
+  if (lease) {
+    await db.insert(ghostSmsTable).values({
+      numberId: String(poolNumber.id),
+      leaseId: lease.id,
+      toUserId: lease.ownerAlias,
+      fromNumber: from,
+      toNumber: to,
+      body: text,
+      direction: "inbound",
+      providerMetadata: body,
+    });
 
-    // Perform the actual rotation — if it fails, release the slot so the user
-    // can retry immediately rather than being locked out for 24 hours.
-    try {
-      await performRotation(number, { resetCountdown: true });
-    } catch (rotateErr) {
-      await pool.query("DELETE FROM user_rotation_limits WHERE user_id = $1", [alias]);
-      throw rotateErr;
-    }
-
-    // Re-fetch and return the updated number
-    const [updated] = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(eq(ghostNumbersTable.id, numberId));
-
-    logger.info({ numberId, alias }, "[rotate-now] On-demand rotation complete");
-    return res.json({ data: updated });
-  } catch (err) {
-    logger.error({ err }, "[rotate-now] Failed");
-    return res.status(500).json({ error: toErrorMessage(err) });
+    await broadcastToAlias(lease.ownerAlias, {
+      type: "sms_inbound",
+      from,
+      to,
+      text,
+    });
+    return;
   }
-});
+
+  // ---- DROP path. No storage, no routing, no lease. ----
+  // Exactly-once is enforced by the primary key, not by a prior SELECT: the
+  // reply is sent only if THIS insert created the row, so two concurrent
+  // messages from the same pair can only ever produce one reply.
+  const claimed = await db
+    .insert(deadEndRepliesTable)
+    .values({ poolMsisdn: to, externalNumber: from })
+    .onConflictDoNothing()
+    .returning();
+
+  if (claimed.length === 0) {
+    logger.info({ to, from }, "unknown inbound dropped; dead-end reply already sent");
+    return;
+  }
+
+  try {
+    await vonageClient.sendSms(to, from, DEAD_END_REPLY);
+    logger.info({ to, from }, "unknown inbound dropped; dead-end reply sent");
+  } catch (err) {
+    // The ledger row stays. A failed courtesy reply is not worth retrying into
+    // an unbounded send loop against a sender we have no relationship with.
+    logger.warn({ to, from, err: toErrorMessage(err) }, "dead-end reply failed to send");
+  }
+}
 
 // POST /api/webhooks/sms/inbound — Vonage inbound SMS webhook
 router.post("/webhooks/sms/inbound", async (req: Request, res: Response) => {
   try {
-    const { msisdn: from, to, text } = req.body;
-    if (!to || !from) return res.json({ ok: true });
-
-    // Match against current MSISDN OR any archived MSISDN — covers in-flight SMS
-    // sent to a recently-rotated number.
-    const [number] = await db
-      .select()
-      .from(ghostNumbersTable)
-      .where(
-        and(
-          eq(ghostNumbersTable.status, "active"),
-          or(
-            eq(ghostNumbersTable.msisdn, to),
-            sql`${ghostNumbersTable.archivedMsisdns} @> ${JSON.stringify([to])}::jsonb`,
-          ),
-        ),
-      );
-
-    if (number) {
-      await db.insert(ghostSmsTable).values({
-        numberId: String(number.id),
-        toUserId: number.userId,
-        fromNumber: from,
-        toNumber: to,
-        body: text ?? "",
-        direction: "inbound",
-        providerMetadata: req.body,
-      });
-
-      // Push real-time notification to the alias owner if they are online
-      await broadcastToAlias(number.userId, {
-        type: "sms_inbound",
-        from,
-        to,
-        text: text ?? "",
-      });
-    }
-
-    return res.json({ ok: true });
+    await handleInboundSms((req.body ?? {}) as Record<string, unknown>);
   } catch (err) {
-    return res.status(500).json({ error: toErrorMessage(err) });
+    // Always 200. A non-2xx makes Vonage retry the delivery, which would
+    // re-run this handler and, on the drop path, is exactly how a courtesy
+    // reply turns into a loop.
+    logger.error({ err: toErrorMessage(err) }, "inbound SMS handling failed");
   }
+  return res.json({ ok: true });
 });
 
 // GET /api/numbers/plans — pricing info
+// ⚠️ GF-20: these prices are still the per-user model's. Under pool leases the
+// cost basis is pool utilisation, not per-user MRC, so they need re-deriving
+// once the Vonage escalation reply and the Plivo rate card land. VOICE is
+// advertised here and is NOT implemented — no voice routing exists.
 router.get("/numbers/plans", (_req: Request, res: Response) => {
   res.json({
     data: [
@@ -405,24 +377,6 @@ router.get("/numbers/plans", (_req: Request, res: Response) => {
         capabilities: ["SMS"],
         countries: ["NZ", "AU", "US", "GB", "CA"],
         description: "One ghost number, SMS only",
-      },
-      {
-        id: "private",
-        name: "PRIVATE",
-        priceNzd: 9.99,
-        numbers: 1,
-        capabilities: ["SMS", "VOICE"],
-        countries: ["NZ", "AU", "US", "GB", "CA", "DE"],
-        description: "One ghost number, SMS + voice calls",
-      },
-      {
-        id: "phantom",
-        name: "PHANTOM",
-        priceNzd: 19.99,
-        numbers: 2,
-        capabilities: ["SMS", "VOICE"],
-        countries: ["NZ", "AU", "US", "GB", "CA", "DE"],
-        description: "Two ghost numbers, SMS + voice, priority routing",
       },
     ],
   });

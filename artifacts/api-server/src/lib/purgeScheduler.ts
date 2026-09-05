@@ -4,8 +4,10 @@ import { logger } from "./logger";
 const TICK_INTERVAL_MS = 60 * 60 * 1000;
 const INITIAL_DELAY_MS = 45 * 1000;
 
-// Distinct from ROTATION_LOCK_KEY in rotationScheduler.ts — two schedulers
-// sharing a key would silently starve each other.
+// Advisory-lock key, unique per scheduler — two schedulers sharing a key would
+// silently starve each other. (It was previously paired with ROTATION_LOCK_KEY
+// in rotationScheduler.ts, retired with GF-20; keep this value distinct from
+// any future scheduler's.)
 const PURGE_LOCK_KEY = 7424211920n;
 
 // Rows removed per statement. Deletes are batched by ctid rather than issued
@@ -54,8 +56,8 @@ async function tick(): Promise<void> {
   if (running) return;
   running = true;
 
-  // Same guard rotationScheduler uses: with more than one replica this keeps
-  // exactly one of them doing the work, instead of all of them racing.
+  // With more than one replica this keeps exactly one of them doing the work,
+  // instead of all of them racing.
   const lockRes = await pool.query<{ locked: boolean }>(
     `SELECT pg_try_advisory_lock($1) AS locked`,
     [PURGE_LOCK_KEY.toString()],

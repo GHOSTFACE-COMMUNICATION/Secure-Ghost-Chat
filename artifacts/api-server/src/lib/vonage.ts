@@ -62,4 +62,19 @@ export const vonageClient = {
     if (!configured()) throw new Error("Vonage not configured");
     await vonageFetch("/number/cancel", "POST", { country, msisdn });
   },
+
+  /**
+   * Outbound SMS. Added for GF-20's dead-end auto-reply and used for nothing
+   * else yet — see the DROP policy in routes/numbers.ts.
+   *
+   * Returns false instead of throwing when Vonage is unconfigured, because the
+   * only caller is a best-effort courtesy reply on an inbound path that must
+   * always answer the webhook 200. A send failure must never turn into a 500
+   * that makes Vonage retry the whole delivery.
+   */
+  async sendSms(from: string, to: string, text: string): Promise<boolean> {
+    if (!configured()) return false;
+    await vonageFetch("/sms/json", "POST", { from, to, text });
+    return true;
+  },
 };

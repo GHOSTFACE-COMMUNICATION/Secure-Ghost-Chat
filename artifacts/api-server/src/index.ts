@@ -3,7 +3,6 @@ import { WebSocketServer } from "ws";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { createWsServer } from "./ws/manager";
-import { startRotationScheduler } from "./lib/rotationScheduler";
 import { startPurgeScheduler } from "./lib/purgeScheduler";
 
 const rawPort = process.env["PORT"];
@@ -24,7 +23,6 @@ const wss = new WebSocketServer({ server: httpServer, path: "/api/ws" });
 createWsServer(wss);
 logger.info("WebSocket server attached at /api/ws");
 
-startRotationScheduler();
 startPurgeScheduler();
 
 httpServer.listen(port, () => {
