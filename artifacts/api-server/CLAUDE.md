@@ -69,15 +69,37 @@ registration silently, and it will look exactly like the P0 in STATUS.md.
 Re-run `infra/vpn-agent/firewall.sh` with fresh values from
 `railway outbound-network static-ip status --service api-server`.
 
-## Schema changes: `drizzle-kit push`, no migration files
+## Schema changes: push for additive, a migration file for destructive
 
-The live schema is exactly what the TS in `lib/db/src/schema/` declares — there
-are no migration files to review. `pnpm --filter @workspace/db push` diffs the
-**entire** schema against production, so its blast radius is every table.
+**`drizzle-kit push` for additive schema changes; a reviewable migration file
+with pre-flight checks for anything destructive (drops columns/tables).**
+
+For additive work the live schema is exactly what the TS in `lib/db/src/schema/`
+declares and there is nothing to review beyond the TS. But
+`pnpm --filter @workspace/db push` diffs the **entire** schema against
+production, so its blast radius is every table — and a push that *infers* a
+destructive step is not something anyone can approve by reading a diff of
+TypeScript.
+
+So anything that drops a column or a table gets a numbered SQL file under
+`lib/db/migrations/`, which must:
+
+- state the exact statements, so they can be read before they run;
+- open with **pre-flight `SELECT`s** that count whatever the migration destroys
+  or orphans, with an explicit STOP condition when a count is non-zero;
+- say plainly whether it has been applied.
+
+`lib/db/migrations/0001_gf20_number_leases.sql` (GF-20) is the worked example.
 
 For a single index, prefer applying it by hand against the Patroni leader
 (`DATABASE_PUBLIC_URL`, which bypasses PgBouncer) with
 `CREATE INDEX CONCURRENTLY`, then let the TS declaration document what exists.
+
+🪤 **`lib/db/dist` is stale build output and api-server typechecks against it**,
+not against `lib/db/src` — the two are wired by TypeScript **project
+references** (`tsconfig.json` → `references`). A new export in the schema is
+invisible to `pnpm run typecheck` until you run `pnpm exec tsc -b ../../lib/db`.
+It cost a confusing "has no exported member" round on 5 Sep.
 
 ## `delivered` does not mean delivered
 

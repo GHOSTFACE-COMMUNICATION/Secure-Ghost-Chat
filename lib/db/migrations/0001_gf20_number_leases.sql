@@ -33,10 +33,39 @@ BEGIN;
 --   --    at stops being that user's.
 --   SELECT count(*) AS stored_sms FROM ghost_sms;
 --
--- If (1) is non-zero, STOP. Those users hold numbers under the old model and
--- there is no backfill in this migration that could invent leases for them:
--- a lease needs a counterparty (external_number), and an assigned number has
--- none. Migrating them is a product decision, not a schema one.
+-- If (1) is non-zero, STOP and read the provider column before going further.
+-- Those users hold numbers under the old model and there is no backfill here
+-- that could invent leases for them: a lease needs a counterparty
+-- (external_number), and an assigned number has none. Migrating them is a
+-- product decision, not a schema one.
+--
+--   -- 1b. The distinction that decides how serious (1) is:
+--   SELECT provider, count(*)::int FROM ghost_numbers
+--    WHERE status = 'active' GROUP BY provider;
+--
+-- provider = 'demo' rows were generated locally by the no-Vonage-configured
+-- branch of the old /numbers/provision. They are not rented, cost nothing, and
+-- have no carrier relationship to sever — the only loss is what those users see
+-- in the app. provider = 'vonage' rows are real subscribed numbers and must not
+-- be quarantined without a decision about the humans holding them.
+--
+-- ---------------------------------------------------------------------------
+-- OBSERVED ON PRODUCTION, 5 Sep 2026 (read-only, nothing applied):
+--   live_assigned       = 3      <-- STOP condition technically met
+--   with_rotation       = 0
+--   stored_sms          = 0
+--   total_numbers       = 3
+--   rotation_limit_rows = 0
+--   status breakdown    = [{"status":"active","n":3}]
+--   provider breakdown  = all 3 are 'demo', NZ, plan 'basic', SMS-only,
+--                         3 distinct owners, created 28 Aug / 29 Aug / 3 Sep.
+--
+-- Reading: no real Vonage inventory exists in production, so this migration
+-- severs no carrier relationship and orphans no message history (stored_sms is
+-- 0). What it does do is take a number out of three real users' apps. That is
+-- a product call, not a schema one, and it is why this file is still NOT
+-- APPLIED.
+-- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
 -- 1. Lease table — the model
