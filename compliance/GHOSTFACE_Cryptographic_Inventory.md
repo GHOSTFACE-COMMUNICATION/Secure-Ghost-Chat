@@ -186,6 +186,39 @@ Applied to the vendored copy at
 `artifacts/ghostface/native/wireguard-apple/Sources/WireGuardKitC/WireGuardKitC.h`.
 It is the only local modification to that vendored component.
 
+**Storage: a failed authenticated read no longer falls back to plaintext.**
+
+`artifacts/ghostface/lib/secureStorage.ts` previously had a third fallback tier:
+when both authenticated decrypts failed, it returned the raw stored bytes as
+plaintext and re-encrypted them under the master key. That treated an AEAD tag
+failure as "this must be pre-encryption legacy data" rather than as "these bytes
+are not ours". A failed read now returns nothing and the caller starts clean.
+
+- **Algorithms:** unchanged — ChaCha20-Poly1305 as listed in §2.
+- **Protocol:** unchanged.
+- **Functionality:** the authenticated path is unchanged; only the behaviour on
+  authentication *failure* changes.
+- **Nature:** removal of a path that bypassed authentication. It strengthens the
+  property the AEAD was there to provide.
+
+**Safety number derived from identity keys.**
+
+`artifacts/ghostface/lib/crypto.ts`: the safety number two users compare to
+verify a conversation is now derived from both parties' identity keys, validated
+as 64 hex characters and rejected otherwise, rather than from signing public
+keys; an older alias-only variant is removed.
+
+- **Algorithms:** unchanged — SHA-256 (§2) over a sorted, domain-separated
+  string, exactly as before.
+- **Protocol:** unchanged.
+- **Functionality:** the *input* to the derivation changes, not the derivation.
+- **Nature:** correctness. The value now depends on the keys actually used to
+  secure the conversation.
+- ⚠️ **Consequence:** the domain-separation label moves from
+  `GHOSTFACE_SAFETY_NUMBER_v2` to `v3`, so **every previously displayed safety
+  number changes**. Users who verified a contact before will see a different
+  number.
+
 ---
 
 ## 6. Change record
@@ -215,12 +248,20 @@ raised.
 | # | Item | Where | Nature |
 |---|---|---|---|
 | 3 | **WireGuard VPN tunnel** recorded — previously absent | §1, §2 table, §3, *WireGuard VPN tunnel*, §4 | Addition to the *description*, not to the codebase. The VPN is a shipped, user-facing feature and was omitted from revisions 1 and 2 in error. It is a second cryptographic subsystem: Noise_IKpsk2 with Curve25519, ChaCha20-Poly1305, BLAKE2s and HKDF, implemented by the upstream WireGuard sources vendored unmodified. Default `allowedIPs` `0.0.0.0/0,::/0` carries all device traffic. |
+| 5 | **Storage: no plaintext fallback on a failed authenticated read** (audit #7, 31 Aug 2026) | §5 | Removal of a fallback tier that returned raw stored bytes as plaintext when authenticated decryption failed, and re-encrypted them under the master key. No algorithm, protocol or parameter change; it removes a path that bypassed authentication. |
+| 6 | **Safety number derived from identity keys** (audit #11, 31 Aug 2026) | §5 | Same construction (SHA-256 over a sorted, domain-separated string); the input changes from signing public keys to validated identity keys, and the domain label moves v2 → v3, so previously displayed safety numbers change. No new primitive. |
 | 4 | **`#include <sys/types.h>` added to `WireGuardKitC.h`** | §5 | Compile-time correction only. The header redeclares `struct ctl_info`/`struct sockaddr_ctl` using BSD `u_*` typedefs that upstream relies on arriving implicitly; explicit Clang modules require the include. No algorithm, protocol, key handling, parameter or runtime behaviour changes. |
 
 Item 3 is a correction to the completeness of this inventory rather than a change
 in the product: the functionality it describes was present when revisions 1 and 2
-were prepared. Item 4 introduces no proprietary or novel cryptographic algorithm
-and does not change the set of primitives in §2.
+were prepared. Items 4, 5 and 6 introduce no proprietary or novel cryptographic
+algorithm and do not change the set of primitives in §2.
+
+⚠️ **Items 5 and 6 were committed on 31 August 2026 — the same date as revision 2
+of this inventory, and before the memorandum was revised on 2 September 2026.
+Whether they were drawn to counsel's attention is not established**, and this
+revision deliberately does not assert either way. They are recorded here so the
+description is complete regardless.
 
 ---
 

@@ -155,6 +155,7 @@ forward add a row at upload time rather than reconstructing later.
 | 1.0.2 | 63 | 20 Aug 2026 | ❌ `false` | not assessed at the time | TestFlight internal, director's accounts only (memo §7.6(f)) |
 | 1.0.2 | 74 | 29 Aug 2026 | ❌ `false` — **verified from the compiled `Info.plist` inside the `.ipa`**, not from config | ✅ **ZERO** — argon2id cleared 31 Aug 2026 and now in the baseline (§2); the AEAD canonical-AD change (`10400e8`, 19 Aug) was also present and unrecorded at the time, cleared 31 Aug | Uploaded to ASC, accepted by processing. **Not submitted for review. Must not be** — its compiled flag is `false`, which the memo does not support (§7.8). Unshippable for the declaration, not for its crypto. |
 | 1.0.2 | 75 | 30 Aug 2026 | ✅ `true` — **verified from the compiled `Info.plist` inside the `.ipa`** (EAS artifact `sOwNGmCL…`), not from config | ✅ **ZERO** — argon2id cleared by counsel 31 Aug 2026 and recorded in the baseline (§2); the AEAD canonical-AD change (`10400e8`, 19 Aug) was also present and unrecorded at the time, cleared 31 Aug | Internal TestFlight only, director's accounts — the footing the memo treats as unproblematic at §7.6(f). Upload currently blocked by ASC error 90592 (stale June encryption declarations), a **declaration-record** issue, not a crypto-diff one — see TRACKER GF-15. |
+| 1.0.2 | **79** | 5 Sep 2026 | ✅ `true` — **verified from the compiled `Info.plist` inside the `.ipa`** (EAS `e167adb0-d0de-4323-a9e6-cec1b4c5102a`, artifact `4_fWqEaaJb…ipa`), not from config | ⚠️ **NOT ZERO — two open items.** **(a) GF-19:** the WireGuard VPN (`PlugIns/networkpackettunnel.appex`, present in this artifact) appears nowhere in the memo or Annex 1, so its status against §2 is **unestablished rather than zero**. **(b) audit #7 (`137b8b4`) and #11 (`ae81b63`)**, both 31 Aug 2026 — assessed non-material below, **counsel inclusion not confirmed**. | **Built, NOT uploaded, and must not be** while GF-19 and 90592 stand. First conforming binary since build 75 — **75 is no longer the only one**, which matters because 75's EAS artifact expires ~30 Sep 2026. Also carries the profile-gated scene fix (`UISceneDelegateClassName = GHOSTFACE.SceneDelegate`) and `DTXcode 2600` / `DTSDKName iphoneos26.0`, i.e. built with Xcode 26.0. |
 
 ### Build 75 — the export declaration is now correct
 
@@ -230,6 +231,67 @@ Argon2id is now part of the reviewed baseline in §2, so it is no longer a diff.
 in the advice, including our reliance on the accuracy and completeness of the
 technical information provided by Ghostface" — which is why the inventory has to
 stay accurate, not merely be updated once.
+
+### ✅ Assessed diff: audit #7 (`137b8b4`) and #11 (`ae81b63`)
+
+Both committed **31 August 2026**, both ancestors of build 79's commit
+(`1465dce`). Present in builds 78 and 79; **no build carrying them has been
+uploaded or distributed.**
+
+**Diffstat**, `1db743a..1465dce` over the five cryptographic modules — `1db743a`
+(27 Aug) is the last commit touching any of them before these two, so this range
+isolates exactly #7 and #11:
+
+| File | Change |
+|---|---|
+| `lib/crypto.ts` | +48 / −28 |
+| `lib/secureStorage.ts` | +30 / −11 |
+| `lib/doubleRatchet.ts` | unchanged |
+| `lib/stealthCrypto.ts` | unchanged |
+| `lib/recoveryPin.ts` | unchanged |
+
+🪤 **A first attempt at this diff returned EMPTY** because an unquoted shell
+variable broke the pathspec. It would have gone into this file as "no
+cryptographic changes" — a false all-clear. Re-run per file. **Verify a
+compliance diff by making it produce something, not by trusting a clean result.**
+
+**#7 — `137b8b4`, "refuse unauthenticated bytes instead of adopting them"
+(`lib/secureStorage.ts`).** Deleted a third fallback tier which, when both
+authenticated decrypts failed, returned the raw stored bytes **as plaintext**
+and re-encrypted them under the master key. That turned an AEAD tag failure —
+the one signal meaning "these bytes are not ours" — into "assume legacy data and
+adopt it", so anything able to write the AsyncStorage slot could choose the
+returned value and have it durably re-encrypted as authentic. Not limited to
+message history: `LOCAL_WALLET_PRIV_KEY` is read through the same path. A failed
+read now returns `null`; the stored value is left in place for off-device
+diagnosis rather than cleared.
+**Assessment: not material.** No algorithm, primitive, protocol or parameter
+changes. It *removes* a path that bypassed authentication — the change
+strengthens the property AEAD was there to provide.
+
+**#11 — `ae81b63`, "safety number from identity keys, alias version deleted"
+(`lib/crypto.ts`).** `generateSafetyNumber` now derives from both parties'
+identity keys, validated as 64 hex characters and rejected otherwise, instead of
+signing public keys; an older alias-only variant is deleted. The construction is
+unchanged — SHA-256 over a sorted, domain-separated string — with the domain
+label bumped `GHOSTFACE_SAFETY_NUMBER_v2` → `v3`.
+**Assessment: not material.** No new primitive; SHA-256 is already in the §2
+baseline. It changes *what the safety number is derived from*, not the
+cryptography.
+⚠️ **User-visible consequence, recorded because it is a security-UX change even
+though it is not a classification one: the `v2` → `v3` label bump means every
+previously verified safety number changes.** Anyone who has verified a contact
+will see a different number and may reasonably read that as tampering.
+
+⚠️ **Counsel inclusion NOT confirmed.** Both commits are dated 31 Aug 2026;
+Cryptographic Inventory rev. 2 is dated 31 Aug 2026 and the revised memo is
+2 Sep 2026. **Dates alone do not establish whether counsel was told about
+either**, and this record deliberately does not claim they "post-date the
+reviewed materials" — the memo revision in fact post-dates the commits. This
+file already carries one correction where exactly that inference was made wrong
+(the AEAD fix at §5, which had shipped eleven days before it was put to
+counsel). Treated here as **recorded, not cleared**, and included in the rev. 3
+covering note to counsel at `compliance/inventory-rev3-covering-email.md`.
 
 ### ⛔ OPEN DIFF: the WireGuard VPN is absent from the reviewed materials
 
@@ -332,6 +394,26 @@ a conditional gate:
 
 > **A build may be submitted only if its crypto diff against §2 is zero and that
 > zero has been recorded as a row in §4.**
+
+### ⛔ THE SUBMIT GATE, in order — GF-19 sits ABOVE 90592
+
+Recorded 5 Sep 2026 because the two are routinely conflated, and 90592 gets
+treated as the only thing in the way:
+
+1. **GF-19 — the WireGuard VPN is absent from the reviewed materials.** This is
+   **first**, and it is ours, not Apple's. §2 does not describe the VPN, so no
+   build containing `PlugIns/networkpackettunnel.appex` — which is every build
+   including 78 and 79 — can honestly claim a zero diff. Under the rule above,
+   that alone bars submission, and it would still bar it on the day Apple clears
+   90592. Blocked on: counsel's answer to Inventory rev. 3.
+2. **90592 — the stuck June export-compliance declarations.** Apple's side. Ten
+   failed submissions; the declarations attach to the *app*, not to a version or
+   build, so a version or build-number bump cannot clear them (tested on build
+   76). Blocked on: Apple Developer Support.
+
+⚠️ **Clearing 90592 does not unblock submission on its own.** Both gates have to
+be open. A build that passes Apple's declaration check while GF-19 stands would
+be a submission this file's own standing rule forbids.
 >
 > **Any material change to cryptographic functionality goes to counsel before it
 > ships** — not after. Record the outcome in §4.
