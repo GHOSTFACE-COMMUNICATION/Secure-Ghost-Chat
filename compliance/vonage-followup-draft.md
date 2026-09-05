@@ -6,7 +6,15 @@
 Sent as a reply on the existing thread with Aaron Lee. Aaron answered the
 27 Aug enquiry (`vonage-reply-draft.md`) point by point; this presses the
 four answers that were incomplete and the two that changed our assumptions.
-⏳ **No reply received as at 5 Sep 2026.**
+⛔ **CORRECTED 5 Sep 2026 — this was NOT the last word on the thread, and the
+"awaiting a reply" reading was backwards.** The day after this went, on
+**29 Aug**, Benjamin sent `1a04cb8704cc2dbb`: a soft close accepting Aaron's
+answers ("we will ensure our platform architecture accounts for these
+constraints") and ending *"I'll be in touch once we are ready to move forward
+with provisioning for our initial rollout."* That withdrew the escalation and
+handed the next move to us. **Vonage was never overdue; we were.** Picked up
+5 Sep by `compliance/vonage-pivot-escalation-draft.md` (`1a06ff98a622dc34`),
+which opens by keeping that promise rather than chasing.
 
 **Deliberately says nothing about the app's cryptography.** Same constraint as
 the first email: GF-01 is still with MinterEllison and no characterisation of
