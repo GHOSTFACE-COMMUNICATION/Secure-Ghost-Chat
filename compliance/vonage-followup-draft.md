@@ -1,9 +1,12 @@
 # Vonage — follow-up to Aaron Lee's answers (SMS API + virtual numbers)
 
-**DRAFT — not sent.** Reply on the existing thread with Aaron Lee
-(aaron.lee@vonage.com), from benjamin@ghostface.co.nz. Aaron answered the
+**SENT 28 Aug 2026** to aaron.lee@vonage.com from benjamin@ghostface.co.nz
+(Gmail message id `1a04801c0d47f909`, on thread `1a046911af7a4b96`).
+
+Sent as a reply on the existing thread with Aaron Lee. Aaron answered the
 27 Aug enquiry (`vonage-reply-draft.md`) point by point; this presses the
 four answers that were incomplete and the two that changed our assumptions.
+⏳ **No reply received as at 5 Sep 2026.**
 
 **Deliberately says nothing about the app's cryptography.** Same constraint as
 the first email: GF-01 is still with MinterEllison and no characterisation of
