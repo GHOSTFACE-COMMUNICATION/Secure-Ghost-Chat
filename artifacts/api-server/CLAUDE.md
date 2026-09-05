@@ -39,6 +39,33 @@ database.** Deleting either is an instant, total outage. PgBouncer logging
 direct claim on backend connections. If the pooler is ever bypassed,
 `max × replica count` must stay under Postgres `max_connections`.
 
+## Railway access (Claude Code has it)
+
+Two routes, different visibility: **MCP tools** (`mcp__railway__*` — projects,
+services, variables, deployments, config, logs, redeploy, set-variables) show
+variable **names only**, values redacted; the authenticated **`railway` CLI**
+(workspace `GHOSTFACELIMITED`) can show values with `-k`/`--json`, though the
+auto-mode classifier may refuse a command that prints secrets.
+
+This project is **`secure-ghost-chat-api`**, `a5d14056-5ff3-4e49-88b1-dab864b1feec`,
+environment production `b384f51f-4397-4fa5-9c59-69bbc099ec47`. Services:
+`api-server`, `PgBouncer`, `Postgres`, `Redis`, `etcd-4`, `etcd-5`.
+
+⛔ **Pin `-p` on every Railway command.** DIOR is a *separate* Railway project
+(`dior-api`, `06f24135-947d-4b9d-9dd3-4cec1c9cc635`) and **also has a service
+called `api-server`** — and `~/Projects/dior-mobile` is itself linked to *this*
+project, so an unpinned command run from either repo can read the wrong app with
+nothing to signal it. Same class of error as the shared Apple team.
+
+🪤 **`DATABASE_URL` here points at PgBouncer's internal hostname**, which is not
+resolvable from a laptop. For a read-only query against production use
+`railway run --service Postgres -- …` and `DATABASE_PUBLIC_URL`, which is on the
+**Postgres** service, not `api-server`, and bypasses PgBouncer to reach the
+Patroni leader.
+
+🪤 **Parse `--json | jq`, never the table** — a value containing newlines splits
+across lines and a line-based parse reports phantom variables and wrong lengths.
+
 ## Redis is load-bearing
 
 `REDIS_URL` backs both the rate limiters and all cross-replica WebSocket state
