@@ -323,6 +323,22 @@ re-confirmation and four days after the call. Nothing on the record has moved
 since 18/19 June. GF-15's escalation is still the whole path, and it is still
 **ASC UI or Developer Support only**.
 
+⏸ **ESCALATION SENT 4 Sep — this is now waiting on Apple.** Benji replied to
+Developer Support advisor **Iris** on the existing case thread, naming both
+declaration UUIDs and asking explicitly for their **removal**. ⚠️ **Provenance:
+reported sent by Benji; this session drafted it but did not send it and has not
+seen the sent copy.** Drafted text archived at
+`~/Documents/ghostface-apple-support-reply-2026-09-04.md`. The reply corrects
+Apple's premise — Iris triaged it as an error *in processing*, when the failure
+is at **upload validation**, which is why her request for "the build number
+currently processing" and a TestFlight screenshot **cannot be satisfied: there
+is nothing processing.** Live figures supplied: 66 builds in ASC (63 Valid,
+3 Invalid), **zero** Processing, newest upload build 74 on 29 Aug. It also
+records that the "higher build number" advice was already tested by build 76,
+cites the 403 on `DELETE`, and flags the **30 Sep** artifact expiry.
+**NEXT: watch for Iris's reply, and for the automated error email** — whitelist
+`no_reply@email.apple.com` and check spam.
+
 ⛔ **Do NOT run `eas submit` while these stand.** A submit today would be
 **attempt 11** against build 75 and would fail with 90592 in about a minute,
 exactly as the previous ten did. **There is nothing newer to submit** — builds
