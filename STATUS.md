@@ -136,6 +136,23 @@ against the iOS 26 SDK so it would not have trapped — but the moment builds mo
 to the iOS 27 SDK, which Apple will mandate, the fix is the only thing standing
 between the app and a launch crash for every user.
 
+📌 **Confirmed from build 78's own artifact, 5 Sep — the "not live" claim is
+evidenced, not assumed.** Read out of `Payload/GHOSTFACE.app/Info.plist` in the
+shipped `.ipa`:
+
+| Key | Value |
+|---|---|
+| `DTXcode` | **`2600`** — Xcode **26.0** |
+| `DTXcodeBuild` | `17A324` |
+| `DTSDKName` | `iphoneos26.0` |
+| `DTPlatformBuild` | `23A339` |
+
+So **EAS built build 78 with Xcode 26.0 against the iOS 26.0 SDK**, and the trap
+is gated on the linked SDK. Nothing shipped or on TestFlight can hit it today.
+That is the whole basis for treating this as armed-but-not-live — recheck
+`DTXcode` on the first build after EAS moves to Xcode 27, because that is the
+moment it becomes live.
+
 ### ⛔ SUPERSEDED — the DIOR control case was confounded by SDK version
 
 The 4 Sep narrowing recorded below concluded "a missing
@@ -362,7 +379,16 @@ stops matching, because a silent skip reintroduces the crash.
 
 (For scale: the manifest-only failure measured **0.00 brightness / 1 colour**.)
 
-⚠️ **KNOWN CAVEAT — the Debug/dev-client build still crashes on iOS 27.** Not
+⛔ **CORRECTED 5 Sep — this caveat said "on iOS 27" and that is WRONG.** The
+dev-client crash is **not** OS-version-specific: it reproduces on an iOS
+**26.5** simulator, verified on DIOR (which now shares this plugin) with a build
+linked against `iphonesimulator26.5`. Unlike the crash the plugin *fixes*, which
+is genuinely gated on the SDK you build against, this breakage happens on every
+iOS version, because the scene manifest makes the app scene-adopting regardless
+of SDK or OS. **Consequence: local dev via a dev client was broken outright on
+both apps, not merely on iOS 27.** See the root cause and the fix below.
+
+⚠️ **KNOWN CAVEAT — the Debug/dev-client build crashes.** Not
 the scene trap (that is gone; the trace now runs through
 `_UISceneLifecycleMultiplexer`), but a Swift assertion in
 **`ExpoDevLauncherAppDelegateSubscriber.application(_:didFinishLaunchingWithOptions:)`**
@@ -380,9 +406,57 @@ either — it calls `fatalError("Cannot find the keyWindow…")` unconditionally
 `ExpoDevLauncherAppDelegateSubscriber.self` **only inside
 `#if EXPO_CONFIGURATION_DEBUG`**. Compiled in, never registered — a structural
 guarantee rather than the accident "absent" implied.
-Consequence: **local dev against an iOS 27 simulator is broken** — use an
-iOS 26.x simulator, or Release builds, until this is addressed upstream or
-worked around. This does **not** affect a shipped build.
+### ✅ ROOT CAUSE (5 Sep) — an ordering incompatibility, not a missing window
+
+The `guard let window` is a symptom. The real problem, verbatim from the
+exception thrown once that guard is satisfied:
+
+> `[EXDevLauncherController autoSetupStart:] was called before
+> autoSetupPrepare:. Make sure you've set up expo-modules correctly in
+> AppDelegate and are using ReactDelegate to create a bridge before calling
+> [super application:didFinishLaunchingWithOptions:].`
+
+The chain:
+
+- `ExpoDevLauncherAppDelegateSubscriber.application(_:didFinishLaunchingWithOptions:)`
+  runs during `didFinishLaunching` and calls
+  `EXDevLauncherController.autoSetupStart:` (`EXDevLauncherController.m:317`).
+- `autoSetupStart:` throws unless `autoSetupPrepare:` has already run.
+- `autoSetupPrepare:` is called **only** from
+  `ExpoDevLauncherReactDelegateHandler.createReactRootView` — i.e. from
+  `startReactNative`, which this plugin deliberately moves into the scene,
+  **after** `didFinishLaunching`.
+
+So the subscriber can never succeed in a scene-adopting app.
+🪤 **A `#if DEBUG` placeholder window was tried and does NOT work** — it
+satisfies the `guard` and merely converts a Swift `fatalError` into the ObjC
+exception above. Do not retry it; it is an ordering problem, not a window
+problem. `expo-dev-launcher` 6.0.21 structurally assumes the pre-scene
+lifecycle.
+
+### ✅ FIX (5 Sep) — registration moved to `app.config.js`, gated on the EAS profile
+
+`plugins/withSceneLifecycle` is **no longer registered in `app.json`**. It is
+added by `artifacts/ghostface/app.config.js` only when
+`EAS_BUILD_PROFILE` is `preview` or `production` — the Release/TestFlight
+profiles that carry no dev client — or when `WITH_SCENE_LIFECYCLE=1` is set for
+deliberate local testing. Development, `development:device` and bare local runs
+omit it, so the dev client works again.
+
+⚠️ **Ordering is preserved deliberately.** The plugin must run **after**
+`withVoipPushKit`, so `app.config.js` splices it in at that index rather than
+appending — appending would place it after `apple-targets`, which configures the
+VPN network-extension target. The config **throws** if the `withVoipPushKit`
+anchor is missing, rather than silently shipping the wrong order.
+
+Verified across profiles: local and `development` exclude it; `preview` and
+`production` include it in the order
+`withVoipPushKit → withSceneLifecycle → apple-targets`, identical to what
+`app.json` had.
+
+⚠️ **Build 78 predates this change** and was built with the plugin registered in
+`app.json`, which is equivalent to the `production` path — so the artifact is
+unaffected and needs no rebuild.
 
 🪤 **`pod install` fails on this machine** with a Ruby
 `Encoding::CompatibilityError` ("Unicode Normalization not appropriate for

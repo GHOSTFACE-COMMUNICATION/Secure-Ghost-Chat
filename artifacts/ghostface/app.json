@@ -121,7 +121,6 @@
       "@config-plugins/react-native-webrtc",
       "./plugins/withAdiRegistration",
       "./plugins/withVoipPushKit",
-      "./plugins/withSceneLifecycle",
       "@bacons/apple-targets"
     ],
     "experiments": {
