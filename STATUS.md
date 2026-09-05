@@ -87,7 +87,56 @@ and there is no `BUILD FAILED`.
 - ⚠️ 2,949 warnings, all standard pod noise (umbrella-header ×1,532, nullability ×684, non-portable path ×78).
 - ⚠️ **20 deprecation warnings in `react-native-callkeep`**: `AVAudioSessionCategoryOptionAllowBluetooth` is deprecated in favour of `AVAudioSessionCategoryOptionAllowBluetoothHFP`. Not breaking today, and it is in the CallKit/VoIP audio path, which is core here.
 
-### ⛔ CORRECTION — the DIOR control case is CONFOUNDED BY SDK VERSION
+### ✅ SETTLED BY EXPERIMENT — it IS SDK gating; the "narrowing" below was WRONG
+
+**Ran the clean experiment 5 Sep.** DIOR at commit `6f5f68a` — the same code,
+pods and bundle id as EAS build 15 — rebuilt locally with **Xcode 27.0
+(`27A5252f`) against `iphonesimulator27.0`**. Verified before running:
+`DTSDKName iphonesimulator27.0`, `DTXcode 2700`, and **no
+`UIApplicationSceneManifest`**, which is the condition under test.
+
+Launched on the same iPhone 17 Pro / iOS 27.0 simulator used for every earlier
+DIOR run. **It died at t+1s.** Crash report
+`~/Library/Logs/DiagnosticReports/DIORMobile-2026-09-04-212158.ips`:
+
+```
+EXC_BREAKPOINT / SIGTRAP, faulting thread 0
+__UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke  (UIKitCore)
+  <- -[UIApplication workspace:didCreateScene:withTransitionContext:completion:]
+  <- FrontBoardServices scene creation
+```
+
+**That is GHOSTFACE's crash signature, frame for frame.**
+
+| DIOR build | Linked SDK | iOS 27.0 result |
+|---|---|---|
+| EAS 14 (Release) | `iphonesimulator26.0` | ✅ alive 15s+, rendering |
+| EAS 15 (Debug + dev-client) | `iphonesimulator26.0` | ✅ alive 8s+ |
+| **local Debug, 5 Sep** | **`iphonesimulator27.0`** | 🔴 **traps at t+1s** |
+
+**One variable changed. The trap is gated on the SDK the app links against, not
+on anything app-specific.**
+
+⛔ **Retracted, explicitly:** the 4 Sep conclusion that "a missing
+`UIApplicationSceneManifest` does not by itself trap on iOS 27; something
+GHOSTFACE-specific triggers it", and the four candidate differentiators listed
+with it (AppDelegate `UIScreen` usage, expo 54.0.35 vs 54.0.37, deployment
+target 16.0 vs 17.0, CallKit/PushKit surface). **None of them mattered.** DIOR
+never trapped because DIOR was never built against the iOS 27 SDK.
+
+⚠️ **The original 4 Sep diagnosis was right, and the "narrowing" damaged a
+correct record.** Missing `UIApplicationSceneManifest` + no scene lifecycle →
+iOS 27 traps, exactly as first written. The lesson is the same one this file
+keeps re-learning: the control case differed in a variable nobody had checked,
+and "same app family, same Expo version" was not the same thing as "same build
+inputs".
+
+✅ **`withSceneLifecycle.js` is REQUIRED, not belt-and-braces.** Build 78 links
+against the iOS 26 SDK so it would not have trapped — but the moment builds move
+to the iOS 27 SDK, which Apple will mandate, the fix is the only thing standing
+between the app and a launch crash for every user.
+
+### ⛔ SUPERSEDED — the DIOR control case was confounded by SDK version
 
 The 4 Sep narrowing recorded below concluded "a missing
 `UIApplicationSceneManifest` does not by itself trap on iOS 27; something
