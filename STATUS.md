@@ -84,10 +84,21 @@ session on the iPhone 17 Pro / iOS 27.0 simulator:
 |---|---|---|
 | 14 (`simulator` profile) | Release | ✅ alive 15s+, **2,273 colours / brightness 27.67** — rendering |
 | 15 (`development` profile) | Debug + dev-client | ✅ alive 8s+ |
+| **16 (`production`, store — the shipped `.ipa`)** | Release, **REAL HARDWARE** | ✅ **launches and runs on a physical iPhone running iOS 27** |
 
 The Debug case was run specifically to test whether the trap is Debug-gated,
 since GHOSTFACE's original diagnosis came through the `ios:sim:build` loop,
 which is `-configuration Debug`. **It is not — DIOR survives in both.**
+
+✅ **Confirmed on real hardware, not just the simulator.** The shipped store
+build 16 launches and runs on a physical iPhone on **iOS 27**. ⚠️ Provenance,
+so it is not over-read later: **the OS version and the launch result are
+Benji's report, read off the device — not measured by tool.** The Mac never
+enumerated the phone (`devicectl` showed all four paired iPhones
+`unavailable` throughout; `system_profiler` and `ioreg` return empty for
+everything in this sandbox and were not evidence either way). No crash log was
+pulled. That is still far stronger than the simulator result: it is the actual
+store artifact, on real silicon, on the OS in question.
 
 ⛔ **So "a missing `UIApplicationSceneManifest` fatally traps on iOS 27" is too
 broad as written in the section below.** Something specific to GHOSTFACE
