@@ -312,8 +312,12 @@ same. Same character as the AEAD canonical-AD correction counsel cleared at memo
 §4.15–4.17 as "a routine implementation correction rather than a material
 change". Recorded in Cryptographic Inventory rev. 3 §5.
 
-**Distribution: none.** Build 77 errored with no artifact, so no build carrying
-this diff has been uploaded or distributed. Build 78 would be the first.
+**Distribution: none.** Build 77 errored with no artifact. **Build 78
+(`cbd76ce8-2832-410d-b33d-dab3072ac131`, 1.0.2 build 78, commit `f6ce57e`) was
+built successfully on 5 Sep 2026 and is the first artifact carrying this diff** —
+verified from the compiled `Info.plist` inside the `.ipa`. It has **not** been
+uploaded to ASC or distributed to anyone, and must not be while GF-19 and 90592
+stand.
 
 ⚠️ **Not put to counsel.** On the §4.16 precedent this change alone almost
 certainly does not need to be — but it cannot be signed off as a zero diff while

@@ -4,7 +4,7 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-04 (Claude Code — 🔴 **GF-19 OPENED: the WireGuard VPN is absent from the reviewed export-control materials.** It is a shipped, user-facing second cryptographic subsystem (Noise_IKpsk2 / Curve25519 / ChaCha20-Poly1305 / BLAKE2s, full-tunnel `0.0.0.0/0,::/0`) and text search of the Classification Memo and Annex 1 returns ZERO hits for WireGuard, VPN, Noise, BLAKE2 or tunnel. Cryptographic Inventory corrected to **rev. 3** today; ⛔ counsel has NOT seen it and the PDF they receive is still rev. 2. COMPLIANCE §4 records it as an open diff and deliberately does not impose a new gate — whether it holds build 78 is Benji's call. Previously, same day: ✅ **BUILD 77'S CAUSE IS CONFIRMED from its Xcode log: the vendored `WireGuardKitC.h` typedefs, the ONLY error cluster in the build. `ad2d02b` is the fix. EAS's Xcode does enforce explicit modules; the vendoring is confirmed working by direct evidence (not the clock); and the phase-1 split is EXONERATED — the build died before any JS was bundled, so the refactor was never executed.** ⚠️ Also: **Blocker A's cause is NARROWER than recorded.** DIOR Mobile — same Apple Team `98337579X8`, same Expo 54 / RN 0.81.5 — has no `UIApplicationSceneManifest` and does **not** crash on iOS 27.0 in either Release or Debug, so the missing-manifest generalisation below is too broad; the scene fix is verified and stays, but the recorded reason needs narrowing. Also corrected: the dev-client caveat's "absent from Release" reasoning was wrong — the pods ship in Release and are excluded by `#if EXPO_CONFIGURATION_DEBUG` registration instead. Read the top section. Previously, same day: 🔴 **TWO NEW BLOCKERS, both above 90592, found by running the app on a simulator: (A) the app HARD-CRASHES at launch on iOS 27 — no `UIApplicationSceneManifest` and no scene lifecycle, so UIKit traps; verified iOS-27-only, it runs fine on 26.5. So a build 78 uploaded today would crash on launch for every iOS 27 tester — DO NOT upload until the scene fix lands. (B) the vendored WireGuard did not compile at all; fixed with one `#include <sys/types.h>` in `WireGuardKitC.h`, and that is the best candidate yet for build 77's failure. Needs a COMPLIANCE §4 row. Read the top section.** Also: 90592 re-checked a third time after the latest Support call — unchanged, and a version/build bump cannot clear it. Previously, same day: ⛔ **CORRECTION: build 77 already ran, it ERRORED, and its tree was `main` PLUS the unmerged split — so the split is NOT excluded from the failure, and the "build 77 unaffected" claim previously in this header was backwards. No artifact was produced, so 90592 was never reached; 77 is consumed and the next production build is 78. The two June declarations were re-read live today and are still stuck — do NOT run `eas submit`, it would be attempt 11 and would fail the same way. Read the top section first.** ⚠️ Also: the Replit-era duplicate now has a SECOND copy, inside an Xcode scratch project. Previously, same day: **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged** (~~`main` untouched, build 77 unaffected~~ — retracted above). ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
+Last updated: 2026-09-05 (Claude Code — ✅ **BUILD 78 SUCCEEDED — the first artifact since build 75.** EAS `cbd76ce8-2832-410d-b33d-dab3072ac131`, 1.0.2 build 78, production/store, commit `f6ce57e` from `refactor/split-appcontext` (deliberately carrying the phase-1 split this time), 6m43s. **Both fixes are proven on EAS**: it cleared the `WireGuardKitC` precompile that killed 77, and the artifact carries a `UIApplicationSceneManifest` naming `GHOSTFACE.SceneDelegate`. Verified from the compiled `Info.plist` inside the `.ipa`, not from config: `ITSAppUsesNonExemptEncryption` = **`true`**, and `networkpackettunnel.appex` ships. ⛔ **DO NOT `eas submit`** — 90592 stands, and GF-19 (the VPN is absent from the reviewed materials) is open. Previously: 🔴 **GF-19 OPENED: the WireGuard VPN is absent from the reviewed export-control materials.** It is a shipped, user-facing second cryptographic subsystem (Noise_IKpsk2 / Curve25519 / ChaCha20-Poly1305 / BLAKE2s, full-tunnel `0.0.0.0/0,::/0`) and text search of the Classification Memo and Annex 1 returns ZERO hits for WireGuard, VPN, Noise, BLAKE2 or tunnel. Cryptographic Inventory corrected to **rev. 3** today; ⛔ counsel has NOT seen it and the PDF they receive is still rev. 2. COMPLIANCE §4 records it as an open diff and deliberately does not impose a new gate — whether it holds build 78 is Benji's call. Previously, same day: ✅ **BUILD 77'S CAUSE IS CONFIRMED from its Xcode log: the vendored `WireGuardKitC.h` typedefs, the ONLY error cluster in the build. `ad2d02b` is the fix. EAS's Xcode does enforce explicit modules; the vendoring is confirmed working by direct evidence (not the clock); and the phase-1 split is EXONERATED — the build died before any JS was bundled, so the refactor was never executed.** ⚠️ Also: **Blocker A's cause is NARROWER than recorded.** DIOR Mobile — same Apple Team `98337579X8`, same Expo 54 / RN 0.81.5 — has no `UIApplicationSceneManifest` and does **not** crash on iOS 27.0 in either Release or Debug, so the missing-manifest generalisation below is too broad; the scene fix is verified and stays, but the recorded reason needs narrowing. Also corrected: the dev-client caveat's "absent from Release" reasoning was wrong — the pods ship in Release and are excluded by `#if EXPO_CONFIGURATION_DEBUG` registration instead. Read the top section. Previously, same day: 🔴 **TWO NEW BLOCKERS, both above 90592, found by running the app on a simulator: (A) the app HARD-CRASHES at launch on iOS 27 — no `UIApplicationSceneManifest` and no scene lifecycle, so UIKit traps; verified iOS-27-only, it runs fine on 26.5. So a build 78 uploaded today would crash on launch for every iOS 27 tester — DO NOT upload until the scene fix lands. (B) the vendored WireGuard did not compile at all; fixed with one `#include <sys/types.h>` in `WireGuardKitC.h`, and that is the best candidate yet for build 77's failure. Needs a COMPLIANCE §4 row. Read the top section.** Also: 90592 re-checked a third time after the latest Support call — unchanged, and a version/build bump cannot clear it. Previously, same day: ⛔ **CORRECTION: build 77 already ran, it ERRORED, and its tree was `main` PLUS the unmerged split — so the split is NOT excluded from the failure, and the "build 77 unaffected" claim previously in this header was backwards. No artifact was produced, so 90592 was never reached; 77 is consumed and the next production build is 78. The two June declarations were re-read live today and are still stuck — do NOT run `eas submit`, it would be attempt 11 and would fail the same way. Read the top section first.** ⚠️ Also: the Replit-era duplicate now has a SECOND copy, inside an Xcode scratch project. Previously, same day: **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged** (~~`main` untouched, build 77 unaffected~~ — retracted above). ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
 was recreated**; read the 3 Sep section directly below first — the 2 Sep
 "transfer to an organisation" never happened, 11 commits including CI were
 unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
@@ -29,6 +29,50 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 5 Sep 2026 — ✅ BUILD 78 SUCCEEDED — first artifact since build 75
+
+Built from **`refactor/split-appcontext`** at `f6ce57e` on Benji's explicit
+instruction, deliberately carrying the phase-1 split this time (build 77 carried
+it by accident).
+
+| | Build 78 |
+|---|---|
+| EAS id | `cbd76ce8-2832-410d-b33d-dab3072ac131` |
+| Version / build | 1.0.2 / **78**, production / store |
+| Commit | `f6ce57e` |
+| Status | ✅ **FINISHED** — 6m43s (403s) |
+| Artifact | `LlPaCtKpu446A2ed9IA7JuhzgQe8hVvzxODUUL1G-AE.ipa`, 49 MB |
+
+**Both fixes are proven on EAS, not just locally:**
+
+- It **cleared the `WireGuardKitC` precompile that killed build 77.** Duration is
+  the corroboration: 76 died at package resolution in 2m29s, 77 died in module
+  precompilation at 4m30s, 75 succeeded in 8m14s. 78's 6m43s is a full build.
+- The artifact carries a **`UIApplicationSceneManifest`** — single-scene,
+  `UIApplicationSupportsMultipleScenes: false`, `UISceneDelegateClassName` =
+  **`GHOSTFACE.SceneDelegate`** — read out of the compiled `Info.plist`. This is
+  the build-time half of the iOS 27 fix and it could only be confirmed from an
+  artifact, which is why 76/77 never proved it.
+
+**Verified from the `.ipa`, not from config** — the method that disproved build
+74 and confirmed 75:
+
+- `ITSAppUsesNonExemptEncryption` = ✅ **`true`**
+- `CFBundleShortVersionString` 1.0.2, `CFBundleVersion` 78,
+  `CFBundleIdentifier` `com.ghostface.app`, `MinimumOSVersion` 16.0
+- `PlugIns/networkpackettunnel.appex` present — the VPN Network Extension ships
+
+⛔ **DO NOT `eas submit`.** Two independent reasons: **90592** is unchanged and
+waiting on Apple (this would be attempt 11), and **GF-19** is open — the VPN is
+absent from the materials counsel holds, so a zero-diff claim covering it cannot
+be evidenced. Building was never gated on either; submitting is.
+
+⚠️ **Not run:** the artifact was not installed on a device or simulator. The iOS
+27 scene fix was verified on device from a *local* Release build on 4 Sep; this
+artifact's manifest is confirmed statically only.
 
 ---
 
