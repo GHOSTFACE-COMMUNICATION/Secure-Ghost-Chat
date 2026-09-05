@@ -4,7 +4,7 @@ Read this at the start of every session (Cowork or Claude Code); update it
 before ending one. This file is the cross-session memory: if it's stale,
 sessions re-derive context wrong.
 
-Last updated: 2026-09-04 (Claude Code — 🔴 **TWO NEW BLOCKERS, both above 90592, found by running the app on a simulator: (A) the app HARD-CRASHES at launch on iOS 27 — no `UIApplicationSceneManifest` and no scene lifecycle, so UIKit traps; verified iOS-27-only, it runs fine on 26.5. So a build 78 uploaded today would crash on launch for every iOS 27 tester — DO NOT upload until the scene fix lands. (B) the vendored WireGuard did not compile at all; fixed with one `#include <sys/types.h>` in `WireGuardKitC.h`, and that is the best candidate yet for build 77's failure. Needs a COMPLIANCE §4 row. Read the top section.** Also: 90592 re-checked a third time after the latest Support call — unchanged, and a version/build bump cannot clear it. Previously, same day: ⛔ **CORRECTION: build 77 already ran, it ERRORED, and its tree was `main` PLUS the unmerged split — so the split is NOT excluded from the failure, and the "build 77 unaffected" claim previously in this header was backwards. No artifact was produced, so 90592 was never reached; 77 is consumed and the next production build is 78. The two June declarations were re-read live today and are still stuck — do NOT run `eas submit`, it would be attempt 11 and would fail the same way. Read the top section first.** ⚠️ Also: the Replit-era duplicate now has a SECOND copy, inside an Xcode scratch project. Previously, same day: **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged** (~~`main` untouched, build 77 unaffected~~ — retracted above). ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
+Last updated: 2026-09-04 (Claude Code — ✅ **BUILD 77'S CAUSE IS CONFIRMED from its Xcode log: the vendored `WireGuardKitC.h` typedefs, the ONLY error cluster in the build. `ad2d02b` is the fix. EAS's Xcode does enforce explicit modules; the vendoring is confirmed working by direct evidence (not the clock); and the phase-1 split is EXONERATED — the build died before any JS was bundled, so the refactor was never executed.** ⚠️ Also: **Blocker A's cause is NARROWER than recorded.** DIOR Mobile — same Apple Team `98337579X8`, same Expo 54 / RN 0.81.5 — has no `UIApplicationSceneManifest` and does **not** crash on iOS 27.0 in either Release or Debug, so the missing-manifest generalisation below is too broad; the scene fix is verified and stays, but the recorded reason needs narrowing. Also corrected: the dev-client caveat's "absent from Release" reasoning was wrong — the pods ship in Release and are excluded by `#if EXPO_CONFIGURATION_DEBUG` registration instead. Read the top section. Previously, same day: 🔴 **TWO NEW BLOCKERS, both above 90592, found by running the app on a simulator: (A) the app HARD-CRASHES at launch on iOS 27 — no `UIApplicationSceneManifest` and no scene lifecycle, so UIKit traps; verified iOS-27-only, it runs fine on 26.5. So a build 78 uploaded today would crash on launch for every iOS 27 tester — DO NOT upload until the scene fix lands. (B) the vendored WireGuard did not compile at all; fixed with one `#include <sys/types.h>` in `WireGuardKitC.h`, and that is the best candidate yet for build 77's failure. Needs a COMPLIANCE §4 row. Read the top section.** Also: 90592 re-checked a third time after the latest Support call — unchanged, and a version/build bump cannot clear it. Previously, same day: ⛔ **CORRECTION: build 77 already ran, it ERRORED, and its tree was `main` PLUS the unmerged split — so the split is NOT excluded from the failure, and the "build 77 unaffected" claim previously in this header was backwards. No artifact was produced, so 90592 was never reached; 77 is consumed and the next production build is 78. The two June declarations were re-read live today and are still stuck — do NOT run `eas submit`, it would be attempt 11 and would fail the same way. Read the top section first.** ⚠️ Also: the Replit-era duplicate now has a SECOND copy, inside an Xcode scratch project. Previously, same day: **`AppContext.tsx` phase-1 split done on branch `refactor/split-appcontext`, unmerged** (~~`main` untouched, build 77 unaffected~~ — retracted above). ⚠️ Also found: a Replit-era duplicate at `~/Downloads/Ghostface-Mobile` with bidirectionally-drifted app code — see the same section. Previously: 2026-09-03 (Claude Code — **90592 FIRED AGAIN after Apple Support said unblocked; their fix did not land and the declarations are untouched. `prepare_asc_api_key` is now closed after two clean runs.** Previously: **build 76 FAILED: `ghostzeronz-coder/wireguard-apple` is also 404, so build 75's tree is permanently unbuildable; `main` already vendors it. Apple Support say 90592 is unblocked — unverified, the declarations are unchanged. Next: build 77 from `main`.** Previously: **the GitHub remote was DEAD and the repo
 was recreated**; read the 3 Sep section directly below first — the 2 Sep
 "transfer to an organisation" never happened, 11 commits including CI were
 unbacked-up, and PRs #1-#11 are permanently gone. Previous entry:
@@ -29,6 +29,82 @@ The compliance machinery now actually exists. **Build 75 is the first conforming
 also carries `c1657d0` (4002 kick-loop stand-down) and `0278b41` (VoIP listeners
 before PushKit), so it is the build that tests whether the kick loop was behind
 the stale-ring drops.
+
+---
+
+## 4 Sep 2026 — ✅ build 77's cause CONFIRMED from its log, and a control case that narrows Blocker A
+
+### ✅ Build 77 is diagnosed, not inferred — it was WireGuardKitC
+
+Build 77's Xcode log was read this session (16,959 lines). `error.errorCode` is
+`XCODE_BUILD_ERROR`, and **the only error cluster in the entire build** is the
+vendored header:
+
+```
+native/wireguard-apple/Sources/WireGuardKitC/WireGuardKitC.h:10:5: error:
+  declaration of 'u_int32_t' must be imported from module
+  '_DarwinFoundation1.unsigned_types.u_int32_t' before it is required
+  … :14:5 u_char … :16:5 u_int16_t
+<unknown>:0: error: failed to emit precompiled module '…/WireGuardKitC-….pcm'
+  for module map '…/Sources/WireGuardKitC/module.modulemap'
+```
+
+Same file, same three typedefs, same line numbers as the local failure.
+**`ad2d02b` (`#include <sys/types.h>`) is the fix for build 77.**
+
+Three previously-open questions are settled by it:
+
+1. **EAS's Xcode DOES enforce explicit modules** the way local Xcode-beta 27
+   does — recorded below as unverified. 381 explicit-module tasks in the log;
+   the failing step is `SwiftExplicitDependencyGeneratePcm` / `PrecompileModule`.
+2. **The vendoring worked — direct evidence now, not a clock inference.** Log
+   line 8 reads `WireGuardKit:
+   /Users/expo/workingdir/build/artifacts/ghostface/native/wireguard-apple @ local`,
+   and there are **zero** references to `ghostzeronz-coder` or any remote
+   wireguard URL anywhere in the log. Build 76's failure mode is cured.
+3. **The phase-1 split is EXONERATED — it was never executed.** The build died
+   in dependency-module precompilation: no `GHOSTFACE` app-target source
+   compiled, and the `Bundle React Native code and images` phase never ran
+   (only the boilerplate "will be run during every build" note appears). **No
+   JS was bundled at all**, so `3f1ef9ce`'s TypeScript could not have
+   contributed.
+
+🪤 **EAS serves the Xcode log brotli-encoded and macOS `curl` cannot decode it**
+— `file` misreports it as "OpenPGP Public Key" and gunzip fails. Decode with
+`node -e "require('zlib').brotliDecompressSync(…)"`.
+
+### ⚠️ Blocker A's cause is NARROWER than recorded — a same-team control case
+
+**DIOR Mobile** (`com.dior.nz.app`, repo `~/Projects/dior-mobile`, same Apple
+Team **`98337579X8`**, same Expo 54 / RN 0.81.5 family) **has NO
+`UIApplicationSceneManifest` and does NOT crash on iOS 27.0.** Tested this
+session on the iPhone 17 Pro / iOS 27.0 simulator:
+
+| DIOR build | Configuration | iOS 27.0 result |
+|---|---|---|
+| 14 (`simulator` profile) | Release | ✅ alive 15s+, **2,273 colours / brightness 27.67** — rendering |
+| 15 (`development` profile) | Debug + dev-client | ✅ alive 8s+ |
+
+The Debug case was run specifically to test whether the trap is Debug-gated,
+since GHOSTFACE's original diagnosis came through the `ios:sim:build` loop,
+which is `-configuration Debug`. **It is not — DIOR survives in both.**
+
+⛔ **So "a missing `UIApplicationSceneManifest` fatally traps on iOS 27" is too
+broad as written in the section below.** Something specific to GHOSTFACE
+triggers it. Candidates, **none tested and none ranked**:
+
+- GHOSTFACE's `AppDelegate.swift` builds `UIWindow(frame: UIScreen.main.bounds)`;
+  DIOR's shipped binary contains **zero** `UIScreen` references.
+- expo **54.0.35** (GHOSTFACE) vs **54.0.37** (DIOR).
+- `MinimumOSVersion` **16.0** vs **17.0**.
+- GHOSTFACE's CallKit / PushKit / Network-Extension native surface.
+
+✅ **None of this undoes the fix.** `withSceneLifecycle.js` is verified on
+device in Release on both 27.0 and 26.5 with deep links intact, and it **stays**.
+What changes is the *recorded reason*: a future session reading "iOS 27 kills
+any app without scene adoption" will mis-triage. ⚠️ The original crash report
+`GHOSTFACE-2026-09-04-102218.ips` is **no longer on disk**, so that trace cannot
+be re-read.
 
 ---
 
@@ -90,8 +166,19 @@ the scene trap (that is gone; the trace now runs through
 `_UISceneLifecycleMultiplexer`), but a Swift assertion in
 **`ExpoDevLauncherAppDelegateSubscriber.application(_:didFinishLaunchingWithOptions:)`**
 — `expo-dev-launcher` evidently expects `window` to exist during
-`didFinishLaunching`, and it no longer does. **`expo-dev-client` is a dev-only
-dependency and is absent from Release, which is why Release is clean.**
+`didFinishLaunching`, and it no longer does. ⛔ **CORRECTED 4 Sep: the reason
+first recorded here — "`expo-dev-client` is a dev-only dependency and is absent
+from Release" — is WRONG.** `expo-dev-client` sits in `dependencies`, not
+`devDependencies`, the Podfile applies no configuration restriction, and build
+77's *production* log compiles `expo-dev-client`, `expo-dev-launcher`,
+`expo-dev-launcher-EXDevLauncher`, `expo-dev-menu`, `expo-dev-menu-EXDevMenu`
+and `expo-dev-menu-interface`. The subscriber has **no build guard of its own**
+either — it calls `fatalError("Cannot find the keyWindow…")` unconditionally.
+**What actually protects Release is registration, not absence:**
+`Pods-GHOSTFACE/ExpoModulesProvider.swift` registers
+`ExpoDevLauncherAppDelegateSubscriber.self` **only inside
+`#if EXPO_CONFIGURATION_DEBUG`**. Compiled in, never registered — a structural
+guarantee rather than the accident "absent" implied.
 Consequence: **local dev against an iOS 27 simulator is broken** — use an
 iOS 26.x simulator, or Release builds, until this is addressed upstream or
 worked around. This does **not** affect a shipped build.
@@ -203,13 +290,10 @@ correction counsel cleared in memo §4.15–4.17 as "a routine implementation
 correction". **Recording it is required; counsel almost certainly is not, but
 that call is Benji's.**
 
-🔍 **This is the best candidate yet for why build 77 errored** — it is a
-compile-time failure in the exact code build 77 was meant to be testing, and
-77's 4m30s is consistent with dying in compilation rather than at package
-resolution (build 76's 2m29s). ⚠️ **Still not confirmed:** build 77's Xcode
-logs were **not** read, and whether EAS's Xcode enforces explicit modules the
-way local Xcode-beta 27 does is **unverified**. Do not write this up as the
-cause without reading the log.
+✅ **CONFIRMED 4 Sep — this IS why build 77 errored.** The Xcode log was read;
+the same three typedefs in the same header are the only error cluster in the
+build, and EAS's Xcode does enforce explicit modules. See the confirmation
+section at the top of this file. `ad2d02b` is the fix.
 
 ### The working simulator loop, for next time
 
@@ -285,16 +369,19 @@ tip**. Everything `main` was supposed to be testing did ship in it — the
 vendored WireGuard (`c246fc8`, `94b3f0e`) and `b6a3113` (peer identity pinning)
 are all ancestors of `3f1ef9ce`, and `artifacts/ghostface/native/wireguard-apple/`
 is present in that tree — but so is a refactor that was deliberately supposed
-to stay out of the build. **Whoever reads build 77's logs must treat the split
-as a live suspect, not as absent.**
+to stay out of the build. ~~**Whoever reads build 77's logs must treat the
+split as a live suspect, not as absent.**~~ ✅ **RESOLVED 4 Sep — the split is
+EXONERATED.** The logs were read: the build died in dependency-module
+precompilation, no app-target source compiled and the JS bundle phase never
+ran, so none of `3f1ef9ce`'s TypeScript was ever executed. It was present in
+the tree but not exercised.
 
-⚠️ **The failure reason is NOT established.** `eas build:view` carries no error
-text for this build, and the Xcode logs were **not read** this session. The only
-signal is duration: **4m30s**, against build 76's **2m29s** (which died at
-`-resolvePackageDependencies`) and build 75's **8m14s** success. Running longer
-than 76 is *consistent with* clearing package resolution, i.e. with the
-vendoring having worked — **but that is an inference from a clock, not a
-diagnosis. Read the logs before believing it.**
+✅ **The failure reason IS now established (4 Sep).** ~~`eas build:view`
+carries no error text for this build, and the Xcode logs were not read.~~ The
+logs have since been read: the cause is the vendored `WireGuardKitC.h`
+typedefs, and the clock-based inference that package resolution had been
+cleared was **correct but is no longer the evidence** — log line 8 shows
+`WireGuardKit … @ local` directly. See the confirmation section at the top.
 Logs: `https://expo.dev/accounts/ghost_face/projects/mayybachh/builds/a49a79ed-7314-4940-bcba-c414231fdcbc`
 
 **What is still unrun, precisely:**
