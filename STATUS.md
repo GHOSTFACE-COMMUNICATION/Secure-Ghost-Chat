@@ -74,6 +74,54 @@ be evidenced. Building was never gated on either; submitting is.
 27 scene fix was verified on device from a *local* Release build on 4 Sep; this
 artifact's manifest is confirmed statically only.
 
+### Build 78's Xcode log, read
+
+80,184 lines. **Zero real compiler errors** — a naive `grep error:` hits 1, but it
+is Objective-C source containing the parameter label `error:&err` in
+`react-native-callkeep`, not a diagnostic. `^file:line:col: error:` matches **0**,
+and there is no `BUILD FAILED`.
+
+- ✅ **WireGuard resolved from the vendored copy** — `WireGuardKit: …/artifacts/ghostface/native/wireguard-apple @ local`; **0** references to `ghostzeronz-coder`; **0** "must be imported from module" complaints. `ad2d02b` holds on EAS.
+- ✅ **The scene plugin applied** — `SceneDelegate` present, `AppDelegate.swift` compiled. The plugin throws rather than no-ops when the Expo window block stops matching, so a clean build is itself the evidence it patched.
+- ✅ **The JS bundle phase RAN** (`main.jsbundle`), 93 app-target source compiles. Build 77 never reached either. **So the phase-1 split was actually executed and bundled this time** — 77 exonerated it by never running it; 78 is the first build that genuinely exercised it.
+- ⚠️ 2,949 warnings, all standard pod noise (umbrella-header ×1,532, nullability ×684, non-portable path ×78).
+- ⚠️ **20 deprecation warnings in `react-native-callkeep`**: `AVAudioSessionCategoryOptionAllowBluetooth` is deprecated in favour of `AVAudioSessionCategoryOptionAllowBluetoothHFP`. Not breaking today, and it is in the CallKit/VoIP audio path, which is core here.
+
+### ⛔ CORRECTION — the DIOR control case is CONFOUNDED BY SDK VERSION
+
+The 4 Sep narrowing recorded below concluded "a missing
+`UIApplicationSceneManifest` does not by itself trap on iOS 27; something
+GHOSTFACE-specific triggers it", and listed four candidate differences. **SDK
+version was not among them, and it is now the leading explanation.**
+
+Read from the build logs and the artifacts:
+
+| Build | Built against |
+|---|---|
+| GHOSTFACE 78 (EAS) | `iPhoneOS26.0.sdk` — artifact `DTSDKName iphoneos26.0` |
+| GHOSTFACE 77 (EAS) | `iPhoneOS26.0.sdk` |
+| DIOR 16 (EAS) | `iPhoneOS26.0.sdk` |
+| DIOR 14 (EAS simulator, the one tested on iOS 27) | `iphonesimulator26.0` |
+| **GHOSTFACE's original crash** | **local Xcode-beta 27, i.e. the iOS 27 SDK** |
+
+**So the comparison was never app-versus-app — it was iOS-26-SDK versus
+iOS-27-SDK.** Apple gates behaviour changes on the SDK an app is linked against,
+and DIOR was never built against the iOS 27 SDK, so it was never eligible to trap.
+The four candidates recorded below (AppDelegate `UIScreen` usage, expo 54.0.35 vs
+54.0.37, deployment target 16.0 vs 17.0, CallKit/PushKit surface) are not
+disproved, but they are no longer needed to explain the difference.
+
+⚠️ **Still not directly tested.** The clean experiment is to build DIOR — or
+pre-`306d3db` GHOSTFACE — against the **iOS 27 SDK** and run it on iOS 27. Until
+that runs, SDK gating is the best-evidenced hypothesis, not a proven cause. **Do
+not write it up as settled.**
+
+**Consequence for shipping, stated plainly:** build 78 links against the iOS 26
+SDK, so it would most likely not have trapped on iOS 27 even without the scene
+fix. That does **not** make `306d3db` wasted — it is verified working on device
+on both 27.0 and 26.5, it costs nothing, and it is exactly what will be required
+once Apple mandates building against the iOS 27 SDK. **Keep it.**
+
 ---
 
 ## 4 Sep 2026 — 🔴 GF-19: the WireGuard VPN is absent from the reviewed materials
