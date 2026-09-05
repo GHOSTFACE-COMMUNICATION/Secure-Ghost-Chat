@@ -1,7 +1,7 @@
 # GHOSTFACE — Cryptographic Inventory
 
 **Prepared by:** Ghostface Limited (NZ)  
-**Product:** GHOSTFACE — end-to-end encrypted mobile messaging app (iOS / Android)  
+**Product:** GHOSTFACE — end-to-end encrypted mobile messaging app with an integrated VPN client (iOS / Android; VPN iOS-only)  
 **Date:** 19 August 2026 · **Revised:** 4 September 2026 (rev. 3 — see §6)  
 **Purpose:** Supporting document for export-control classification review. Factual inventory of all cryptography used in the product, its sources, and its purpose. Prepared for review by legal counsel — this document states technical facts, not legal conclusions.
 

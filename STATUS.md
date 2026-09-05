@@ -62,9 +62,13 @@ implementation sentence, two §2 primitive rows, a new §3 *WireGuard VPN tunnel
 subsection, §4 nature/dependencies bullets, a §5 entry for the include, and a §6
 rev. 2 → rev. 3 record marked as not yet put to counsel.
 
-⛔ **`compliance/GHOSTFACE_Cryptographic_Inventory.pdf` is still rev. 2 (2 Sep).**
-The `.md` and the `.pdf` have diverged and **counsel receives the PDF** — it has
-to be regenerated before anything is sent.
+✅ **PDF regenerated 4 Sep — rev. 3.** 6 pages (rev. 2 was 5), A4, same
+toolchain as rev. 2 (pandoc 3.11 → WeasyPrint 69.0), PDF title metadata updated,
+and the opening matches rev. 2 exactly (the template title block is hidden so it
+does not print above the H1). 🪤 **rev. 2 had no build recipe committed, which is
+how the `.md` and `.pdf` drifted in the first place** — the stylesheet and the
+exact two commands are now at `compliance/inventory-pdf.css`. The rev. 2 PDF
+remains in git history at `b85fd63`.
 
 ⛔ **Not yet sent to counsel.** Should go with the §4.17 distribution correction
 already owed — one message, two completeness items.
