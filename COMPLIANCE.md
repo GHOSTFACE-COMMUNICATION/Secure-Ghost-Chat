@@ -66,6 +66,13 @@ This is the functionality counsel was shown. **A release conforms only if its
 cryptography is unchanged against this list.** Anything added, removed or
 materially altered is a diff and must be recorded in §4 — see the standing rule.
 
+⛔ **The WireGuard VPN is NOT in this baseline, and is deliberately not added
+here.** This section records what counsel was actually shown; the VPN was not.
+It is a shipped, user-facing cryptographic subsystem that appears nowhere in the
+memo or in Annex 1 — logged as an open diff in §4 and now described in
+Cryptographic Inventory rev. 3 §3, *WireGuard VPN tunnel*. It joins this list only if and when counsel
+has considered it.
+
 Source: memo §4.3–§4.4 and §4.10, and the Cryptographic Inventory (Annex 1).
 
 **Algorithms**
@@ -223,6 +230,94 @@ Argon2id is now part of the reviewed baseline in §2, so it is no longer a diff.
 in the advice, including our reliance on the accuracy and completeness of the
 technical information provided by Ghostface" — which is why the inventory has to
 stay accurate, not merely be updated once.
+
+### ⛔ OPEN DIFF: the WireGuard VPN is absent from the reviewed materials
+
+**Found 4 September 2026 while recording the change below.** The application
+ships a **WireGuard VPN**: `app/(tabs)/vpn.tsx` is a top-level tab with server
+selection, `app.json:46` carries the
+`com.apple.developer.networking.networkextension` entitlement, and build 77's
+Xcode log compiles `WireGuardKit`, `WireGuardKitC`, `WireGuardKitGo` and
+`WireGuardGoBridge` into the app target. The VPN cut attempted for 1.0.2 was
+reverted (`4a4053c`); it ships.
+
+**It appears nowhere in the reviewed materials.** Text search of the
+Classification Memo and the Cryptographic Inventory (Annex 1) returns **zero**
+occurrences of "WireGuard", "VPN", "Noise", "BLAKE2" or "tunnel". The only
+Curve25519 reference in Annex 1 is X25519 ECDH via `@noble/curves` — the
+messaging handshake, not the tunnel's.
+
+**Three statements in Annex 1 (as it stood at rev. 2) were inconsistent with the
+shipped app:**
+
+1. §Purpose — "factual inventory of **all cryptography used in the product**".
+2. §1 — the cryptography is implemented "**entirely**" via `@noble/*` and
+   `react-native-argon2` plus OS facilities. The tunnel is vendored C, Swift and
+   Go: `WireGuardKitC/x25519.c` and `golang.zx2c4.com/wireguard` +
+   `golang.org/x/crypto` 0.6.0.
+3. §1 — encryption exists "**solely** to protect users' personal communications
+   in transit and at rest" and performs "no encryption function beyond that
+   data-security purpose". The tunnel's default `allowedIPs` is
+   `0.0.0.0/0,::/0`, carrying all of the device's traffic.
+
+✅ **Annex 1 has been corrected — Cryptographic Inventory rev. 3, 4 Sep 2026**:
+the VPN is described at §3, *WireGuard VPN tunnel*, its primitives are in the §2 table, §1 and §4 are
+corrected, and §6 records the revision. **Counsel has not yet seen rev. 3.**
+
+**Why this is recorded rather than resolved here.** Memo §3.1(b) conditions the
+opinion on the accuracy and completeness of the technical information provided.
+The nearest precedent is argon2id: a single KDF from a named library still
+required an Inventory update so it would "remain a complete and accurate
+description of the Application's cryptographic functionality" (§4.12–4.14). This
+is a second cryptographic subsystem and a product capability the description did
+not mention. **That comparison is this record's characterisation, not counsel's.
+The classification question is counsel's and is not answered here.**
+
+**Effect on the §5 standing rule — for Benji to decide, not asserted here.**
+The rule permits submission where the crypto diff against §2 is zero and that
+zero is recorded. Against §2 as it stands, the VPN's status is **unestablished
+rather than zero** — §2 does not describe it either way, which is the gap this
+entry exists to record. Whether that should hold build 78 is a judgement call
+for Benji; **this record does not itself impose a new gate.** What it does
+establish is that a zero-diff claim *covering the VPN* cannot be evidenced from
+the materials as they stand.
+
+**Action:** goes to counsel together with the §4.17 distribution correction
+already owed — one message, two completeness items.
+
+### ✅ Assessed diff: WireGuardKitC.h — `#include <sys/types.h>`
+
+A single `#include <sys/types.h>` added to
+`native/wireguard-apple/Sources/WireGuardKitC/WireGuardKitC.h` (5 lines, comment
+included), commit `ad2d02b`, 4 September 2026. **It sits inside the component
+described immediately above, which is itself an open diff.**
+
+**Why it was needed.** The header redeclares `struct ctl_info` and
+`struct sockaddr_ctl` from `<sys/kern_control.h>` using the BSD `u_int32_t`,
+`u_char` and `u_int16_t` typedefs, which upstream relies on arriving implicitly.
+Under explicit Clang modules the compiler refuses: *"declaration of `u_int32_t`
+must be imported from module `_DarwinFoundation1.unsigned_types.u_int32_t`
+before it is required"*, ending in *"failed to emit precompiled module …
+WireGuardKitC-….pcm"*.
+
+**This is the confirmed cause of build 77's failure**, established 4 Sep 2026 by
+reading build 77's Xcode log: those three typedefs are the only error cluster in
+the entire build. EAS's Xcode enforces explicit modules as local Xcode-beta 27
+does.
+
+**Assessment: not a material change to cryptographic functionality.** No
+algorithm, protocol, key handling, parameter or runtime behaviour changes; the
+change alters type visibility at compile time only, and the emitted code is the
+same. Same character as the AEAD canonical-AD correction counsel cleared at memo
+§4.15–4.17 as "a routine implementation correction rather than a material
+change". Recorded in Cryptographic Inventory rev. 3 §5.
+
+**Distribution: none.** Build 77 errored with no artifact, so no build carrying
+this diff has been uploaded or distributed. Build 78 would be the first.
+
+⚠️ **Not put to counsel.** On the §4.16 precedent this change alone almost
+certainly does not need to be — but it cannot be signed off as a zero diff while
+the component it modifies is undescribed in the materials counsel holds.
 
 ---
 
