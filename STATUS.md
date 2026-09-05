@@ -38,7 +38,82 @@ Ran the app on a simulator for the first time in this record, via
 `ios:sim:build`. It produced **two findings that both outrank 90592**, and one
 of them means **build 78 must not be uploaded as-is**.
 
-### 🔴 BLOCKER A — the app HARD-CRASHES at launch on iOS 27
+### ✅ BLOCKER A — FIXED AND VERIFIED, 4 Sep: `plugins/withSceneLifecycle.js`
+
+**The iOS 27 launch crash is repaired.** New config plugin
+`plugins/withSceneLifecycle.js` (registered in `app.json` after
+`withVoipPushKit`), modelled on that plugin's `withAppDelegate` approach. It
+does both halves, which is the part that matters — the manifest alone is a
+silent blank screen (see the tested-and-insufficient note below):
+
+- `withInfoPlist` → static `UIApplicationSceneManifest`,
+  `UIApplicationSupportsMultipleScenes: false`, one configuration naming
+  `$(PRODUCT_MODULE_NAME).SceneDelegate` (verified to resolve to
+  `GHOSTFACE.SceneDelegate` in the built binary). No `UISceneStoryboardFile` —
+  RN sets the root view controller programmatically.
+- `withAppDelegate` → replaces the `UIWindow(frame: UIScreen.main.bounds)`
+  block with `self.launchOptions = launchOptions`, and appends a
+  `SceneDelegate: UIResponder, UIWindowSceneDelegate` that builds the window
+  with **`UIWindow(windowScene:)`** and calls `startReactNative` into it.
+
+**Three things it handles deliberately, each a silent-breakage risk:**
+
+1. **Deep links.** Under scenes UIKit stops calling
+   `application(_:open:options:)` and `application(_:continue:)`, so the plugin
+   adds `scene(_:openURLContexts:)` and `scene(_:continue:)` forwarding to
+   `RCTLinkingManager`. Without these, `ghostface://` invite links would break
+   on **every** iOS version — a worse regression than the crash.
+2. **Cold-launch URLs.** `didFinishLaunchingWithOptions` gets `nil`
+   launchOptions once an app adopts scenes, so the URL is re-injected from
+   `connectionOptions.urlContexts` before `startReactNative`.
+3. **`AppDelegate.window` is kept as a mirror** assigned by the scene delegate.
+   TN3187 says remove it; it is retained because native modules in this tree
+   read `UIApplication.shared.delegate.window` (react-native-callkeep and the
+   VoIP path). Ownership is the scene's; it is a compatibility alias.
+
+The plugin **throws rather than no-ops** if the Expo template's window block
+stops matching, because a silent skip reintroduces the crash.
+
+#### ✅ Verified on device, Release configuration
+
+| Case | Result |
+|---|---|
+| **iOS 27.0, Release, no Metro** | ✅ launches, **renders the lock screen** (ghost mark, fingerprint, "HOLD TO ENTER", "NO FACE. NO TRACE.") — brightness 40.60 / 12 colours |
+| **iOS 26.5, Release** | ✅ launches and renders — **no regression** — brightness 33.21 / 14 colours |
+| **Deep link into running iOS 27 app** | ✅ `ghostface://invite/…` — survived, no crash |
+| **Native build, Debug and Release** | ✅ both `BUILD SUCCEEDED` |
+
+(For scale: the manifest-only failure measured **0.00 brightness / 1 colour**.)
+
+⚠️ **KNOWN CAVEAT — the Debug/dev-client build still crashes on iOS 27.** Not
+the scene trap (that is gone; the trace now runs through
+`_UISceneLifecycleMultiplexer`), but a Swift assertion in
+**`ExpoDevLauncherAppDelegateSubscriber.application(_:didFinishLaunchingWithOptions:)`**
+— `expo-dev-launcher` evidently expects `window` to exist during
+`didFinishLaunching`, and it no longer does. **`expo-dev-client` is a dev-only
+dependency and is absent from Release, which is why Release is clean.**
+Consequence: **local dev against an iOS 27 simulator is broken** — use an
+iOS 26.x simulator, or Release builds, until this is addressed upstream or
+worked around. This does **not** affect a shipped build.
+
+🪤 **`pod install` fails on this machine** with a Ruby
+`Encoding::CompatibilityError` ("Unicode Normalization not appropriate for
+ASCII-8BIT") unless run as
+`LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 RUBYOPT="-E utf-8" pod install`.
+
+🪤 **After `expo prebuild --clean`, re-run `node scripts/link-wireguard-kit.mjs`**
+— prebuild regenerates the xcodeproj and the vendored WireGuard package
+reference has to be re-added (verified: 0 dead-fork refs, 6 vendored refs
+after).
+
+🔍 **Corroboration for the WireGuardKitC fix:** `link-wireguard-kit.mjs` itself
+prints *"Disabled Explicit Modules at the project level (does not cover the SPM
+package graph)"* — which is exactly why that header failed under explicit
+modules.
+
+---
+
+### 🔴 BLOCKER A (original diagnosis) — the app HARD-CRASHES at launch on iOS 27
 
 `com.ghostface.app` **traps 2.4s after launch on iOS 27.0**, before any JS runs.
 Crash `~/Library/Logs/DiagnosticReports/GHOSTFACE-2026-09-04-102218.ips`:
